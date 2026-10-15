@@ -1,7 +1,6 @@
 # 📋 API REST y Workflow Docente — Proyecto Integrador
 
-> Curso de Programación Web · Ingeniería en Sistemas · Universidad Da Vinci
-> PM del proyecto: Jonathan Veras
+> Curso de Programación Web · Ingeniería en Sistemas · Universidad Da Vinci | PM del proyecto: Jonathan Veras
 
 > Este documento manda sobre todo lo demás del repositorio. Si algo aquí
 > contradice lo dicho en el chat, gana este documento. Los cambios a estas
