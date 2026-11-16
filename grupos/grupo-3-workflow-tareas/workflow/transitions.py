@@ -207,7 +207,12 @@ def _translate_db_error(exc):
     if len(args) != 2 or not isinstance(args[0], int):
         return None
     errno, msg = args[0], str(args[1])
-    if errno in (1205, 1213):                              # lock wait timeout / deadlock
+    if errno == 1062:
+        return Conflict(
+            "Ya existe una entrega con ese número de intento",
+            code="DUPLICATE_ENTREGA"
+        )
+    if errno in (1205, 1213):
         return Conflict("La asignación está siendo modificada por otra solicitud",
                         code="CONCURRENT_UPDATE")
     if errno == 1644:                                      # SIGNAL SQLSTATE '45000'
@@ -268,8 +273,25 @@ def perform(conn, assignment_id, action, actor, comment=None):
     mysql = _is_mysql(conn)
 
     with transaction(conn):
-        set_actor(conn, actor["id"])           # auditoría de G1 (@actor_id); no-op en SQLite
-        row = conn.execute(_SELECT_MYSQL if mysql else _SELECT_SQLITE, (assignment_id,)).fetchone()
+        set_actor(conn, actor["id"])
+
+        if mysql and action in ENTREGA_ACTIONS:
+            try:
+                conn.execute(
+                    "SELECT id FROM tarea_destinatario WHERE id = ? FOR UPDATE",
+                    (assignment_id,)
+                ).fetchone()
+            except Exception as exc:
+                mapped = _translate_db_error(exc)
+                if mapped is None:
+                    raise
+                raise mapped from exc
+
+        row = conn.execute(
+            _SELECT_MYSQL if mysql else _SELECT_SQLITE,
+            (assignment_id,)
+        ).fetchone()
+
         if row is None:
             raise NotFound(f"Asignación {assignment_id} no existe")
 
