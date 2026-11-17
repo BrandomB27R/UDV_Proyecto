@@ -284,3 +284,4 @@ Semana 2 · martes 20-oct · Semana 3 · martes 27-oct · Semana 4 · martes 03-
 
 *Nota: el resumen sale de los PDF del QA (Lista inicial, Updt_1 e Informe no. 1), del Planner de Allison y de los avisos del PM.*
 
+
