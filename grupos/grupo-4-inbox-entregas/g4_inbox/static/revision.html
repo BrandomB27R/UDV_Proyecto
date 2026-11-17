@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bandeja de revisión · UDV</title>
+  <!-- Estilos institucionales del PM (grupos/udv-styles): se importan, no se copian -->
+  <link rel="stylesheet" href="../../../udv-styles/udv.css">
+  <link rel="stylesheet" href="css/inbox.css">
+</head>
+<body>
+
+  <header class="udv-header">
+    <a href="/app/" class="udv-header__logo">
+      <div class="udv-header__logo-text">
+        Universidad Da Vinci
+        <span>de Guatemala</span>
+      </div>
+    </a>
+    <nav aria-label="Principal">
+      <ul class="udv-header__nav">
+        <li><a href="/app/">Inicio</a></li>
+        <li><a href="inbox.html">Inbox</a></li>
+        <li><a href="#" class="active" aria-current="page">Revisión</a></li>
+        <li><a href="/app/g3/">Tareas</a></li>
+        <li><a href="/app/g5/Programa.html">Programas</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="udv-section">
+    <div class="udv-container">
+      <h1 class="udv-section-title">Bandeja de revisión</h1>
+      <p class="udv-section-subtitle">Entregas que te toca revisar. Primero las que ya tomaste, luego las que llevan más tiempo esperando.</p>
+
+      <!-- Contadores: los llena revision.js desde GET /review-queue -->
+      <div class="udv-grid-3 udv-mb-3">
+        <div class="udv-card-light inbox-contador">
+          <span class="inbox-contador__numero" id="total-por-revisar">0</span>
+          <span class="inbox-contador__texto">Por revisar</span>
+        </div>
+        <div class="udv-card-light inbox-contador">
+          <span class="inbox-contador__numero" id="total-en-revision">0</span>
+          <span class="inbox-contador__texto">En revisión</span>
+        </div>
+      </div>
+
+      <!-- Búsqueda, filtro y tamaño de página -->
+      <div class="udv-grid-3 udv-mb-2">
+        <div class="udv-form-group">
+          <label class="udv-label" for="buscar">Buscar por tarea o docente</label>
+          <input class="udv-input" type="search" id="buscar" placeholder="Ej.: CV o López">
+        </div>
+        <div class="udv-form-group">
+          <label class="udv-label" for="filtro-estado">Mostrar</label>
+          <select class="udv-select" id="filtro-estado">
+            <option value="pending" selected>Pendientes de revisar</option>
+            <option value="submitted">Entregadas (sin tomar)</option>
+            <option value="under_review">En revisión</option>
+            <option value="returned">Devueltas</option>
+            <option value="approved">Aprobadas</option>
+            <option value="all">Todas</option>
+          </select>
+        </div>
+        <div class="udv-form-group">
+          <label class="udv-label" for="por-pagina">Por página</label>
+          <select class="udv-select" id="por-pagina">
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+          </select>
+        </div>
+      </div>
+
+      <p id="resultado" class="inbox-resultado" aria-live="polite"></p>
+      <div id="aviso"></div>
+
+      <!-- Aquí JavaScript coloca las tarjetas -->
+      <div id="lista" class="udv-grid-2"></div>
+
+      <nav id="paginacion" class="udv-flex-between udv-mt-3" aria-label="Paginación" hidden>
+        <button type="button" class="btn-udv btn-udv-primary btn-udv-sm" id="pagina-anterior">← Anterior</button>
+        <span id="pagina-actual" aria-live="polite"></span>
+        <button type="button" class="btn-udv btn-udv-primary btn-udv-sm" id="pagina-siguiente">Siguiente →</button>
+      </nav>
+    </div>
+  </main>
+
+  <script src="js/sesion.js"></script>
+  <script src="js/revision.js"></script>
+</body>
+</html>

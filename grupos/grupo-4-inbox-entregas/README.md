@@ -40,6 +40,9 @@ producción lo sirve la app principal).
   la vinculación de archivos con su fila de `entrega`. Es lo que se usa
   siempre; los datos en memoria solo los usan las pruebas
   (`G4_USAR_MYSQL=0`, lo pone `tests/conftest.py`).
+- `g4_inbox/revision.py` - la bandeja de revisión (`GET /review-queue`): qué
+  entregas le tocan a cada revisor, en qué orden. La pantalla es
+  `static/revision.html`.
 - `g4_inbox/main.py` - solo sirve para correr G4 por su cuenta en
   local. La raíz del proyecto usa `routes.py` directo, no este archivo.
 - `static/` - las dos pantallas, con sus propios css y js.

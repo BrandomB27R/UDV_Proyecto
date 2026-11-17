@@ -187,3 +187,35 @@ def test_aprobar_envia_la_observacion_si_se_escribio():
     inicio = js.index("async function aprobar(")
     assert 'getElementById("obs")' in js[inicio:inicio + 400]
     assert "api.last_approval" in js
+
+
+# ---------- bandeja de revisión ----------
+
+def test_la_bandeja_existe_y_cada_tarjeta_abre_el_detalle():
+    html = (STATIC / "revision.html").read_text(encoding="utf-8")
+    js = (STATIC / "js" / "revision.js").read_text(encoding="utf-8")
+    assert '<script src="js/sesion.js"></script>' in html and '<script src="js/revision.js"></script>' in html
+    assert "/review-queue?" in js
+    assert "detalle.html?id=${encodeURIComponent(a.id)}" in js
+
+
+def test_la_bandeja_no_cambia_el_detalle_ni_el_inbox():
+    """Condición del PM: solo la pantalla nueva. El enlace lo pone el portal."""
+    for pantalla in ("inbox.html", "detalle.html"):
+        assert "revision.html" not in (STATIC / pantalla).read_text(encoding="utf-8")
+    assert "revision" not in (STATIC / "js" / "detalle.js").read_text(encoding="utf-8")
+
+
+def test_la_bandeja_se_recarga_al_volver_con_atras():
+    js = (STATIC / "js" / "revision.js").read_text(encoding="utf-8")
+    assert 'addEventListener("pageshow"' in js and "e.persisted" in js
+    assert 'cache: "no-store"' in js
+
+
+@pytest.mark.parametrize("archivo", ["detalle.js", "revision.js"])
+def test_las_horas_se_muestran_en_hora_de_guatemala(archivo):
+    """Regla del PM (16-nov): la API en UTC y la pantalla convierte al mostrar."""
+    js = (STATIC / "js" / archivo).read_text(encoding="utf-8")
+    assert 'toLocaleString("es-GT", { timeZone: "America/Guatemala" })' in js
+    assert 'texto + "Z"' in js            # si llega sin zona, se toma como UTC
+    assert "formatearFecha(" not in js     # la función vieja mostraba la hora sin convertir

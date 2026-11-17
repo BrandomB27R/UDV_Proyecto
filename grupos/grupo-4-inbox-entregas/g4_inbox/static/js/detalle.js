@@ -118,12 +118,14 @@ function ocultarAvisos() {
   });
 }
 
-// "2026-11-15T16:41" -> "15/11/2026 16:41". Se arma a mano para mostrar la
-// hora tal como viene de la base, sin que el navegador la cambie de zona.
-function formatearFecha(iso) {
-  const [dia, hora] = iso.split("T");
-  const [a, m, d] = dia.split("-");
-  return `${d}/${m}/${a}${hora ? " " + hora.slice(0, 5) : ""}`;
+// Horas que manda la API (UTC) -> hora de Guatemala, como pidió el PM.
+// Si una hora llegara sin zona ("2026-11-15T16:41"), se toma como UTC.
+function horaGuatemala(valor) {
+  const texto = String(valor);
+  const conZona = /(Z|[+-]\d{2}:?\d{2})$/.test(texto) ? texto : texto + "Z";
+  const fecha = new Date(conZona);
+  if (Number.isNaN(fecha.getTime())) return texto;
+  return fecha.toLocaleString("es-GT", { timeZone: "America/Guatemala" });
 }
 
 function adaptarTarea(api) {
@@ -214,7 +216,7 @@ async function cargarDetalle() {
       const d = tareaActual.devolucion;
       const aviso = document.createElement("div");
       aviso.className = "udv-alert udv-alert-danger";
-      const fecha = d.at ? ` (${formatearFecha(d.at)})` : "";
+      const fecha = d.at ? ` (${horaGuatemala(d.at)})` : "";
       aviso.textContent = `Observación del revisor${fecha}: ${d.comment}`;
       contComentario.appendChild(aviso);
     }
@@ -222,7 +224,7 @@ async function cargarDetalle() {
       const d = tareaActual.aprobacion;
       const aviso = document.createElement("div");
       aviso.className = "udv-alert udv-alert-success";
-      const fecha = d.at ? ` (${formatearFecha(d.at)})` : "";
+      const fecha = d.at ? ` (${horaGuatemala(d.at)})` : "";
       aviso.textContent = `Comentario del revisor al aprobar${fecha}: ${d.comment}`;
       contComentario.appendChild(aviso);
     }

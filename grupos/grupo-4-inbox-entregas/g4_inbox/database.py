@@ -49,10 +49,17 @@ class ArchivoNoEncontrado(Exception):
 
 
 if engine.dialect.name == "mysql":
-    # Zona horaria: G4 NO fija time_zone y usa la del servidor, igual que G3.
-    # G3 decide el intento actual comparando tarea_transicion.creado_en (que
-    # escribe G3) con entrega.entregado_en (que puede escribir G4): las dos
-    # fechas tienen que estar en la misma zona para poder compararse.
+    # Regla del PM (16-nov): la base y la API en UTC; cada pantalla convierte
+    # a hora de Guatemala al mostrar. G2 y G3 también fijan UTC en su conexión.
+    # Importa para la entrega: G3 compara tarea_transicion.creado_en (suya)
+    # con entrega.entregado_en (que puede crear G4), y si una de las dos se
+    # guarda en otra zona hay 6 horas de diferencia con el docker.
+    @event.listens_for(engine, "connect")
+    def _en_utc(conexion_dbapi, _registro):
+        cursor = conexion_dbapi.cursor()
+        cursor.execute("SET time_zone = '+00:00'")
+        cursor.close()
+
 
     @event.listens_for(engine, "checkin")
     def _limpiar_actor(conexion_dbapi, _registro):
@@ -172,7 +179,9 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
     due_at = fecha.isoformat() if isinstance(fecha, (date, datetime)) else None
 
     def _iso(valor):
-        return valor.isoformat(timespec="minutes") if isinstance(valor, datetime) else None
+        # La conexión está en UTC: se marca con "Z" para que la pantalla
+        # sepa convertirla a hora de Guatemala (regla del PM, 16-nov).
+        return valor.isoformat(timespec="minutes") + "Z" if isinstance(valor, datetime) else None
 
     # El comentario de la última devolución o aprobación. G3 lo guarda en el
     # historial de transiciones (tarea_transicion.comentario), no en la tabla
@@ -395,3 +404,73 @@ def vincular_archivo(assignment_id: int, file_id: str, actor_id: int) -> dict:
     finally:
         sesion.close()
     return {"entrega_id": intento["id"], "numero_intento": intento["numero_intento"]}
+
+
+# ============================================================================
+# BANDEJA DE REVISIÓN
+# ============================================================================
+def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
+    """Asignaciones entregadas o ya revisadas que le tocan a este usuario.
+
+    Regla oficial del PM (16-nov, la de G3):
+    - coordinación y administración ven todas;
+    - un revisor ve solo las tareas donde es el revisor designado. Una tarea
+      sin revisor la revisa la coordinación que la creó o admin.
+    El revisor designado se lee como en G3: el de la asignación y, si no
+    tiene, el de la tarea.
+    """
+    roles = set(roles)
+    sesion = _sesion()
+    try:
+        filas = sesion.execute(text("""
+            SELECT td.id, td.usuario_id, td.estado_codigo, t.titulo, tt.codigo AS tipo,
+                   t.prioridad, COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite,
+                   CONCAT(u.nombres, ' ', u.apellidos) AS docente,
+                   ult.id AS ultima_transicion_id, env.creado_en AS enviado_en,
+                   (SELECT COUNT(*) FROM tarea_transicion x
+                     WHERE x.tarea_destinatario_id = td.id AND x.estado_nuevo = 'submitted') AS envios,
+                   (SELECT COUNT(*) FROM archivo a JOIN entrega e ON e.id = a.entrega_id
+                     WHERE e.tarea_destinatario_id = td.id AND a.eliminado_en IS NULL) AS archivos
+            FROM tarea_destinatario td
+            JOIN tarea t       ON t.id = td.tarea_id
+            JOIN workflow w    ON w.id = t.workflow_id
+            JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
+            JOIN usuario u     ON u.id = td.usuario_id
+            LEFT JOIN tarea_transicion ult ON ult.id = (
+                SELECT MAX(x.id) FROM tarea_transicion x WHERE x.tarea_destinatario_id = td.id)
+            LEFT JOIN tarea_transicion env ON env.id = (
+                SELECT MAX(x.id) FROM tarea_transicion x
+                 WHERE x.tarea_destinatario_id = td.id AND x.estado_nuevo = 'submitted')
+            WHERE t.eliminado_en IS NULL
+              AND td.estado_codigo IN ('submitted', 'under_review', 'returned', 'approved', 'closed')
+              AND (:ve_todas = 1 OR COALESCE(td.revisor_id, t.revisor_id) = :yo)
+        """), {"yo": usuario_id,
+               "ve_todas": int(bool(roles & {"coordinator", "admin"}))}).mappings().all()
+    finally:
+        sesion.close()
+
+    def _iso(valor):
+        # La conexión está en UTC: se marca con "Z" para que la pantalla
+        # sepa convertirla a hora de Guatemala (regla del PM, 16-nov).
+        return valor.isoformat(timespec="minutes") + "Z" if isinstance(valor, datetime) else None
+
+    resultado = []
+    for f in filas:
+        fecha = f["fecha_limite"]
+        resultado.append({
+            "id": f["id"],
+            "assignee_id": f["usuario_id"],
+            "teacher": f["docente"],
+            "title": f["titulo"],
+            "task_type": f["tipo"],
+            "status": f["estado_codigo"],
+            "priority": f["prioridad"],
+            "due_at": fecha.date().isoformat() if isinstance(fecha, datetime) else (
+                fecha.isoformat() if isinstance(fecha, date) else None),
+            "submitted_at": _iso(f["enviado_en"]),
+            "attempt": f["envios"],
+            "files": f["archivos"],
+            "last_transition_id": f["ultima_transicion_id"],
+        })
+    return resultado
+

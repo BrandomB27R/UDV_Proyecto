@@ -98,14 +98,40 @@ Acuerdo con el PM del 13 de noviembre (aplica a G3 y G4).
   sigue abierto mientras haya menos de N envíos. Da lo mismo que la regla
   del PM sin depender de la zona horaria.
 - G3 sí compara fechas (`tarea_transicion.creado_en >= entrega.entregado_en`).
-  Para que eso funcione, G4 no fija `time_zone` y escribe en la zona del
-  servidor, igual que G3. Con el docker-compose (`TZ: America/Guatemala`), si
-  uno escribe en UTC y el otro no, hay 6 horas de diferencia.
+  Regla del PM (16-nov): la base y la API en UTC. G2, G3 y G4 fijan
+  `time_zone = '+00:00'` en su conexión; las pantallas convierten a hora de
+  Guatemala al mostrar. Si un grupo no lo fija, con el docker-compose
+  (`TZ: America/Guatemala`) hay 6 horas de diferencia.
 - La entrega que crea G4 lleva `contenido_texto` y `programa_version_id` del
   borrador, igual que cuando la crea G3, porque G1 no deja modificarla
   después. La pantalla guarda el borrador antes de subir el archivo.
 - El revisor solo ve y comenta las asignaciones de las tareas donde es el
   revisor designado (`tarea.revisor_id`). Coordinación y admin ven todas.
+
+## 4.2 Bandeja de revisión
+
+Entregable 4 de los requerimientos de G4. Aprobada por el PM el 15-nov, en un
+PR aparte y sin cambios en el detalle ni en las acciones.
+
+- `GET /api/v1/review-queue?q=&status=&page=&per_page=` responde
+  `{page, per_page, total, data, summary}`. `summary` cuenta `submitted` y
+  `under_review` sin aplicar filtros.
+- Solo para usuarios con rol `reviewer`, `coordinator` o `admin`; los demás
+  reciben 403.
+- Quién ve qué (regla oficial del PM, 16-nov, la de G3): coordinación y
+  administración ven todas; un revisor ve solo las asignaciones donde es el
+  revisor designado, `COALESCE(tarea_destinatario.revisor_id, tarea.revisor_id)`.
+  Una tarea sin revisor la revisa la coordinación que la creó o admin.
+- Pantalla: `/app/g4/revision.html`. El enlace lo pone el portal del PM en la
+  tarjeta de G4 para revisor y coordinación.
+- `status`: `pending` (por defecto: `under_review` y `submitted`), uno de
+  `submitted`, `under_review`, `returned`, `approved`, `closed`, o `all`.
+  Otro valor responde 422.
+- Orden: primero las ya tomadas, luego las entregadas, de la que más espera a
+  la que menos; las revisadas al final. Se ordena por id de transición, no por
+  fecha.
+- Las acciones (tomar, aprobar, devolver) siguen siendo de G3 y se hacen desde
+  el detalle.
 
 ## 5. Definición de HECHO (checklist de cada PR)
 
@@ -129,3 +155,4 @@ Acuerdo con el PM del 13 de noviembre (aplica a G3 y G4).
 | 2026-09-26 | Versión inicial | — | PM |
 | 2026-09-28 | Jerarquía de fuentes; prefijo `/api/v1`; **nuevo** `PUT /assignments/{id}/submission-draft` (el .docx exige borradores y no había ruta); reparto de responsabilidades con el G3; `program_version_id` con el G5; reglas del .docx que faltaban; checklist con pruebas y OpenAPI | PM | PM |
 | 2026-11-14 | Sección 4.1: comentarios y borrador en la base, validación de archivos, fila de entrega por intento, revisor designado | PM y QA | Pendiente |
+| 2026-11-15 | Sección 4.2: bandeja de revisión (GET /review-queue) | Requerimientos G4, entregable 4 | PM (15-nov) |
