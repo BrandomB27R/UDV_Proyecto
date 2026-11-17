@@ -246,7 +246,7 @@ def test_el_docente_ve_la_observacion_y_la_fecha_de_la_devolucion(c, s):
     accion(c, s["revisor"], a, "return", "Falta la bibliografía de la unidad 3")
     d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
     assert d["last_return"]["comment"] == "Falta la bibliografía de la unidad 3"
-    assert d["last_return"]["at"]                      # con fecha
+    assert d["last_return"]["at"].endswith("Z")        # con fecha, en UTC
     # el historial sale en el orden en que pasó, aunque las fechas vengan en zonas distintas
     assert [h["new_status"] for h in d["history"]] == [
         "assigned", "in_progress", "submitted", "under_review", "returned"]
@@ -269,3 +269,72 @@ def test_solo_el_revisor_designado_ve_la_asignacion(c, s):
     sin_revisor = publicar(c, s, revisor=None)
     assert c.get(f"/api/v1/assignments/{con_revisor}", headers=s["revisor"]).status_code == 200
     assert c.get(f"/api/v1/assignments/{sin_revisor}", headers=s["revisor"]).status_code == 403
+
+
+# ------------------------------------------------------------ bandeja de revisión
+def _bandeja(c, cabeceras, **filtros):
+    r = c.get("/api/v1/review-queue", headers=cabeceras, params={"per_page": 100, **filtros})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_la_entrega_aparece_en_la_bandeja_del_revisor_y_avanza(c, s):
+    a = publicar(c, s)
+    accion(c, s["docente1"], a, "start")
+    fid = subir(c, s["docente1"], "cola.pdf")
+    c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"], json={"file_id": str(fid), "name": "cola.pdf"})
+    assert a not in [x["id"] for x in _bandeja(c, s["revisor"])["data"]]   # aún no entregada
+    accion(c, s["docente1"], a, "submit")
+
+    fila = next(x for x in _bandeja(c, s["revisor"])["data"] if x["id"] == a)
+    assert fila["status"] == "submitted" and fila["attempt"] == 1 and fila["files"] == 1
+    assert fila["teacher"] and fila["submitted_at"].endswith("Z")
+    # la hora es UTC de verdad: la entrega acaba de pasar, así que está a menos
+    # de 10 minutos de la hora UTC actual (con el docker en hora de Guatemala
+    # y la conexión sin fijar UTC habría 6 horas de diferencia)
+    from datetime import datetime, timezone
+    enviada = datetime.fromisoformat(fila["submitted_at"].replace("Z", "+00:00"))
+    assert abs((datetime.now(timezone.utc) - enviada).total_seconds()) < 600
+
+    accion(c, s["revisor"], a, "review")
+    bandeja = _bandeja(c, s["revisor"])
+    assert bandeja["data"][0]["id"] == a          # las ya tomadas van primero
+    assert bandeja["summary"]["under_review"] >= 1
+
+    accion(c, s["revisor"], a, "approve")
+    assert a not in [x["id"] for x in _bandeja(c, s["revisor"])["data"]]
+    assert a in [x["id"] for x in _bandeja(c, s["revisor"], status="approved")["data"]]
+
+
+def test_la_bandeja_es_solo_para_quien_revisa(c, s):
+    assert c.get("/api/v1/review-queue", headers=s["docente1"]).status_code == 403
+
+
+def test_coordinacion_ve_todas_aunque_tengan_revisor(c, s):
+    """Regla oficial: coordinación y admin ven todas."""
+    a = publicar(c, s, tipo=1)   # con revisor 5
+    accion(c, s["docente1"], a, "start")
+    accion(c, s["docente1"], a, "submit")
+    assert a in [x["id"] for x in _bandeja(c, s["coordinacion"])["data"]]
+
+
+def test_sin_revisor_la_ve_coordinacion_y_no_los_revisores(c, s):
+    """Regla oficial: sin revisor la revisa coordinación o admin (como en G3)."""
+    a = publicar(c, s, tipo=1, revisor=None)
+    accion(c, s["docente1"], a, "start")
+    accion(c, s["docente1"], a, "submit")
+    assert a not in [x["id"] for x in _bandeja(c, s["revisor"], status="all")["data"]]
+    assert a in [x["id"] for x in _bandeja(c, s["coordinacion"])["data"]]
+
+
+def test_con_otro_revisor_designado_no_aparece(c, s):
+    """El revisor designado se lee como en G3: el de la asignación manda sobre el de la tarea."""
+    a = publicar(c, s, tipo=1)   # tarea con revisor 5
+    from sqlalchemy import create_engine, text
+    motor = create_engine(URL)
+    with motor.begin() as cx:   # 1 = admin, designado solo en esta asignación
+        cx.execute(text("UPDATE tarea_destinatario SET revisor_id = 1 WHERE id = :a"), {"a": a})
+    motor.dispose()
+    accion(c, s["docente1"], a, "start")
+    accion(c, s["docente1"], a, "submit")
+    assert a not in [x["id"] for x in _bandeja(c, s["revisor"], status="all")["data"]]

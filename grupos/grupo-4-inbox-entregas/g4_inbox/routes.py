@@ -39,7 +39,7 @@ from .inbox import Asignacion, ErrorValidacion, listar_inbox, resumen_inbox
 # quedan solo para pruebas: G4_USAR_MYSQL=0 (lo pone tests/conftest.py).
 USAR_MYSQL = os.environ.get("G4_USAR_MYSQL", "1") != "0"
 
-from . import database
+from . import database, revision
 
 router = APIRouter(prefix="/api/v1", tags=["G4 - Inbox y entregas"])
 
@@ -188,6 +188,43 @@ def inbox(q: str = "", status: Optional[str] = None, page: int = 1, per_page: in
 @router.get("/inbox/summary")
 def inbox_summary(usuario: Usuario = Depends(obtener_usuario_actual)):
     return resumen_inbox(_asignaciones_para_inbox(), usuario.id)
+
+
+# ============================================================================
+# 2b. BANDEJA DE REVISIÓN
+# ============================================================================
+def _cola_en_memoria(usuario: Usuario) -> List[dict]:
+    """Igual que database.fetch_cola_revision, sobre los datos de ejemplo."""
+    roles = {r.codigo for r in (usuario.roles or [])}
+    ve_todas = bool(roles & {"coordinator", "admin"})
+    filas = []
+    for a in DB:
+        if a["status"] not in revision.ESTADOS_COLA:
+            continue
+        revisor = a.get("reviewer_id")
+        if not (ve_todas or revisor == usuario.id):
+            continue
+        filas.append({
+            "id": a["id"], "assignee_id": a["assignee_id"], "teacher": f"Docente {a['assignee_id']}",
+            "title": a["title"], "task_type": a["task_type"], "status": a["status"],
+            "priority": a["priority"], "due_at": a["due_at"], "submitted_at": None,
+            "attempt": None, "files": len(a["files"]), "last_transition_id": a["id"],
+        })
+    return filas
+
+
+@router.get("/review-queue")
+def bandeja_de_revision(q: str = "", status: Optional[str] = None, page: int = 1,
+                        per_page: int = 20, usuario: Usuario = Depends(obtener_usuario_actual)):
+    """Entregas que le tocan revisar al usuario: primero las pendientes."""
+    roles = [r.codigo for r in (usuario.roles or [])]
+    if not revision.puede_usar_la_bandeja(roles):
+        raise HTTPException(status_code=403, detail="La bandeja de revisión es para revisores, coordinación y administración")
+    filas = database.fetch_cola_revision(usuario.id, roles) if USAR_MYSQL else _cola_en_memoria(usuario)
+    try:
+        return revision.listar_cola(filas, q=q, status=status, page=page, per_page=per_page)
+    except ErrorValidacion as e:
+        raise HTTPException(status_code=422, detail=e.details)
 
 
 # ============================================================================
