@@ -112,7 +112,7 @@
           <span class="modulo__desc">Sedes, unidades, cursos, periodos y tipos de tarea.</span>
           <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g6/catalogos.html">Abrir</a></div>
         </article>
-        <article class="udv-card-light modulo" data-roles="admin,auditor,authority">
+        <article class="udv-card-light modulo" data-roles="admin,auditor">
           <span class="modulo__grupo">Grupo 6</span>
           <span class="modulo__titulo">Auditoría</span>
           <span class="modulo__desc">Quién hizo qué y cuándo: acciones del sistema y transiciones de tareas.</span>
@@ -153,11 +153,14 @@
         $("#titulo-sesion").textContent = "Sesión";
         $("#usuario-nombre").textContent = [usuario.nombres, usuario.apellidos].filter(Boolean).join(" ") || usuario.correo || "";
         $("#usuario-correo").textContent = usuario.correo || "";
-        $("#usuario-roles").innerHTML = roles.map((r) => `<span class="udv-badge badge-assigned">${r}</span>`).join("");
-        $("#nav-sesion").innerHTML = `<span style="color:rgba(255,255,255,.85);font-size:.85rem">${$("#usuario-nombre").textContent}</span>`;
+        // Texto siempre con textContent: el nombre y los roles vienen de la base y nunca se interpretan como HTML.
+        const caja = $("#usuario-roles"); caja.replaceChildren();
+        roles.forEach((r) => { const s = document.createElement("span"); s.className = "udv-badge badge-assigned"; s.textContent = r; caja.appendChild(s); });
+        const nav = document.createElement("span"); nav.style.cssText = "color:rgba(255,255,255,.85);font-size:.85rem"; nav.textContent = $("#usuario-nombre").textContent;
+        $("#nav-sesion").replaceChildren(nav);
         document.querySelectorAll(".modulo").forEach((m) => {
           const permitidos = (m.dataset.roles || "").split(",");
-          const puede = roles.length === 0 || roles.some((r) => permitidos.includes(r));
+          const puede = roles.some((r) => permitidos.includes(r));
           m.classList.toggle("modulo--bloqueado", !puede);
         });
       }
@@ -166,7 +169,7 @@
         $("#form-login").classList.remove("oculto");
         $("#sesion-activa").classList.add("oculto");
         $("#titulo-sesion").textContent = "Iniciar sesión";
-        $("#nav-sesion").innerHTML = "";
+        $("#nav-sesion").replaceChildren();
         document.querySelectorAll(".modulo").forEach((m) => m.classList.add("modulo--bloqueado"));
       }
 
@@ -196,7 +199,11 @@
         finally { $("#btn-entrar").disabled = false; }
       });
 
-      $("#btn-salir").addEventListener("click", () => { borrarToken(); mostrarSinSesion(); });
+      $("#btn-salir").addEventListener("click", async () => {
+        // Revoca el token en el servidor (G2) antes de olvidarlo en el navegador.
+        try { await llamar("/auth/logout", { method: "POST" }); } catch {}
+        borrarToken(); mostrarSinSesion();
+      });
 
       fetch("/health").then((r) => r.json()).then((h) => {
         const n = (h.routers || []).length, p = Object.keys(h.pendientes || {}).length;
