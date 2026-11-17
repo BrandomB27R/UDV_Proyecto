@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("g2_api.errores")
@@ -178,12 +180,30 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
+# Los triggers del G1 avisan con SQLSTATE 45000 (error 1644 en MySQL) y marcan el codigo en el mensaje.
+_MARCA_HTTP = re.compile(r"\((409|422)\)")
+
+
+async def _db_exception_handler(request: Request, exc: DBAPIError):
+    original = getattr(exc, "orig", None)
+    args = getattr(original, "args", ()) or ()
+    es_trigger = (args and args[0] == 1644) or getattr(original, "sqlstate", None) == "45000"
+    if not es_trigger:
+        return await _unhandled_exception_handler(request, exc)
+    texto = str(args[1]) if len(args) > 1 else str(original)
+    marca = _MARCA_HTTP.search(texto)
+    estado = int(marca.group(1)) if marca else 409
+    mensaje = _MARCA_HTTP.sub("", texto).replace("ERROR:", "").strip() or DEFAULT_MESSAGES[estado]
+    return error_response(status_code=estado, message=mensaje)
+
+
 # --- Registro -------------------------------------------------------------
 
 def register_error_handlers(app: FastAPI) -> None:
     """Engancha los tres manejadores. Nombre que usa main.py."""
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    app.add_exception_handler(DBAPIError, _db_exception_handler)
     app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 

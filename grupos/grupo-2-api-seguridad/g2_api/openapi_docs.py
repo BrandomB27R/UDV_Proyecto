@@ -5,6 +5,8 @@
 # Esta funcion se puede usar en cualquier app de FastAPI: la del grupo (g2_api/main.py) y
 # la de la raiz que despliega Railway (main.py del PM). Solo toca las rutas cuyo codigo
 # vive en g2_api.routers, asi que no cambia la documentacion de los grupos 3 a 6.
+import logging
+
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
@@ -67,9 +69,7 @@ def _rutas_del_g2():
 def completar_openapi(app: FastAPI):
     # Deja en 'app.openapi' el esquema con los codigos HTTP y ejemplos reales del G2.
 
-    def _construir():
-        if app.openapi_schema:
-            return app.openapi_schema
+    def _con_ejemplos():
         esquema = get_openapi(title=app.title, version=app.version, routes=app.routes)
         esquema.setdefault("components", {}).setdefault("schemas", {})["ErrorResponse"] = {
             "type": "object",
@@ -140,6 +140,17 @@ def completar_openapi(app: FastAPI):
                 elif ruta.endswith("/files") and metodo == "post":
                     r["200"] = _resp_ok("Archivo aceptado.", {
                         "file_id": 177, "nombre_interno": "3f2a9c1e-0000-4000-8000-000000000000.pdf"})
+        return esquema
+
+    def _construir():
+        if app.openapi_schema:
+            return app.openapi_schema
+        try:
+            esquema = _con_ejemplos()
+        except Exception:
+            # si algo falla al completar los ejemplos, Swagger sale igual, solo sin ellos
+            logging.getLogger("g2_api.openapi").exception("No se pudieron completar los ejemplos de OpenAPI")
+            esquema = get_openapi(title=app.title, version=app.version, routes=app.routes)
         app.openapi_schema = esquema
         return esquema
 

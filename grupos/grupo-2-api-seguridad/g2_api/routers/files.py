@@ -1,7 +1,7 @@
 import uuid # <----- Nombre interno aleatorio del archivo
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 import puremagic # <----- Dependencia Para verificar el tipo de archivo
-from g2_api.middleware.auth_middleware import obtener_usuario_actual
+from g2_api.middleware.auth_middleware import obtener_usuario_actual, requerir_permiso
 from g2_api.models import Usuario
 from pathlib import Path
 from fastapi.responses import FileResponse
@@ -32,20 +32,32 @@ MIMETYPES_PERMITIDOS = {
 # Definir la ruta para verificar el archivo subido
 @router.post("")
 async def verificar_archivo(file: UploadFile = File(...),
-    usuario_actual: Usuario = Depends(obtener_usuario_actual),
+    usuario_actual: Usuario = Depends(requerir_permiso("files.upload")),
     db: Session = Depends(get_db)
 ):
-    contenido = await file.read()
+    # lee por bloques de 1 MB y corta apenas pasa el limite, sin cargar archivos enormes
+    partes = []
+    leidos = 0
+    while True:
+        bloque = await file.read(1024 * 1024)
+        if not bloque:
+            break
+        leidos += len(bloque)
+        if leidos > MAX_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo supera el límite de 5 MB"
+            )
+        partes.append(bloque)
+    contenido = b"".join(partes)
 
-    if len(contenido) > MAX_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail="El archivo supera el límite de 5 MB"
-        )
+    # un archivo vacio no es valido
+    if not contenido:
+        raise HTTPException(status_code=422, detail="El archivo está vacío.")
     # leer los primeros 2048 bytes del archivo para determinar su tipo real
     try:
         tipo_real = puremagic.from_string(contenido[:2048], mime=True)
-    except puremagic.PureError:
+    except (puremagic.PureError, ValueError):
         # si el archivo esta corrupto o no se puede determinar su tipo, se lanza una excepción HTTP
         raise HTTPException(
             status_code=400,
@@ -88,8 +100,14 @@ async def verificar_archivo(file: UploadFile = File(...),
         autor_id=usuario_actual.id
     )
 
-    db.add(nuevo_archivo)
-    db.commit()
+    try:
+        db.add(nuevo_archivo)
+        db.commit()
+    except Exception:
+        # si la base rechaza el registro, se borra el archivo para no dejarlo huerfano
+        db.rollback()
+        ruta_archivo.unlink(missing_ok=True)
+        raise
     db.refresh(nuevo_archivo)
     
     # devolver el identificador único y el nombre interno del archivo

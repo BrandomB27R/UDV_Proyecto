@@ -48,10 +48,18 @@ def crear_token(usuario_id: int) -> tuple[str, datetime]:
 def verificar_token(token: str) -> dict | None:
     # Revisa que el token tenga una firma válida
     try:
-        return jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+        # exp y sub son obligatorios: un token sin vencimiento o sin usuario no sirve
+        payload = jwt.decode(
+            token, config.SECRET_KEY, algorithms=[config.ALGORITHM],
+            options={"require": ["exp", "sub"]},
+        )
     except jwt.InvalidTokenError:
         # Incluye ExpiredSignatureError (vencido) e InvalidSignatureError (alterado).
         return None
+    # solo tokens de acceso y con un id de usuario valido
+    if payload.get("tipo") != "access" or not str(payload.get("sub", "")).isdigit():
+        return None
+    return payload
 
 
 def hash_token(token: str) -> str:
