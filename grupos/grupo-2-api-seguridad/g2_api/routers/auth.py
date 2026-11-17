@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from g2_api import config
@@ -83,12 +84,24 @@ def login(datos: LoginRequest, request: Request, db: Session = Depends(get_db)):
     # si la contraseña esta mal: suma un intento y, al llegar al limite, bloquea
     if not verificar_contrasena(datos.password, usuario.hash_contrasena):
         fijar_actor(db, usuario.id, ip)
-        usuario.intentos_fallidos = (usuario.intentos_fallidos or 0) + 1
-        bloquear = usuario.intentos_fallidos >= config.LOGIN_MAX_INTENTOS
-        if bloquear:
-            usuario.bloqueado_hasta = ahora + timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS)
-            usuario.intentos_fallidos = 0
+        # la base suma el intento en una sola sentencia: con peticiones al mismo tiempo no se pierde ninguno
+        db.execute(
+            update(Usuario)
+            .where(Usuario.id == usuario.id)
+            .values(intentos_fallidos=Usuario.intentos_fallidos + 1)
+        )
+        # y bloquea solo si ya llego al limite (la condicion va en la misma sentencia)
+        db.execute(
+            update(Usuario)
+            .where(Usuario.id == usuario.id, Usuario.intentos_fallidos >= config.LOGIN_MAX_INTENTOS)
+            .values(
+                bloqueado_hasta=ahora + timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS),
+                intentos_fallidos=0,
+            )
+        )
         db.commit()
+        db.refresh(usuario)
+        bloquear = usuario.bloqueado_hasta is not None and usuario.bloqueado_hasta > ahora
         registrar_login_fallido(db, datos.correo, ip_origen=ip)
         if bloquear:
             raise _cuenta_bloqueada(usuario.bloqueado_hasta, ahora)

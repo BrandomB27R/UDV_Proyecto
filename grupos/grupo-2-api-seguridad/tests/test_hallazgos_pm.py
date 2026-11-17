@@ -67,9 +67,9 @@ def test_archivo_eliminado_da_404(client, db, sembrado, tmp_path, headers_docent
     assert client.get(f"/api/v1/files/{archivo_id}", headers=headers_docente).status_code == 404
 
 
-def test_tipo_no_permitido_dice_el_motivo(client, headers_docente):
+def test_tipo_no_permitido_dice_el_motivo(client, headers_admin):
     r = client.post("/api/v1/files", files={"file": ("imagen.gif", b"GIF89a" + b"\x00" * 40, "image/gif")},
-                    headers=headers_docente)
+                    headers=headers_admin)
     assert r.status_code == 400
     assert "PDF" in r.json()["error"]["message"]
 

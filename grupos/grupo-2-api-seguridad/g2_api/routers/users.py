@@ -7,11 +7,11 @@ from g2_api.database import get_db
 from typing import Optional
 import bcrypt
 from g2_api.middleware.auth_middleware import requerir_permiso, requerir_rol
-from g2_api.models import Rol, Usuario, UsuarioRol
+from g2_api.models import Rol, SesionToken, Usuario, UsuarioRol
 from g2_api.routers.auth import obtener_usuario_actual
 from g2_api.database import fijar_actor
 from g2_api.utils.paginacion import params_paginacion, Paginacion, paginar
-from datetime import timezone
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/v1/users", tags=["Users"])
 
@@ -147,8 +147,19 @@ def actualizar_o_desactivar_usuario(usuario_id: int, datos: UsuarioUpdate, reque
         if db.query(Usuario).filter(Usuario.correo == cambios["correo"]).first():
             raise _correo_repetido()
     
+    # un admin no se desactiva, y nadie se quita a si mismo el rol de admin
+    es_admin = any(r.codigo == "admin" for r in u.roles)
+    if es_admin and cambios.get("activo") is False:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No se puede desactivar a un administrador.")
+    if es_admin and u.id == actual.id and "rol" in cambios and cambios["rol"] != "admin":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No puedes quitarte el rol de administrador.")
+
     if "password" in cambios:
         u.hash_contrasena = _hash(cambios.pop("password"))
+        # al cambiar la contraseña se cierran todas sus sesiones abiertas
+        db.query(SesionToken).filter(
+            SesionToken.usuario_id == u.id, SesionToken.revocado_en.is_(None)
+        ).update({SesionToken.revocado_en: datetime.now(timezone.utc).replace(tzinfo=None)}, synchronize_session=False)
         
     if "rol" in cambios:
         rol = _buscar_rol(db, cambios.pop("rol"))
