@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.responses import FileResponse
 import hashlib
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from g2_api import config
@@ -119,6 +120,49 @@ async def verificar_archivo(file: UploadFile = File(...),
 
 
 
+# Tarea a la que pertenece un archivo: archivo -> entrega -> tarea_destinatario -> tarea (tablas del G1).
+# Devuelve quien creo la tarea y el revisor designado (el del destinatario o, si no tiene, el de la tarea).
+# Va con parametros (:entrega_id), nunca con texto armado a mano. Una tarea eliminada no da acceso.
+_SQL_TAREA_DE_LA_ENTREGA = text(
+    "SELECT t.creado_por, COALESCE(td.revisor_id, t.revisor_id) "
+    "FROM entrega e "
+    "JOIN tarea_destinatario td ON td.id = e.tarea_destinatario_id "
+    "JOIN tarea t ON t.id = td.tarea_id "
+    "WHERE e.id = :entrega_id AND t.eliminado_en IS NULL"
+)
+
+
+# Regla de descarga que decidio el PM (17-nov):
+#  - dueño del archivo y admin: pueden siempre.
+#  - auditoria: cualquier archivo ya vinculado a una entrega, un comentario o una version de programa.
+#  - revisor: solo si el archivo es de una entrega de una tarea donde es el revisor designado
+#    (si la tarea no tiene revisor designado, cualquier revisor).
+#  - coordinacion: solo si el archivo es de una entrega de una tarea que el creo.
+#  - un archivo todavia suelto (sin vincular) solo lo descargan su dueño y el admin.
+#  - docente ajeno, autoridad y cualquiera sin el permiso files.download: 403.
+def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo) -> bool:
+    if registro.autor_id == usuario.id:
+        return True
+    roles = {rol.codigo for rol in usuario.roles}
+    if "admin" in roles:
+        return True
+    # fuera del dueño y el admin, hace falta el permiso files.download (matriz del Grupo 1)
+    if not any(p.codigo == "files.download" for rol in usuario.roles for p in rol.permisos):
+        return False
+    if "auditor" in roles:
+        return any(v is not None for v in (registro.entrega_id, registro.comentario_id, registro.programa_version_id))
+    # revisor y coordinacion: se valida la tarea de la entrega; sin entrega vinculada no hay acceso
+    if registro.entrega_id is None or not roles & {"reviewer", "coordinator"}:
+        return False
+    fila = db.execute(_SQL_TAREA_DE_LA_ENTREGA, {"entrega_id": registro.entrega_id}).first()
+    if fila is None:
+        return False
+    creador_id, revisor_id = fila
+    if "coordinator" in roles and creador_id == usuario.id:
+        return True
+    return "reviewer" in roles and (revisor_id is None or revisor_id == usuario.id)
+
+
 @router.get("/{id}")
 async def descargar_archivo(
     id: int,
@@ -138,15 +182,8 @@ async def descargar_archivo(
             detail="Archivo no encontrado"
         )
 
-    # descarga el dueño, el admin o un rol que no sea docente con files.download
-    # (revisor, coordinacion, autoridad, auditoria), segun la matriz del Grupo 1
-    puede_descargar = any(
-        rol.codigo == "admin"
-        or (rol.codigo != "teacher" and any(p.codigo == "files.download" for p in rol.permisos))
-        for rol in usuario_actual.roles
-    )
-
-    if registro.autor_id != usuario_actual.id and not puede_descargar:
+    # la autorizacion se decide en el servidor segun la tarea de la entrega (ver _puede_descargar)
+    if not _puede_descargar(db, usuario_actual, registro):
         raise HTTPException(
         status_code=403,
         detail="No tienes permiso para acceder a este archivo"
@@ -164,3 +201,4 @@ async def descargar_archivo(
         path=str(ruta),
         filename=registro.nombre_original
     )
+
