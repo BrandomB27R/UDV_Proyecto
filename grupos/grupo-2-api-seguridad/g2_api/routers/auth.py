@@ -10,23 +10,21 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from g2_api import config
 from g2_api.database import fijar_actor, get_db
-from g2_api.models import SesionToken, Usuario
-from g2_api.seguridad import crear_token, hash_token, verificar_contrasena, verificar_token
-from g2_api.utils.registro import LOGIN_OK, LOGOUT, registrar_accion, registrar_login_fallido
+from g2_api.models import Auditoria, SesionToken, Usuario
+from g2_api.seguridad import crear_token, hash_token, hashear_contrasena, verificar_contrasena, verificar_token
+from g2_api.utils.registro import LOGIN_FALLIDO, LOGIN_OK, LOGOUT, registrar_accion, registrar_login_fallido
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Autenticacion"])
 me_router = APIRouter(prefix="/api/v1", tags=["Autenticacion"])
 
-
 # hora actual en UTC
 def _ahora_utc():
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
 
 # ---------- LOGIN ----------
 
@@ -35,13 +33,28 @@ class LoginRequest(BaseModel):
     correo: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=config.CONTRASENA_MIN, max_length=config.CONTRASENA_MAX)
 
-
 # mismo mensaje para correo o contraseña mal
 CREDENCIALES_INVALIDAS = "Correo o contraseña incorrectos"
+
+# hash falso para la verificacion de relleno: se calcula una sola vez al cargar el modulo.
+# Con el costo por defecto de bcrypt (el mismo de hashear_contrasena), tarda lo mismo que un hash real.
+_HASH_FALSO = hashear_contrasena("contrasena-falsa-solo-para-igualar-tiempos")
 
 # respuesta 401 que se muestra en /docs
 RESPUESTA_401 = {401: {"description": "Token faltante, invalido, vencido o sesion cerrada"}}
 
+# True si esta IP ya acumulo demasiados login fallidos en la ventana de bloqueo.
+# Cuenta en auditoria (accion LOGIN_FALLIDO), porque el G1 no tiene tabla de intentos de login.
+def _ip_bloqueada(db: Session, ip: str | None, ahora: datetime) -> bool:
+    if not ip or config.LOGIN_MAX_INTENTOS_IP <= 0:
+        return False
+    desde = ahora - timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS)
+    fallos = (
+        db.query(func.count(Auditoria.id))
+        .filter(Auditoria.accion == LOGIN_FALLIDO, Auditoria.ip_origen == ip, Auditoria.creado_en >= desde)
+        .scalar()
+    )
+    return fallos >= config.LOGIN_MAX_INTENTOS_IP
 
 # arma el error 429 con los minutos que faltan
 def _cuenta_bloqueada(bloqueado_hasta: datetime, ahora: datetime):
@@ -51,16 +64,25 @@ def _cuenta_bloqueada(bloqueado_hasta: datetime, ahora: datetime):
         detail=f"Cuenta bloqueada por intentos fallidos. Intenta de nuevo en {minutos} minutos.",
     )
 
-
 @router.post(
     "/login",
     responses={
         401: {"description": "Correo o contraseña incorrectos"},
         422: {"description": "Correo vacio o contraseña fuera del largo permitido"},
-        429: {"description": "Cuenta bloqueada por intentos fallidos"},
+        429: {"description": "Cuenta bloqueada por intentos fallidos o demasiados fallos desde la misma IP"},
     },
 )
 def login(datos: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else None
+    ahora = _ahora_utc()
+
+    # limite por IP: si esta IP ya fallo demasiado, se corta antes de mirar el correo (no revela si existe)
+    if _ip_bloqueada(db, ip, ahora):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos fallidos desde esta dirección. Intenta de nuevo más tarde.",
+        )
+
     # busca el usuario por correo
     usuario = (
         db.query(Usuario)
@@ -68,11 +90,10 @@ def login(datos: LoginRequest, request: Request, db: Session = Depends(get_db)):
         .first()
     )
 
-    ip = request.client.host if request.client else None
-    ahora = _ahora_utc()
-
     # si no existe o esta inactivo: guarda el intento y da 401
     if usuario is None or not usuario.activo:
+        # verificacion falsa: gasta el mismo tiempo de bcrypt que un correo real y no se distingue por la demora
+        verificar_contrasena(datos.password, _HASH_FALSO)
         registrar_login_fallido(db, datos.correo, ip_origen=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=CREDENCIALES_INVALIDAS)
 
@@ -145,12 +166,10 @@ def login(datos: LoginRequest, request: Request, db: Session = Depends(get_db)):
         },
     }
 
-
 # ---------- REVISAR LA SESION ----------
 
 # lee el header Authorization: Bearer <token>
 _bearer = HTTPBearer(auto_error=False)
-
 
 # arma el error 401
 def _no_autenticado(mensaje: str):
@@ -159,7 +178,6 @@ def _no_autenticado(mensaje: str):
         detail=mensaje,
         headers={"WWW-Authenticate": "Bearer"},
     )
-
 
 # revisa que la sesion siga activa
 def obtener_sesion_actual(
@@ -192,7 +210,6 @@ def obtener_sesion_actual(
 
     return sesion
 
-
 # devuelve el usuario de la sesion (para las rutas protegidas)
 def obtener_usuario_actual(
     request: Request,
@@ -205,7 +222,6 @@ def obtener_usuario_actual(
     fijar_actor(db, usuario.id, request.client.host if request.client else None)
 
     return usuario
-
 
 # ---------- LOGOUT ----------
 
@@ -230,7 +246,6 @@ def logout(
     )
     return {"mensaje": "Sesión cerrada"}
 
-
 # ---------- ME ----------
 
 @me_router.get("/me", responses=RESPUESTA_401)
@@ -248,3 +263,4 @@ def me(usuario: Usuario = Depends(obtener_usuario_actual)):
         "roles": [rol.codigo for rol in usuario.roles],
         "permisos": permisos,
     }
+
