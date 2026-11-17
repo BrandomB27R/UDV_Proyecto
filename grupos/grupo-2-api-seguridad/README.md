@@ -53,6 +53,7 @@ El archivo `.env` **nunca se sube** al repositorio. Se copia desde `.env.example
 | `CORS_ORIGINS` | Orígenes del frontend permitidos, separados por coma. |
 | `LOGIN_MAX_INTENTOS` | Intentos fallidos antes del bloqueo (5 intentos). |
 | `LOGIN_BLOQUEO_MINUTOS` | Minutos de bloqueo (15 minutos). |
+| `LOGIN_MAX_INTENTOS_IP` | Fallos de login permitidos desde una misma IP en esos minutos (20; `0` lo desactiva). Detrás de un proxy como Railway la IP que ve la API puede ser la del proxy: si ocurre, sube el valor o usa `0`. |
 | `CONTRASENA_MIN` / `CONTRASENA_MAX` | Largo de la contraseña (de 8 a 64 caracteres). |
 | `UPLOAD_DIR` | Carpeta donde se guardan los archivos subidos. En un servidor usa una ruta absoluta dentro de un volumen persistente. |
 
@@ -67,7 +68,7 @@ El archivo `.env` **nunca se sube** al repositorio. Se copia desde `.env.example
 
 El esquema lo crea el Grupo 1 (`01_schema.sql` y `02_seed.sql`). Esta API **no crea tablas** en la base compartida.
 
-La versión 1.2.0 de la base (G1) agrega el catálogo `prioridad_tarea` y una llave foránea en `tarea.prioridad`. No afecta a este módulo (`models.py` no usa `tarea`). Si tu base **local** es 1.1.0, aplica `migracion_1.2.0.sql` (en `grupos/grupo-1-base-de-datos/Docs/sql/`) con `mysql -u root db_udv < migracion_1.2.0.sql`; para comprobar la versión: `SELECT * FROM schema_migracion;`. En la base compartida **no se corre**: la actualiza el PM o el Grupo 1.
+La versión 1.2.0 de la base (G1) agrega el catálogo `prioridad_tarea` y una llave foránea en `tarea.prioridad`. No afecta a este módulo (`models.py` no usa `tarea`; solo la regla de descarga de `files.py` la lee, con una consulta parametrizada). Si tu base **local** es 1.1.0, aplica `migracion_1.2.0.sql` (en `grupos/grupo-1-base-de-datos/Docs/sql/`) con `mysql -u root db_udv < migracion_1.2.0.sql`; para comprobar la versión: `SELECT * FROM schema_migracion;`. En la base compartida **no se corre**: la actualiza el PM o el Grupo 1.
 Las fechas se guardan en UTC y cada conexión nueva queda en UTC.
 
 Para comprobar la conexión:
@@ -94,7 +95,10 @@ En `auditoria` solo se escriben a mano los eventos de acceso (login, login falli
 - Contraseñas solo con hash bcrypt; ninguna respuesta las devuelve.
 - Autorización en el servidor con `Authorization: Bearer <token>`.
 - Errores en el formato común, sin trazas, SQL ni rutas internas.
-- Los archivos de `/files` los descarga su dueño, un admin o un rol que no sea docente con el permiso `files.download` (revisor, coordinación, autoridad o auditoría); cualquier otro usuario recibe 403.
+- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado (cualquier revisor si la tarea no tiene uno) o que ellos crearon (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
+- Subida de `/files`: se lee por bloques de 1 MB y se corta al pasar 5 MB, sin cargar el archivo entero en memoria.
+- Login: si el correo no existe se verifica igual una contraseña falsa (misma demora), el bloqueo de 5 intentos sigue respondiendo 429 y también se limita por IP (`LOGIN_MAX_INTENTOS_IP`).
+- Token: `verificar_token` exige `exp` y `sub`. Un admin no puede desactivarse ni quitarse su propio rol, y cambiar una contraseña cierra las sesiones abiertas de ese usuario.
 - Sin credenciales en el código: todo va en `.env`.
 
 ## 7. Estructura
@@ -134,6 +138,7 @@ grupos/grupo-2-api-seguridad/
 │   ├── test_errores.py                     # Pruebas del formato de error y de la paginación. (Elaborado por Edgar Domingo)
 │   ├── test_file.py                        # Pruebas de archivos: tipo no permitido, tamaño y descarga. (Elaborado por Fulvio Jiménez)
 │   ├── test_hallazgos_pm.py                # Pruebas de los hallazgos del PM: descarga por rol, archivo eliminado, validaciones 422 y Coordinación. (Elaborado por Daniel Cobos)
+│   ├── test_seguridad_pm.py                # Pruebas de la auditoría de seguridad del PM: errores de triggers, subida, token, admin, sesiones, descarga según la tarea, verificación falsa y límite por IP. (Elaborado por Daniel Cobos y Robert Rodríguez)
 │   └── test_openapi.py                     # Pruebas de que Swagger coincide con lo que responde la API. (Elaborado por Robert Rodríguez)
 └── g2_api/                                 # Paquete con todo el código de la API. (Elaborado por el Grupo 2)
     ├── __init__.py                         # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
@@ -145,10 +150,10 @@ grupos/grupo-2-api-seguridad/
     ├── seguridad.py                        # Crea y valida los tokens JWT y revisa las contraseñas. (Elaborado por Daniel Cobos)
     ├── routers/                            # Rutas de la API agrupadas por tema. (Elaborado por Daniel Cobos, Randy Torres y Fulvio Jiménez)
     │   ├── __init__.py                     # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
-    │   ├── auth.py                         # Login, logout y /me, con el bloqueo por intentos fallidos. (Elaborado por Daniel Cobos)
+    │   ├── auth.py                         # Login, logout y /me, con el bloqueo por intentos fallidos y el límite por IP. (Elaborado por Daniel Cobos)
     │   ├── users.py                        # Crear, listar, consultar, editar y desactivar usuarios. (Elaborado por Randy Torres)
     │   ├── roles.py                        # Listar roles y crear uno nuevo, solo para el admin. (Elaborado por Randy Torres)
-    │   └── files.py                        # Subir archivos validados y descargarlos el dueño, un admin o un rol no docente con permiso. (Elaborado por Fulvio Jiménez)
+    │   └── files.py                        # Subir archivos validados y descargarlos según el dueño, el rol y la tarea de la entrega. (Elaborado por Fulvio Jiménez)
     ├── middleware/                         # Código que se ejecuta antes o después de cada ruta. (Elaborado por Randy Torres y Edgar Domingo)
     │   ├── __init__.py                     # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
     │   ├── auth_middleware.py              # Exige un rol permitido y responde 403 si no lo tiene. (Elaborado por Randy Torres)
