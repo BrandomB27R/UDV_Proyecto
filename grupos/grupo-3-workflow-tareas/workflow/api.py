@@ -25,7 +25,7 @@ from .matrix import SHORT, STANDARD
 PREFIX = "/api/v1"
 
 # Las 6 acciones de asignación que ahora son de G3 (antes las hacía G4).
-ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve")
+ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve", "close")
 
 
 def _codigo_mayusculas(body):
@@ -189,8 +189,8 @@ for _action in ASSIGNMENT_ACTIONS:
              deprecated=True)
 def post_action(assignment_id: int, action: str, body: ActionIn = ActionIn(),
                 conn=Depends(get_conn), user=Depends(current_user)):
-    """Ruta genérica anterior; se mantiene para `close` y `cancel`, que no tienen ruta propia.
-    Para las 6 acciones del contrato usar /assignments/{id}/<acción>."""
+    """Ruta genérica anterior, conservada por compatibilidad.
+    Para las acciones del contrato usar /assignments/{id}/<acción>."""
     return transitions.perform(conn, assignment_id, action, user, body.comment)
 
 
