@@ -8,6 +8,9 @@ Expone un `router` (APIRouter con prefijo /api/v1) que el main.py de la raíz mo
 - Paginación: {"page": 1, "per_page": 20, "total": 0, "data": [...]}
 """
 from typing import Optional
+import json
+from datetime import datetime, timezone
+from fastapi.responses import Response
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -35,24 +38,78 @@ def _codigo_mayusculas(body):
         err["code"] = err["code"].upper()
     return body
 
+def _fechas_utc_z(value):
+    """Normaliza fechas UTC sin modificar los demás campos."""
+    if isinstance(value, list):
+        return [_fechas_utc_z(item) for item in value]
+
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key.endswith(("_at", "_en")) and isinstance(item, str):
+                try:
+                    dt = datetime.fromisoformat(
+                        item.replace("Z", "+00:00")
+                    )
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+
+                    result[key] = (
+                        dt.astimezone(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    )
+                    continue
+                except ValueError:
+                    pass
+
+            result[key] = _fechas_utc_z(item)
+
+        return result
+
+    return value
+
+    return value
 
 class FormatoErrorRoute(APIRoute):
-    """Convierte los errores de dominio y de validación al formato del CONTRATO_COMUN, sin
-    depender de manejadores registrados en la app de la raíz."""
+    """Maneja los errores de las rutas."""
 
     def get_route_handler(self):
         original = super().get_route_handler()
 
         async def handler(request: Request):
             try:
-                return await original(request)
+                response = await original(request)
+
+                if (
+                    response.headers.get("content-type", "").startswith("application/json")
+                    and hasattr(response, "body")
+                ):
+                    try:
+                        data = json.loads(response.body)
+                        data = _fechas_utc_z(data)
+                        response.body = json.dumps(
+                            data, ensure_ascii=False
+                        ).encode("utf-8")
+                        response.headers["content-length"] = str(len(response.body))
+                    except (ValueError, TypeError):
+                        pass
+
+                return response
+
             except WorkflowError as exc:
-                return JSONResponse(_codigo_mayusculas(exc.to_dict()), status_code=exc.status_code)
+                return JSONResponse(
+                    _codigo_mayusculas(exc.to_dict()),
+                    status_code=exc.status_code
+                )
             except RequestValidationError as exc:
-                return JSONResponse(_codigo_mayusculas(validation_body(exc)), status_code=422)
+                return JSONResponse(
+                    _codigo_mayusculas(validation_body(exc)),
+                    status_code=422
+                )
+
 
         return handler
-
 
 router = APIRouter(prefix=PREFIX, route_class=FormatoErrorRoute)
 
