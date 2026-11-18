@@ -11,6 +11,8 @@ import {
 } from "../flujo.js";
 import { requerirSesion, perfiles, puedeRevisar, tieneRol } from "../sesion.js";
 import { sinAcceso } from "../componentes.js";
+import { leerVersion, abrirVersionDeAsignacion } from "../programa/api-programa.js";
+import { avanceDe } from "../programa/secciones.js";
 
 const TERMINADAS = ["submitted", "under_review", "approved", "closed", "cancelled"];
 const EXITO = {
@@ -34,6 +36,7 @@ const st = {
   motivo: "",                // observación del revisor
   aviso: null,               // {tipo, texto} tras una acción
   ocupado: false,
+  programa: null,            // {version, avance} de la versión ligada (tareas de programa)
 };
 
 // (El arranque está al final del archivo: las constantes de más abajo deben existir antes.)
@@ -62,6 +65,14 @@ async function cargar() {
   st.motivo = "";
   // Los nombres vienen en el detalle (assignee_name, reviewer_name, created_by_name).
   st.nombres = { docente: st.a.assignee_name || null, revisor: st.a.reviewer_name || null, creador: st.a.created_by_name || null };
+  // Tarea de programa con versión ligada: su avance (secciones listas) decide si se puede entregar.
+  st.programa = null;
+  if (formaDeEntrega(st.a).programa && st.a.program_version?.id) {
+    try {
+      const v = await leerVersion(st.a.program_version.id);
+      st.programa = { version: v, avance: avanceDe(v) };
+    } catch { /* sin acceso a la versión: se muestra solo su estado */ }
+  }
   tituloPestana(st.a.title);
   pintar();
 }
@@ -189,6 +200,7 @@ function ctxPaso() {
     motivo: st.motivo,
     leyoDevolucion: st.leidaLocal || leyoDevolucion(),
     nombres: st.nombres,
+    programa: st.programa,
   };
 }
 
@@ -252,15 +264,40 @@ function filaRequisito(r) {
   if (r.id === "leer" && r.estado !== "hecho") {
     accion = h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { marcarLeida(); refrescarPaso(); } }, "Ya la leí");
   }
+  let extra = null;
   if (r.id === "programa") {
-    accion = h("a", { class: "v-btn v-btn--sec v-btn--chico", href: RUTAS.programas }, "Abrir el programa de curso");
+    const pv = st.a.program_version;
+    if (pv?.id) {
+      accion = h("a", { class: "v-btn v-btn--chico", href: RUTAS.programa(pv.id, st.a.id) }, r.estado === "hecho" ? "Ver el programa" : "Continuar el programa");
+    } else {
+      const zona = h("span", { class: "v-req__detalle", role: "status" });
+      const boton = h("button", { type: "button", class: "v-btn v-btn--chico", onclick: async () => {
+        boton.disabled = true; boton.textContent = "Abriendo…"; zona.textContent = "";
+        try {
+          const v = await abrirVersionDeAsignacion(st.a.id);
+          location.assign(RUTAS.programa(v.id, st.a.id));
+        } catch (e) {
+          // 422: la tarea no tiene curso y período; 409: no hay versión de la cual partir.
+          // 404 genérico de FastAPI: la ruta todavía no está en el backend.
+          zona.textContent = e.status === 404 && /^not found$/i.test(e.message)
+            ? "Abrir el programa desde la tarea todavía no está disponible. Avisa a coordinación."
+            : e.message;
+          boton.disabled = false; boton.textContent = "Completar el programa";
+        }
+      } }, "Completar el programa");
+      accion = boton;
+      extra = zona;
+    }
   }
+  const barraAvance = r.avance != null
+    ? h("div", { class: "v-req__avance", role: "img", "aria-label": r.detalle }, h("span", { style: `width: ${Math.round(r.avance * 100)}%` }))
+    : null;
   return h("li", {},
     marca,
     h("div", { class: "v-req__cuerpo" },
       h("span", { class: "v-req__titulo" }, r.titulo, " ",
         h("span", { class: `v-req__estado${r.estado === "pendiente" ? " v-req__estado--pendiente" : ""}` }, `· ${estadoTxt}`)),
-      r.detalle ? h("span", { class: "v-req__detalle" }, r.detalle) : null),
+      r.detalle ? h("span", { class: "v-req__detalle" }, r.detalle) : null, barraAvance, extra),
     accion ? h("div", { class: "v-req__accion" }, accion) : null);
 }
 
@@ -344,7 +381,9 @@ function entrega(c) {
     bloques.push(h("div", { class: "v-programa" },
       h("p", { class: "v-texto" }, pv
         ? `Programa del curso: ${pv.name || "versión"} · versión ${pv.number} (${ESTADOS_PROGRAMA[pv.status] || pv.status}).`
-        : "Esta entrega se hace en el programa del curso.")));      // el enlace al editor está en "Te toca a ti"
+        : "Esta entrega se hace en el programa del curso."),
+      // Quien entrega tiene el enlace en "Te toca a ti"; los demás (revisión, coordinación) lo tienen aquí.
+      pv?.id && !(propia && editable) ? h("a", { class: "v-btn v-btn--sec v-btn--chico", href: RUTAS.programa(pv.id, a.id) }, "Ver el programa") : null));
   }
   if (editable) {
     const ta = h("textarea", {

@@ -14,7 +14,9 @@ export const RUTAS = {
   panel: "/app/panel.html",
   notificaciones: "/app/notificaciones.html",
   // Pantallas de los grupos que todavía se enlazan (etapa 1).
-  programas: "/app/g5/Programa.html",
+  programas: "/app/programas.html",
+  programa: (versionId, asignacionId) =>
+    `/app/programa.html?version=${encodeURIComponent(versionId)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}`,
   panelAdmin: "/app/g6/panel.html",
   catalogos: "/app/g6/catalogos.html",
   auditoria: "/app/g6/auditoria.html",

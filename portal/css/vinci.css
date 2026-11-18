@@ -460,3 +460,7 @@ body.vinci--blanco { background: var(--v-white); }
 .v-enlace-tarea { font-size: 14px; font-weight: 700; align-self: flex-start; padding: 6px 0; }
 .v-curso { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--v-line); border-radius: 12px; background: #F7F9FB; }
 .v-check__marca { font-style: normal; font-size: 11px; font-weight: 700; color: #00577A; background: #E0F4FC; border-radius: var(--v-pill); padding: 2px 8px; align-self: flex-start; margin-top: 4px; }
+
+/* Avance del programa dentro de "Te toca a ti" */
+.v-req__avance { height: 8px; max-width: 420px; background: var(--v-line); border-radius: var(--v-pill); overflow: hidden; margin-top: 4px; }
+.v-req__avance span { display: block; height: 8px; background: var(--v-navy); }

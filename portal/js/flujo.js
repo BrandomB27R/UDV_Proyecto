@@ -107,7 +107,7 @@ export function formaDeEntrega(a) {
 const ETQ = { hecho: "hecho", pendiente: "pendiente", opcional: "opcional" };
 
 /**
- * Lo que toca ahora. ctx: {texto, leyoDevolucion, motivo, nombres: {docente, revisor}, esPrograma}
+ * Lo que toca ahora. ctx: {texto, textoCambiado, leyoDevolucion, motivo, nombres: {docente, revisor, creador}, programa}
  * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria}
  *   turno: "tuyo" | "espera" | "fin"
  *   requisitos: [{id, titulo, estado, detalle, nota}]
@@ -141,10 +141,16 @@ export function pasoActual(a, yo, ctx = {}) {
       req.push({ id: "iniciar", titulo: "Iniciar la tarea", estado: ETQ.hecho, detalle: inicio ? `Hecho el ${fechaCorta(inicio.at)}` : "Hecho." });
     }
     if (forma.programa) {
+      // ctx.programa: {avance: {listas, total, faltan}} de la versión ligada, o null si todavía no hay.
       const pv = a.program_version;
-      req.push({ id: "programa", titulo: "Actualiza el programa del curso", estado: ETQ.opcional, nota: "en el editor de programas",
-        detalle: pv ? `${pv.name || "Programa"} · versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}. Luego vuelve aquí para entregar.`
-          : "Los cambios del programa se hacen en su propia pantalla. Luego vuelve aquí para entregar." });
+      const av = ctx.programa?.avance;
+      const listo = !!av && av.listas === av.total;
+      req.push({ id: "programa", titulo: "Completar el programa del curso", estado: listo ? ETQ.hecho : ETQ.pendiente,
+        detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso."
+          : !av ? `Versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}.`
+            : listo ? `Las ${av.total} secciones están listas (versión ${pv.number}).`
+              : `${av.listas} de ${av.total} secciones listas. Faltan ${av.faltan.map((x) => x.titulo).join(", ")}.`,
+        avance: av ? av.listas / av.total : null });
     }
     // En una reentrega el texto anterior sigue en el borrador: solo cuenta si se cambió.
     const textoHecho = reentrega ? ctx.textoCambiado || (forma.textoObligatorio && textoListo) : textoListo;
@@ -165,7 +171,7 @@ export function pasoActual(a, yo, ctx = {}) {
       req.push({ id: "archivo", titulo: tituloArchivo, estado: actuales.length ? ETQ.hecho : ETQ.opcional,
         detalle: "Adjuntar archivos es opcional en este tipo de tarea." });
     }
-    const etiquetas = { leer: "marques la observación como leída", archivo: "adjuntes el archivo", texto: "escribas tu entrega" };
+    const etiquetas = { leer: "marques la observación como leída", programa: "el programa esté completo", archivo: "adjuntes el archivo", texto: "escribas tu entrega" };
     const faltan = req.filter((r) => r.estado === ETQ.pendiente);
     const destino = "Entregada";
     let motivo = "";

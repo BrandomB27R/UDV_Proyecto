@@ -61,3 +61,47 @@ ni en "Por revisar". Pedido: `course_code`, `course_name` y `period_code` en cad
 seguimiento y la lista de Tareas los resuelven con `GET /users` (coordinación tiene
 `users.read`). Pedido: `reviewer_name` y `created_by_name`, como en el detalle de la
 asignación.
+
+## Programas de curso (etapa 2)
+
+### 6. Las tres rutas acordadas con el PM (en camino)
+
+La pantalla ya está escrita contra este contrato; las llamadas están en
+`portal/js/programa/api-programa.js`, una función cada una:
+
+- `POST /program-versions/for-assignment/{assignment_id}` → abre o crea la versión
+  de la asignación (botón "Completar el programa"). Mientras no exista, la pantalla
+  dice que todavía no está disponible.
+- `viewer_actions` en `GET /program-versions/{id}` (`edit`, `submit`, `review`,
+  `return`, `approve`, `authorize`). Mientras no llegue, `accionesDeVersion` calcula
+  una lista **provisional** con la misma regla del G5 (rol y estado); se borra
+  cuando el backend la traiga.
+- `GET /graduate-profiles` → selector de Perfil de egreso. Mientras dé 404, el
+  editor conserva los rasgos que ya hay y para agregar uno pide su código.
+
+### 7. Contenidos por unidad y módulo (G5)
+
+El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e ignora
+`unidad_padre_id`. La pantalla edita unidades (título y horas) con temas,
+reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
+`unidad_padre_id`.
+
+### 8. "Sin prerrequisitos" no se guarda (G5)
+
+La sección se da por completa con al menos un curso o con la casilla "Sin
+prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
+navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
+
+### 9. `/changes` devuelve identificadores internos (G5)
+
+Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
+contenido sea el mismo. La pantalla los filtra y muestra etiquetas legibles; lo
+correcto es que `/changes` compare solo el contenido.
+
+### 10. Versión enlazada a la tarea y lectura del docente (G4 y G5)
+
+Si la tarea tiene `programa_version_id` (la de la semilla), el detalle de cada
+asignación trae esa misma versión aunque el docente no sea su responsable; ese
+docente recibe 404 al leerla y no ve su avance. Con `for-assignment` cada docente
+tendrá la suya: conviene que `program_version` del detalle priorice la versión
+creada desde la asignación y no devuelva una que quien mira no puede leer.

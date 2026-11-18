@@ -26,7 +26,7 @@ const pest = h("div");
 // Sin ninguno de los dos, a la sección que corresponde por el tipo de evento.
 function destino(n) {
   if (n.assignment_id != null) return { texto: "Ver la tarea", href: RUTAS.asignacion(n.assignment_id) };
-  if (n.program_version_id != null) return { texto: "Ver el programa", href: RUTAS.programas };
+  if (n.program_version_id != null) return { texto: "Ver el programa", href: RUTAS.programa(n.program_version_id) };
   const e = String(n.event || "");
   if (e.startsWith("task.") && (yo.roles || []).includes("coordinator")) return { texto: "Ir a Tareas", href: RUTAS.tareas };
   if (e.startsWith("task.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
