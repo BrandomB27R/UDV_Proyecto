@@ -720,11 +720,68 @@ def get_version(
     version_id: int,
     *,
     docente_responsable_id: int | None = None,
+    actor: Actor | None = None,
 ):
     """Trae una versión junto con el contenido de sus secciones."""
     row = _require_version(session, version_id)
     _require_version_owner(row, docente_responsable_id)
-    return _serialize_version(session, row)
+    version = _serialize_version(session, row)
+    if actor is not None:
+        version["viewer_actions"] = _viewer_actions(session, actor, row)
+    return version
+
+
+def _viewer_actions(session: Session, actor: Actor, row: dict) -> list[str]:
+    """Dice qué puede hacer con la versión quien la está viendo, ahora mismo.
+
+    Cruza el rol, el estado y la regla de que quien elaboró no aprueba, con las
+    mismas condiciones que aplican ``update_version`` y ``transition``. Sirve
+    para que la pantalla muestre solo los botones que van a funcionar.
+    """
+    status = row["estado_codigo"]
+    responsible_id = row.get("docente_responsable_id")
+    actions = []
+    if status in {"draft", "returned"}:
+        is_assigned_teacher = "teacher" in actor.roles and actor.id == responsible_id
+        if has_role(actor, "manager") or (has_role(actor, "author") and is_assigned_teacher):
+            actions.append("edit")
+        only_teacher = "teacher" in actor.roles and "coordinator" not in actor.roles
+        if has_role(actor, "author") and not (only_teacher and actor.id != responsible_id):
+            actions.append("submit")
+    if status == "submitted" and has_role(actor, "reviewer"):
+        actions.append("review")
+    if status == "under_review" and has_role(actor, "reviewer"):
+        actions.append("return")
+        if not _took_part_in_authoring(session, actor, row):
+            actions.append("approve")
+    if status == "approved" and has_role(actor, "authority"):
+        actions.append("authorize")
+    return actions
+
+
+def _took_part_in_authoring(session: Session, actor: Actor, row: dict) -> bool:
+    """Indica si el usuario elaboró, es responsable o envió la versión."""
+    if actor.id in {row.get("creado_por"), row.get("docente_responsable_id")}:
+        return True
+    latest_submission = _one(
+        session,
+        """SELECT actor_id FROM programa_aprobacion
+           WHERE programa_version_id = :id AND estado_nuevo = 'submitted'
+           ORDER BY creado_en DESC, id DESC LIMIT 1""",
+        {"id": row["id"]},
+    )
+    return bool(latest_submission and latest_submission.get("actor_id") == actor.id)
+
+
+def list_graduate_profiles(session: Session) -> dict:
+    """Catálogo de perfiles de egreso activos, para elegirlos en la sección de perfil."""
+    rows = _all(
+        session,
+        """SELECT id, codigo, descripcion, programa_academico
+           FROM perfil_egreso WHERE activo = 1
+           ORDER BY programa_academico, codigo, id""",
+    )
+    return {"data": rows, "total": len(rows)}
 
 
 def _flatten(value, prefix=""):
@@ -1000,29 +1057,12 @@ def transition(
         current = row["estado_codigo"]
         new_status = next_status(action, current)
 
-        if action == "approve":
-            if actor.id in {
-                row.get("creado_por"),
-                row.get("docente_responsable_id"),
-            }:
-                raise ApiError(
-                    409,
-                    "CONFLICT",
-                    "Quien elaboró, es responsable o envió la versión no puede aprobarla.",
-                )
-            latest_submission = _one(
-                session,
-                """SELECT actor_id FROM programa_aprobacion
-                   WHERE programa_version_id = :id AND estado_nuevo = 'submitted'
-                   ORDER BY creado_en DESC, id DESC LIMIT 1""",
-                {"id": version_id},
+        if action == "approve" and _took_part_in_authoring(session, actor, row):
+            raise ApiError(
+                409,
+                "CONFLICT",
+                "Quien elaboró, es responsable o envió la versión no puede aprobarla.",
             )
-            if latest_submission and latest_submission.get("actor_id") == actor.id:
-                raise ApiError(
-                    409,
-                    "CONFLICT",
-                    "Quien elaboró, es responsable o envió la versión no puede aprobarla.",
-                )
 
         if action == "submit":
             _require_teacher_is_responsible(actor, row.get("docente_responsable_id"))
@@ -1399,64 +1439,186 @@ def create_version(session: Session, actor: Actor, program_id: int, body: dict):
         ).scalar_one()
         if source is None:
             raise ApiError(409, "CONFLICT", "Solo se puede clonar una versión autorizada.")
-        result = session.execute(
-            text("""INSERT INTO programa_version
-                    (programa_curso_id, numero_version, periodo_id, estado_codigo,
-                     version_origen_id, nombre, descripcion, resumen_cambios,
-                     unidad_academica_id, programa_academico, departamento, nivel,
-                     area_id, pensum, horas_clase_semanal,
-                     docente_responsable_id, tarea_destinatario_origen_id, creado_por)
-                    VALUES (:program_id, :number, :period_id, 'draft',
-                            :source_id, :name, :description, :summary,
-                            :unit_id, :academic_program, :department, :level,
-                            :area_id, :pensum, :hours, :responsible_id,
-                            :assignment_id, :actor_id)"""),
-            {
-                "program_id": program_id,
-                "number": (latest or 0) + 1,
-                "period_id": period_id,
-                "source_id": source["id"] if source and body.get("clonar", True) else None,
-                "name": (source or {}).get("nombre", program["asignatura"]),
-                "description": (source or {}).get("descripcion"),
-                "summary": body.get("resumen_cambios"),
-                "unit_id": (source or {}).get("unidad_academica_id"),
-                "academic_program": (source or {}).get("programa_academico"),
-                "department": (source or {}).get("departamento"),
-                "level": (source or {}).get("nivel"),
-                "area_id": (source or {}).get("area_id"),
-                "pensum": (source or {}).get("pensum"),
-                "hours": (source or {}).get("horas_clase_semanal"),
-                "responsible_id": (source or {}).get("docente_responsable_id", actor.id),
-                "assignment_id": (
-                    assignment_id if "tarea_destinatario_origen_id" in body
-                    else (source or {}).get("tarea_destinatario_origen_id")
-                ),
-                "actor_id": actor.id,
-            },
+        clone = body.get("clonar", True)
+        version_id = _insert_version_from(
+            session,
+            actor,
+            {"programa_curso_id": program_id, "nombre": program["asignatura"], **source},
+            number=(latest or 0) + 1,
+            period_id=period_id,
+            clone=clone,
+            summary=body.get("resumen_cambios"),
+            responsible_id=source.get("docente_responsable_id", actor.id),
+            assignment_id=(
+                assignment_id if "tarea_destinatario_origen_id" in body
+                else source.get("tarea_destinatario_origen_id")
+            ),
         )
-        version_id = result.lastrowid
-        if source and body.get("clonar", True):
-            for section_name, value in _load_sections(session, source).items():
-                content = value["contenido"]
-                if section_name == "responsables":
-                    content = {
-                        key: item
-                        for key, item in content.items()
-                        if key != "docente_responsable_id"
-                    }
-                _save_section(
-                    session,
-                    version_id,
-                    section_name,
-                    content,
-                    actor.id,
-                    {
-                        "curso_id": source["curso_id"],
-                        "periodo_id": period_id,
-                        "sede_id": source["sede_id"],
-                    },
-                )
         version = _serialize_version(session, _require_version(session, version_id))
+    return version
+
+
+def _insert_version_from(
+    session: Session,
+    actor: Actor,
+    source: dict,
+    *,
+    number: int,
+    period_id: int,
+    clone: bool,
+    summary: str | None,
+    responsible_id: int | None,
+    assignment_id: int | None,
+    keep_summary: bool = True,
+) -> int:
+    """Inserta un borrador con el encabezado de ``source`` y, si se pide, sus secciones."""
+    result = session.execute(
+        text("""INSERT INTO programa_version
+                (programa_curso_id, numero_version, periodo_id, estado_codigo,
+                 version_origen_id, nombre, descripcion, resumen_cambios,
+                 unidad_academica_id, programa_academico, departamento, nivel,
+                 area_id, pensum, horas_clase_semanal,
+                 docente_responsable_id, tarea_destinatario_origen_id, creado_por)
+                VALUES (:program_id, :number, :period_id, 'draft',
+                        :source_id, :name, :description, :summary,
+                        :unit_id, :academic_program, :department, :level,
+                        :area_id, :pensum, :hours, :responsible_id,
+                        :assignment_id, :actor_id)"""),
+        {
+            "program_id": source["programa_curso_id"],
+            "number": number,
+            "period_id": period_id,
+            "source_id": source["id"] if clone else None,
+            "name": source["nombre"],
+            "description": source.get("descripcion"),
+            "summary": summary,
+            "unit_id": source.get("unidad_academica_id"),
+            "academic_program": source.get("programa_academico"),
+            "department": source.get("departamento"),
+            "level": source.get("nivel"),
+            "area_id": source.get("area_id"),
+            "pensum": source.get("pensum"),
+            "hours": source.get("horas_clase_semanal"),
+            "responsible_id": responsible_id,
+            "assignment_id": assignment_id,
+            "actor_id": actor.id,
+        },
+    )
+    version_id = result.lastrowid
+    if clone:
+        for section_name, value in _load_sections(session, source).items():
+            content = value["contenido"]
+            if section_name == "general":
+                # El encabezado copiado trae el período del origen; manda el del borrador nuevo.
+                content = {**content, "periodo_id": period_id}
+                if not keep_summary:
+                    content.pop("resumen_cambios", None)
+            if section_name == "responsables":
+                content = {
+                    key: item
+                    for key, item in content.items()
+                    if key != "docente_responsable_id"
+                }
+            _save_section(
+                session,
+                version_id,
+                section_name,
+                content,
+                actor.id,
+                {
+                    "curso_id": source["curso_id"],
+                    "periodo_id": period_id,
+                    "sede_id": source["sede_id"],
+                },
+            )
+    return version_id
+
+
+def start_version_for_assignment(session: Session, actor: Actor, assignment_id: int) -> dict:
+    """Devuelve la versión que el docente trabaja para una tarea; si no existe, la abre.
+
+    La tarea dice de qué curso y período es el programa. El borrador parte de
+    la última versión autorizada de ese curso (de cualquier período), queda a
+    nombre del docente y ligado a la asignación, para que la entrega y la
+    revisión lo encuentren. Llamarla otra vez devuelve el mismo borrador.
+    """
+    with session.begin():
+        set_database_actor(session, actor)
+        assignment = _one(
+            session,
+            """SELECT td.id, td.usuario_id, t.curso_id, t.periodo_id
+               FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id
+               WHERE td.id = :id AND t.eliminado_en IS NULL FOR UPDATE""",
+            {"id": assignment_id},
+        )
+        if assignment is None:
+            raise ApiError(404, "NOT_FOUND", "Asignación no encontrada.")
+        if assignment["usuario_id"] != actor.id:
+            raise ApiError(
+                403,
+                "FORBIDDEN",
+                "Solo el docente a quien se asignó la tarea puede abrir su programa.",
+            )
+        existing = _one(
+            session,
+            MAIN_SELECT + """ WHERE pv.tarea_destinatario_origen_id = :id
+                              ORDER BY pv.id DESC LIMIT 1""",
+            {"id": assignment_id},
+        )
+        if existing is None:
+            course_id, period_id = assignment["curso_id"], assignment["periodo_id"]
+            if not course_id or not period_id:
+                raise ApiError(
+                    422,
+                    "VALIDATION_ERROR",
+                    "La tarea no indica de qué curso y período es el programa.",
+                    {"course_id": "La coordinación debe indicar el curso y el período en la tarea."},
+                )
+            # Si el curso se imparte en varias sedes, primero la sede donde da clases el docente.
+            source = _one(
+                session,
+                MAIN_SELECT + """ WHERE pc.curso_id = :course_id AND pc.activo = 1
+                                  AND pv.estado_codigo = 'authorized'
+                                  ORDER BY EXISTS (SELECT 1 FROM docente_curso dc
+                                                   WHERE dc.usuario_id = :teacher_id
+                                                     AND dc.curso_id = pc.curso_id
+                                                     AND dc.sede_id = pc.sede_id
+                                                     AND dc.activo = 1) DESC,
+                                           (pv.periodo_id = :period_id) DESC,
+                                           pv.autorizado_en DESC, pv.id DESC
+                                  LIMIT 1""",
+                {"course_id": course_id, "period_id": period_id, "teacher_id": actor.id},
+            )
+            if source is None:
+                raise ApiError(
+                    409,
+                    "CONFLICT",
+                    "El curso todavía no tiene un programa autorizado del cual partir.",
+                )
+            session.execute(
+                text("SELECT id FROM programa_curso WHERE id = :id FOR UPDATE"),
+                {"id": source["programa_curso_id"]},
+            )
+            latest = session.execute(
+                text("""SELECT MAX(numero_version) FROM programa_version
+                        WHERE programa_curso_id = :program_id"""),
+                {"program_id": source["programa_curso_id"]},
+            ).scalar_one()
+            version_id = _insert_version_from(
+                session,
+                actor,
+                source,
+                number=(latest or 0) + 1,
+                period_id=period_id,
+                clone=True,
+                summary=None,
+                responsible_id=actor.id,
+                assignment_id=assignment_id,
+                keep_summary=False,
+            )
+            existing = _require_version(session, version_id)
+        version = _serialize_version(session, existing)
+        version["viewer_actions"] = _viewer_actions(session, actor, existing)
     return version
 
 

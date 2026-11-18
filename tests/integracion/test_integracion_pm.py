@@ -646,3 +646,95 @@ def test_el_texto_se_puede_corregir_despues_de_adjuntar_y_antes_de_entregar(c, s
         motor.dispose()
     assert ver()["attempts"][0]["text"] == "Texto corregido"
 
+
+
+# --------------------------------- 10. el programa que pide una tarea (G5, para Vinci)
+def _asignar_programa(c, s, docente=DOC2, **extra):
+    t = _tarea(c, s, reviewer_id=REVISOR, **extra).json()
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [docente]})
+    return c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+
+
+def test_la_tarea_abre_el_borrador_del_programa_a_nombre_del_docente(c, s):
+    a = _asignar_programa(c, s, course_id=1, period_id=2)
+    ruta = f"/api/v1/program-versions/for-assignment/{a}"
+    es_error_comun(c.post(ruta, headers=s["docente1"]), 403)
+    es_error_comun(c.post(ruta, headers=s["coordinacion"]), 403)
+    r = c.post(ruta, headers=s["docente2"])
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"]
+    assert v["secciones"] and v["viewer_actions"] == ["edit", "submit"]
+    # Llamarla otra vez no abre otro borrador.
+    assert c.post(ruta, headers=s["docente2"]).json()["id"] == v["id"]
+    # Es suyo: lo lee, lo edita, y la entrega (G4) lo encuentra.
+    leida = c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente2"])
+    assert leida.status_code == 200 and leida.json()["viewer_actions"] == ["edit", "submit"]
+    r = c.put(f"/api/v1/program-versions/{v['id']}/sections/metodologia", headers=s["docente2"],
+              json={"contenido": {"texto": "Clases prácticas con proyecto integrador."}})
+    assert r.status_code == 200, r.text
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["docente2"]).json()
+    assert detalle["program_version"]["id"] == v["id"]
+    # Otro docente no ve el borrador ajeno.
+    es_error_comun(c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente1"]), 404)
+
+
+def test_la_tarea_sin_curso_o_sin_programa_previo_no_abre_borrador(c, s):
+    sin_curso = _asignar_programa(c, s)
+    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["docente2"]), 422)
+    sin_programa = _asignar_programa(c, s, course_id=4, period_id=2)
+    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"]), 409)
+    es_error_comun(c.post("/api/v1/program-versions/for-assignment/999999", headers=s["docente2"]), 404)
+    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["auditoria"]), 403)
+
+
+def test_viewer_actions_del_programa_sigue_el_flujo(c, s):
+    a = _asignar_programa(c, s, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente2"]).json()["id"]
+
+    def puede(quien):
+        return c.get(f"/api/v1/program-versions/{vid}", headers=s[quien]).json()["viewer_actions"]
+
+    def hacer(accion, quien, **cuerpo):
+        r = c.post(f"/api/v1/program-versions/{vid}/{accion}", headers=s[quien], json=cuerpo)
+        assert r.status_code == 200, f"{accion}: {r.status_code} {r.text[:300]}"
+
+    assert puede("docente2") == ["edit", "submit"]
+    assert puede("revisor") == ["edit"]            # gestiona programas, pero no es quien lo envía
+    assert puede("auditoria") == [] and puede("direccion") == []
+    hacer("submit", "docente2")
+    assert puede("docente2") == [] and puede("revisor") == ["review"]
+    hacer("review", "revisor")
+    assert puede("revisor") == ["return", "approve"] and puede("docente2") == []
+    hacer("return", "revisor", comentario="Falta detallar la unidad 2.")
+    assert puede("docente2") == ["edit", "submit"]
+    hacer("submit", "docente2")
+    hacer("review", "coordinacion")
+    assert puede("coordinacion") == ["return", "approve"]
+    hacer("approve", "coordinacion")
+    assert puede("revisor") == [] and puede("direccion") == ["authorize"]
+    assert puede("coordinacion") == ["authorize"]  # decisión E: coordinación también autoriza
+    hacer("authorize", "direccion")
+    assert puede("direccion") == [] and puede("docente2") == []
+
+
+def test_quien_envio_el_programa_no_tiene_la_accion_de_aprobarlo(c, s):
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    # La coordinación lo envía en nombre del docente y luego lo toma en revisión.
+    assert c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["coordinacion"]).status_code == 200
+    assert c.post(f"/api/v1/program-versions/{vid}/review", json={}, headers=s["coordinacion"]).status_code == 200
+    acciones = c.get(f"/api/v1/program-versions/{vid}", headers=s["coordinacion"]).json()["viewer_actions"]
+    assert acciones == ["return"]
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/approve", json={}, headers=s["coordinacion"]), 409)
+    assert c.get(f"/api/v1/program-versions/{vid}", headers=s["revisor"]).json()["viewer_actions"] == ["return", "approve"]
+
+
+def test_catalogo_de_perfiles_de_egreso(c, s):
+    r = c.get("/api/v1/graduate-profiles", headers=s["docente1"])
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["total"] == len(cuerpo["data"]) >= 1
+    assert all({"id", "codigo", "descripcion"} <= set(p) for p in cuerpo["data"])
+    es_error_comun(c.get("/api/v1/graduate-profiles"), 401)
