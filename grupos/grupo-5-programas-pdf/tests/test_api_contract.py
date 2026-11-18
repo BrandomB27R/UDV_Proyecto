@@ -915,16 +915,28 @@ class ApiContractTests(unittest.TestCase):
                 headers=request_headers + [(b"authorization", b"Bearer admin")],
                 body=body,
             )
-            self.assertEqual(status, 200)
-            save_section.assert_called_once()
+            # Quien gestiona programas no corrige el contenido: lo devuelve.
+            self.assertEqual(status, 403)
+            save_section.assert_not_called()
 
-            save_section.reset_mock()
             status, response = _asgi_request(
                 app,
                 "PUT",
                 "/api/v1/program-versions/41/sections/descripcion",
                 headers=request_headers + [(b"authorization", b"Bearer coordinator")],
                 body=body,
+            )
+            self.assertEqual(status, 403)
+            self.assertEqual(response["error"]["code"], "FORBIDDEN")
+            save_section.assert_not_called()
+
+            # Pero sí completa los responsables (coordinación, decanatura).
+            status, response = _asgi_request(
+                app,
+                "PUT",
+                "/api/v1/program-versions/41/sections/responsables",
+                headers=request_headers + [(b"authorization", b"Bearer coordinator")],
+                body=b'{"contenido":{"coordinador":"Ana"}}',
             )
             self.assertEqual(status, 200)
             save_section.assert_called_once()
