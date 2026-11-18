@@ -429,7 +429,7 @@ def get_task(conn, actor, task_id):
     return _out(conn, task)
 
 
-def _list_tasks_mysql(conn, actor, status, page, page_size):
+def _list_tasks_mysql(conn, actor, status, page, page_size, include=()):
     roles = _roles(actor)
     where, params = [], []
     if AUTHORITY not in roles:
@@ -451,12 +451,55 @@ def _list_tasks_mysql(conn, actor, status, page, page_size):
     res = _paged(conn, f"SELECT {_TASK_COLS_MYSQL}", f"{_TASK_FROM_MYSQL} {clause}", params,
                  "t.id DESC", page, page_size)
     res["data"] = [_task_out(item, conn) for item in res["data"]]
+    if "progress" in include:
+        _add_progress(conn, res["data"])
     return res
 
 
-def list_tasks(conn, actor, status=None, page=1, page_size=20):
+def _add_progress(conn, tasks_page):
+    """Agrega a cada tarea de la página su avance, con una sola consulta.
+
+    `total` no cuenta las asignaciones canceladas; `done` son aprobadas o cerradas;
+    `to_review`, entregadas o en revisión; `overdue_pending`, pendientes con la fecha
+    límite pasada. `assignee_name` solo viene cuando la tarea tiene un destinatario.
+    """
+    vacio = {"total": 0, "done": 0, "to_review": 0, "overdue_pending": 0,
+             "by_status": {}, "assignee_name": None}
+    for task in tasks_page:
+        task["progress"] = dict(vacio, by_status={})
+    if not tasks_page:
+        return
+    por_id = {task["id"]: task["progress"] for task in tasks_page}
+    marks = ",".join("?" * len(por_id))
+    rows = conn.execute(
+        "SELECT td.tarea_id, td.estado_codigo, COUNT(*) AS n,"
+        " SUM(CASE WHEN td.estado_codigo IN ('assigned','in_progress','returned')"
+        "  AND COALESCE(td.fecha_limite, t.fecha_limite) < UTC_TIMESTAMP(3) THEN 1 ELSE 0 END) AS vencidas,"
+        " MIN(CONCAT(u.nombres, ' ', u.apellidos)) AS nombre"
+        " FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id"
+        " LEFT JOIN usuario u ON u.id = td.usuario_id"
+        f" WHERE td.tarea_id IN ({marks}) GROUP BY td.tarea_id, td.estado_codigo",
+        list(por_id)).fetchall()
+    for row in rows:
+        p, estado, n = por_id[row["tarea_id"]], row["estado_codigo"], int(row["n"])
+        p["by_status"][estado] = n
+        if estado == "cancelled":
+            continue
+        p["total"] += n
+        p["overdue_pending"] += int(row["vencidas"] or 0)
+        if estado in ("approved", "closed"):
+            p["done"] += n
+        if estado in ("submitted", "under_review"):
+            p["to_review"] += n
+        p["assignee_name"] = row["nombre"]
+    for p in por_id.values():
+        if p["total"] != 1:
+            p["assignee_name"] = None
+
+
+def list_tasks(conn, actor, status=None, page=1, page_size=20, include=()):
     if _is_mysql(conn):
-        return _list_tasks_mysql(conn, actor, status, page, page_size)
+        return _list_tasks_mysql(conn, actor, status, page, page_size, include)
     where, params = [], []
     if actor["role"] == COORDINATOR:
         where.append("(t.created_by = ? OR t.responsible_id = ?)")

@@ -29,7 +29,7 @@ comprobar cada número.
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from . import tablas
@@ -122,9 +122,53 @@ class RepositorioPanel:
             "state": f.estado_codigo, "due_date": f.vence} for f in filas]
 
 
+    def resumen_por_docente(self, *, ahora: datetime, hasta: datetime) -> list[dict[str, Any]]:
+        """Una fila por docente con los mismos criterios de las tarjetas del panel.
+
+        Cuenta asignaciones de tareas no eliminadas, sin las canceladas. Vencidas
+        y por vencer usan la misma condición que `pendientes_que_vencen`.
+        """
+        t, td, u = tablas.tarea, tablas.tarea_destinatario, tablas.usuario
+        vence = func.coalesce(td.c.fecha_limite, t.c.fecha_limite)
+        pendiente = (td.c.estado_codigo.in_(ESTADOS_PENDIENTES)
+                     & t.c.estado_codigo.not_in(ESTADOS_FINALES_TAREA) & vence.is_not(None))
+
+        def cuenta(condicion):
+            return func.sum(case((condicion, 1), else_=0))
+
+        filas = self.sesion.execute(
+            select(td.c.usuario_id, u.c.nombres, u.c.apellidos, u.c.correo,
+                   func.count().label("asignadas"),
+                   cuenta(pendiente & (vence < ahora)).label("vencidas"),
+                   cuenta(pendiente & (vence >= ahora) & (vence < hasta)).label("por_vencer"),
+                   cuenta(td.c.estado_codigo.in_(("submitted", "under_review"))).label("por_revisar"),
+                   cuenta(td.c.estado_codigo.in_(("approved", "closed"))).label("terminadas"))
+            .join(t, t.c.id == td.c.tarea_id)
+            .outerjoin(u, u.c.id == td.c.usuario_id)
+            .where(t.c.eliminado_en.is_(None), td.c.estado_codigo != "cancelled")
+            .group_by(td.c.usuario_id, u.c.nombres, u.c.apellidos, u.c.correo))
+        datos = [{
+            "user_id": f.usuario_id, "user_email": f.correo,
+            "name": " ".join(p for p in (f.nombres, f.apellidos) if p) or None,
+            "assigned": int(f.asignadas), "overdue": int(f.vencidas or 0),
+            "due_soon": int(f.por_vencer or 0), "to_review": int(f.por_revisar or 0),
+            "finished": int(f.terminadas or 0)} for f in filas]
+        datos.sort(key=lambda d: (-d["overdue"], -d["due_soon"], -d["to_review"], d["name"] or ""))
+        return datos
+
+
 class ServicioPanel:
     def __init__(self, repositorio: RepositorioPanel) -> None:
         self.repositorio = repositorio
+
+    def por_docente(self, *, ahora: datetime | None = None) -> dict[str, Any]:
+        """Resumen por docente; sus sumas cuadran con las tarjetas de `indicadores`."""
+        hora_de_la_base, desfase = self.repositorio.reloj()
+        ahora = ahora or hora_de_la_base
+        dias = self.repositorio.dias_aviso()
+        datos = self.repositorio.resumen_por_docente(ahora=ahora, hasta=ahora + timedelta(days=dias))
+        return {"generated_at": _iso(ahora, desfase), "due_soon_days": dias,
+                "total": len(datos), "data": datos}
 
     def indicadores(self, *, limite: int = 20, ahora: datetime | None = None) -> dict[str, Any]:
         """Todo el panel en una respuesta. `limite` corta las listas, no los totales.

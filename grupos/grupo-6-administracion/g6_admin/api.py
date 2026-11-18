@@ -209,6 +209,24 @@ class IndicadoresPanel(BaseModel):
     compliance: Cumplimiento
 
 
+class DocentePanel(BaseModel):
+    user_id: int
+    user_email: str | None
+    name: str | None
+    assigned: int
+    overdue: int
+    due_soon: int
+    to_review: int
+    finished: int
+
+
+class ResumenDocentes(BaseModel):
+    generated_at: str
+    due_soon_days: int
+    total: int
+    data: list[DocentePanel]
+
+
 class ResumenEventos(BaseModel):
     processed: int
     notifications: int
@@ -423,3 +441,10 @@ def panel(
         "Los totales siempre cuentan todas."))] = 20,
 ) -> dict[str, Any]:
     return servicio.indicadores(limite=limit)
+
+
+@router.get("/dashboard/teachers", tags=["Panel"], response_model=ResumenDocentes,
+            summary="Asignaciones por docente: asignadas, vencidas, por vencer, por revisar y terminadas",
+            responses=_errores(401, 403))
+def panel_por_docente(servicio: Panel, _usuario: Monitoreo) -> dict[str, Any]:
+    return servicio.por_docente()
