@@ -93,3 +93,13 @@ asignación trae esa misma versión aunque el docente no sea su responsable; ese
 docente recibe 404 al leerla y no ve su avance. Con `for-assignment` cada docente
 tendrá la suya: conviene que `program_version` del detalle priorice la versión
 creada desde la asignación y no devuelva una que quien mira no puede leer.
+
+## Inicio (rediseño del 18-nov)
+
+### 8. `/inbox` sin revisor, fecha de entrega ni observación (G4) — resuelto (PR #69, vinci-11)
+
+Cada fila de `GET /inbox` trae ahora `reviewer_name`, `submitted_at` y
+`last_return_comment` (este, solo mientras la asignación está devuelta). El inicio
+del docente ya no hace ninguna consulta por fila: «Qué sigue» de las devueltas
+muestra `last_return_comment`, y «En espera de revisión» dice quién la tiene
+(«Espera a que <revisor> la tome» / «La revisa <revisor>») y cuándo se entregó.

@@ -107,6 +107,34 @@ export function formaDeEntrega(a) {
 
 const ETQ = { hecho: "hecho", pendiente: "pendiente", opcional: "opcional" };
 
+// Qué pide cada tipo, para decir qué sigue sin pedir el detalle de la asignación. Solo lo que la
+// pantalla de entrega de verdad pide (archivo o respuesta): no los campos del catálogo que aún no pide.
+const QUE_PIDE = {
+  ACTUALIZAR_PROGRAMA: { inicio: "Después completas el programa del curso.", curso: ["Completa el programa", "Llena las nueve secciones y envíalo a revisión."] },
+  SUBIR_CV: { inicio: "Te pedirá tu CV en PDF.", curso: ["Adjunta el archivo y entrega", "Te pedirá el CV en PDF."] },
+  ENTREGAR_FACTURA: { inicio: "Te pedirá el archivo.", curso: ["Adjunta la factura y entrega", "Te pedirá el archivo."] },
+  CONFIRMAR_ACTIVIDAD: { inicio: "Te pedirá confirmar tu asistencia.", curso: ["Confirma y entrega", "Te pedirá tu respuesta."] },
+  CARGAR_EVIDENCIA: { inicio: "Te pedirá uno o varios archivos.", curso: ["Adjunta el archivo y entrega", "Te pedirá uno o varios archivos."] },
+};
+
+const recortar = (t, max) => (t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t);
+
+/**
+ * Qué sigue para una fila del inbox (assigned, in_progress o returned), sin el detalle completo.
+ * En las devueltas, la observación viene en la misma fila (last_return_comment, vinci-11).
+ * Devuelve {frase, detalle, boton}.
+ */
+export function queSigue(item) {
+  const t = QUE_PIDE[item.task_type] || {};
+  if (item.status === "assigned") return { frase: "Inicia la tarea", detalle: t.inicio || "Lee las instrucciones antes de empezar.", boton: "Iniciar" };
+  if (item.status === "returned") {
+    const obs = String(item.last_return_comment || "").trim();
+    return { frase: "Corrige y reentrega", detalle: obs ? `Observación: ${recortar(obs, 90)}` : "Lee la observación de quien la revisó.", boton: "Corregir" };
+  }
+  const [frase, detalle] = t.curso || ["Prepara tu entrega", "Revisa lo que pide la tarea."];
+  return { frase, detalle, boton: "Continuar" };
+}
+
 /**
  * Lo que toca ahora. ctx: {texto, textoCambiado, leyoDevolucion, motivo, nombres: {docente, revisor, creador}, programa}
  * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria}
