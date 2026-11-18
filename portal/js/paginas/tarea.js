@@ -4,9 +4,9 @@ import { api, ApiError } from "../api.js";
 import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
-import { chipEstado, chipPrioridad, plazo, fechaCorta, fechaHora, nombreCompleto, PRIORIDADES } from "../formato.js";
+import { chipEstado, chipPrioridad, plazo, fechaCorta, fechaHora, PRIORIDADES } from "../formato.js";
 import { barraAvance, vacio, todasLasPaginas, tomarAviso, sinAcceso, textoDeError } from "../componentes.js";
-import { requerirSesion, tienePermiso } from "../sesion.js";
+import { requerirSesion } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const id = new URLSearchParams(location.search).get("id");
@@ -14,7 +14,7 @@ const yo = await requerirSesion();
 montarBarra(yo, "tareas");
 
 const ATENCION = ["submitted", "under_review", "returned", "in_progress", "assigned", "approved", "closed", "cancelled"];
-const st = { tarea: null, tipo: null, asignaciones: [], resumen: null, nombres: new Map(), aviso: tomarAviso() };
+const st = { tarea: null, tipo: null, asignaciones: [], resumen: null, aviso: tomarAviso() };
 
 async function cargar() {
   try {
@@ -31,21 +31,19 @@ async function cargar() {
   st.tipo = (tipos.data || []).find((x) => x.id === st.tarea.type_id) || null;
   st.asignaciones = asig.data || [];
   st.resumen = asig.summary || null;
-  if (!st.nombres.size && tienePermiso(yo, "users.read")) {
-    const u = await todasLasPaginas(api, "/users").catch(() => ({ data: [] }));
-    for (const x of u.data || []) st.nombres.set(x.id, nombreCompleto(x));
-  }
   tituloPestana(st.tarea.title);
   pintar();
 }
 
-const nombre = (uid) => (uid == null ? null : uid === yo.id ? `${yo.nombre} (tú)` : st.nombres.get(uid) || null);
+const conTu = (uid, n) => (n && uid === yo.id ? `${n} (tú)` : n);
 
 function destinatarios(regla) {
   if (!regla) return "Sin definir";
   if (regla.mode === "all") return "Todos los docentes";
   if (regla.mode === "users") {
-    const n = (regla.user_ids || []).map((u) => st.nombres.get(u)).filter(Boolean);
+    // Publicada: los nombres salen de las asignaciones. En borrador solo se sabe cuántos son.
+    const porId = new Map(st.asignaciones.map((x) => [x.assignee_id, x.assignee_name]));
+    const n = (regla.user_ids || []).map((u) => porId.get(u)).filter(Boolean);
     return n.length ? (n.length <= 3 ? n.join(", ") : `${n.length} docentes elegidos`) : `${(regla.user_ids || []).length} docentes elegidos`;
   }
   if (regla.mode === "filter") return ["Docentes de", regla.unit || regla.campus].join(" ");
@@ -69,10 +67,12 @@ function pintar() {
         chipEstado(t.status)),
       h("h1", { class: "v-h1" }, t.title),
       h("dl", { class: "v-datos" },
+        t.course_code ? dato("Curso", [t.course_code, t.course_name].filter(Boolean).join(" · ")) : null,
+        t.period_code ? dato("Período", t.period_code) : null,
         dato("Fecha límite", p.texto),
-        dato("Revisa", t.reviewer_id != null ? nombre(t.reviewer_id) || "Revisor designado" : "Coordinación (sin revisor designado)"),
+        dato("Revisa", t.reviewer_id != null ? conTu(t.reviewer_id, t.reviewer_name) || "Revisor designado" : `${conTu(t.created_by, t.created_by_name) || "Coordinación"} (sin revisor designado)`),
         dato("Destinatarios", destinatarios(t.recipient_rule)),
-        dato("Creada por", nombre(t.created_by) || "Coordinación"))),
+        dato("Creada por", conTu(t.created_by, t.created_by_name) || "Coordinación"))),
     t.status === "draft" ? bloqueBorrador() : null,
     t.status !== "draft" ? bloqueAvance() : null,
     h("section", { class: "v-card", "aria-labelledby": "t-inst" },

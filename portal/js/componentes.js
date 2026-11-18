@@ -13,6 +13,7 @@ export function filaAsignacion(item) {
   const p = plazo(item.due_at, { terminada: !PENDIENTES.includes(item.status) });
   const estadoPlazo = item.due_state || p.estado;
   const extra = [];
+  if (item.course_code) extra.push([`${item.course_code}${item.course_name ? ` · ${item.course_name}` : ""}`, item.period_code].filter(Boolean).join(" · "));
   if (item.teacher) extra.push(item.teacher);
   if (item.submitted_at) extra.push(`Entregada ${fechaCorta(item.submitted_at)}`);
   if (item.attempt > 1) extra.push(`Intento ${item.attempt}`);

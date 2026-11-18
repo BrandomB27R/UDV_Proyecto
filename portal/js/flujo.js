@@ -1,9 +1,8 @@
 // Reglas del flujo vistas desde la pantalla: línea de estados, quién puede qué
 // y qué falta para avanzar (requisito 2). Sin DOM: solo datos.
 //
-// Quien decide de verdad es el G3 al ejecutar la acción; esto solo evita pintar
-// botones que van a fallar. allowed_actions depende del estado, no de quien mira
-// (trampa 3), así que se cruza con viewer y con la unión de roles.
+// Los botones salen de viewer_actions del detalle: las acciones que el estado permite
+// y que puede ejecutar quien mira (el backend ya cruzó rol, revisor designado y creador).
 import { etiquetaEstado, fechaCorta } from "./formato.js";
 
 export const LINEA = ["assigned", "in_progress", "submitted", "under_review", "approved", "closed"];
@@ -62,43 +61,61 @@ function marcarHecho(a, p) {
   p.dato = fechaCorta(ultimaVez(a, p.estado)?.at);
 }
 
-/** Qué puede hacer quien mira. */
-export function capacidades(a, yo) {
-  const roles = new Set(yo.roles || []);
-  const permitidas = new Set(a.allowed_actions || []);
+/**
+ * Qué puede hacer quien mira. Las acciones salen de viewer_actions: el backend ya cruzó
+ * el estado con el rol, el revisor designado y quien creó la tarea. Aquí no se decide nada más.
+ */
+export function capacidades(a) {
+  const va = new Set(a.viewer_actions || []);
   const esDestinatario = !!a.viewer?.is_assignee;
-  const esRevisor = !!a.viewer?.is_reviewer;          // designado; sin designado: coordinación o admin
-  const docente = esDestinatario && roles.has("teacher");
-  const revisa = esRevisor && (roles.has("reviewer") || roles.has("coordinator") || roles.has("admin"));
   return {
-    start: docente && permitidas.has("start"),
-    submit: docente && permitidas.has("submit"),
-    resubmit: docente && permitidas.has("resubmit"),
-    review: revisa && permitidas.has("review"),
-    return: revisa && permitidas.has("return"),
-    // Aprueba el revisor designado o quien tenga authority (dirección), aunque no sea el designado.
-    approve: permitidas.has("approve") && (roles.has("authority") || (esRevisor && roles.has("reviewer"))),
-    // El G4 no incluye "close" en allowed_actions: se decide por estado y rol. El G3 exige además
-    // ser quien creó la tarea o su responsable; si no lo es, el mensaje del 403 se muestra tal cual.
-    close: a.status === "approved" && roles.has("coordinator"),
+    start: va.has("start"),
+    submit: va.has("submit"),
+    resubmit: va.has("resubmit"),
+    review: va.has("review"),
+    return: va.has("return"),
+    approve: va.has("approve"),
+    close: va.has("close"),
     editarEntrega: esDestinatario && EDITABLES.includes(a.status),
-    comentar: esDestinatario || roles.has("coordinator") || roles.has("admin") || (esRevisor && roles.has("reviewer")),
+    comentar: !!a.viewer?.can_comment,
     esDestinatario,
-    esRevisor,
+    esRevisor: !!a.viewer?.is_reviewer,
+  };
+}
+
+/**
+ * Qué pide la entrega según delivery.mode (texto, archivo, ambos, formulario o programa).
+ * archivos: se pueden adjuntar; archivoObligatorio: el tipo lo exige (requiere_archivo);
+ * textoObligatorio: el texto es la entrega (texto o formulario); programa: se hace en el editor.
+ */
+export function formaDeEntrega(a) {
+  const d = a.delivery || {};
+  const modo = d.mode || (a.requiere_archivo ? "archivo" : "ambos");
+  const archivoObligatorio = !!a.requiere_archivo;
+  return {
+    modo,
+    programa: modo === "programa",
+    archivos: archivoObligatorio || modo === "archivo" || modo === "ambos",
+    archivoObligatorio,
+    textoObligatorio: modo === "texto" || modo === "formulario",
+    extensiones: (d.extensions || []).map((x) => String(x).toLowerCase()),
+    noAceptadas: (d.not_accepted || []).map((x) => String(x).toLowerCase()),
+    maxMb: Number(d.max_mb) || 5,
   };
 }
 
 const ETQ = { hecho: "hecho", pendiente: "pendiente", opcional: "opcional" };
 
 /**
- * Lo que toca ahora. ctx: {texto, leyoDevolucion, motivo, nombres: {docente, revisor}, esPrograma}
+ * Lo que toca ahora. ctx: {texto, textoCambiado, leyoDevolucion, motivo, nombres: {docente, revisor, creador}, programa}
  * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria}
  *   turno: "tuyo" | "espera" | "fin"
  *   requisitos: [{id, titulo, estado, detalle, nota}]
  *   principal/secundaria: {accion, etiqueta, habilitada, motivo}
  */
 export function pasoActual(a, yo, ctx = {}) {
-  const c = capacidades(a, yo);
+  const c = capacidades(a);
+  const forma = formaDeEntrega(a);
   const docente = ctx.nombres?.docente || "el docente";
   const revisor = ctx.nombres?.revisor || "la coordinación";
   const actuales = archivosDelIntentoActual(a);
@@ -123,16 +140,28 @@ export function pasoActual(a, yo, ctx = {}) {
     } else {
       req.push({ id: "iniciar", titulo: "Iniciar la tarea", estado: ETQ.hecho, detalle: inicio ? `Hecho el ${fechaCorta(inicio.at)}` : "Hecho." });
     }
-    if (ctx.esPrograma) {
-      req.push({ id: "programa", titulo: "Actualiza el programa del curso", estado: ETQ.opcional, nota: "en el editor de programas",
-        detalle: "Los cambios del programa se hacen en su propia pantalla. Luego vuelve aquí para entregar." });
+    if (forma.programa) {
+      // ctx.programa: {avance: {listas, total, faltan}} de la versión ligada, o null si todavía no hay.
+      const pv = a.program_version;
+      const av = ctx.programa?.avance;
+      const listo = !!av && av.listas === av.total;
+      req.push({ id: "programa", titulo: "Completar el programa del curso", estado: listo ? ETQ.hecho : ETQ.pendiente,
+        detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso."
+          : !av ? `Versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}.`
+            : listo ? `Las ${av.total} secciones están listas (versión ${pv.number}).`
+              : `${av.listas} de ${av.total} secciones listas. Faltan ${av.faltan.map((x) => x.titulo).join(", ")}.`,
+        avance: av ? av.listas / av.total : null });
     }
+    // En una reentrega el texto anterior sigue en el borrador: solo cuenta si se cambió.
+    const textoHecho = reentrega ? ctx.textoCambiado || (forma.textoObligatorio && textoListo) : textoListo;
     req.push({ id: "texto", titulo: reentrega ? "Ajusta el texto de tu entrega" : "Escribe tu entrega",
-      // En una reentrega el texto anterior sigue en el borrador: solo cuenta si se cambió.
-      estado: (reentrega ? ctx.textoCambiado : textoListo) ? ETQ.hecho : ETQ.opcional,
+      estado: textoHecho ? ETQ.hecho : forma.textoObligatorio ? ETQ.pendiente : ETQ.opcional,
+      nota: forma.textoObligatorio ? "es la entrega en este tipo de tarea" : null,
       detalle: "Puedes escribirlo abajo, en «Tu entrega». Lo leerá quien revisa." });
-    const tituloArchivo = reentrega ? "Adjunta un archivo nuevo" : "Adjunta un PDF";
-    if (a.requiere_archivo) {
+    const tituloArchivo = reentrega ? "Adjunta un archivo nuevo" : "Adjunta un archivo";
+    if (!forma.archivos) {
+      // Este tipo no pide archivos: no se agrega el requisito.
+    } else if (forma.archivoObligatorio) {
       req.push({ id: "archivo", titulo: tituloArchivo, estado: actuales.length ? ETQ.hecho : ETQ.pendiente,
         nota: "obligatorio en este tipo de tarea",
         detalle: actuales.length
@@ -142,17 +171,17 @@ export function pasoActual(a, yo, ctx = {}) {
       req.push({ id: "archivo", titulo: tituloArchivo, estado: actuales.length ? ETQ.hecho : ETQ.opcional,
         detalle: "Adjuntar archivos es opcional en este tipo de tarea." });
     }
+    const etiquetas = { leer: "marques la observación como leída", programa: "el programa esté completo", archivo: "adjuntes el archivo", texto: "escribas tu entrega" };
     const faltan = req.filter((r) => r.estado === ETQ.pendiente);
     const destino = "Entregada";
     let motivo = "";
     if (faltan.length) {
-      motivo = faltan.some((r) => r.id === "archivo") && faltan.some((r) => r.id === "leer")
-        ? "Se habilita cuando leas la observación y adjuntes el archivo."
-        : faltan[0].id === "archivo" ? "Se habilita cuando adjuntes el archivo." : "Se habilita cuando marques la observación como leída.";
+      const partes = faltan.map((r) => etiquetas[r.id]).filter(Boolean);
+      motivo = `Se habilita cuando ${partes.length > 1 ? `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}` : partes[0]}.`;
     }
     return {
       turno: "tuyo", eyebrow: "Te toca a ti",
-      titulo: reentrega ? "Corrige y vuelve a entregar" : (ctx.esPrograma ? "Actualiza el programa y entrega" : "Prepara y envía tu entrega"),
+      titulo: reentrega ? "Corrige y vuelve a entregar" : (forma.programa ? "Actualiza el programa y entrega" : "Prepara y envía tu entrega"),
       resumen: faltan.length
         ? `Para pasar a «${destino}» ${faltan.length === 1 ? "falta un requisito" : `faltan ${faltan.length} requisitos`}.`
         : `Todo listo: ya puedes ${reentrega ? "reentregar" : "entregar"}.`,
@@ -215,7 +244,7 @@ export function pasoActual(a, yo, ctx = {}) {
     returned: [tu ? "Te devolvieron la entrega" : `Devuelta a ${docente} para corrección`, ""],
     submitted: [`En espera de revisión por ${revisor}`, tu ? "Recibirás un aviso cuando la revisen." : ""],
     under_review: [ctx.nombres?.revisor ? `${capital(revisor)} está revisando la entrega` : `En revisión por ${revisor}`, tu ? "Recibirás un aviso con el resultado." : ""],
-    approved: ["Entrega aprobada", "Falta que la coordinación cierre la tarea."],
+    approved: ["Entrega aprobada", `Falta que ${ctx.nombres?.creador || "la coordinación"} cierre la tarea.`],
     closed: ["Tarea cerrada", "No queda nada pendiente."],
     cancelled: ["Tarea cancelada", "La coordinación canceló esta tarea."],
   }[a.status] || [etiquetaEstado(a.status), ""];
@@ -225,6 +254,9 @@ export function pasoActual(a, yo, ctx = {}) {
     titulo: espera[0], resumen: espera[1], requisitos: [], principal: null,
   };
 }
+
+const ESTADOS_PROGRAMA = { draft: "borrador", submitted: "enviada", under_review: "en revisión", returned: "devuelta", approved: "aprobada", authorized: "autorizada", superseded: "reemplazada" };
+const etiquetaEstadoPrograma = (s) => ESTADOS_PROGRAMA[s] || s || "sin estado";
 
 const capital = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 

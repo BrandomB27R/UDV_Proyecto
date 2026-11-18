@@ -5,7 +5,7 @@ import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
 import { pestanas, vacio, sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
-import { requerirSesion, perfiles, puedeRevisar } from "../sesion.js";
+import { requerirSesion, perfiles } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -22,13 +22,12 @@ const listaEl = h("div", { role: "tabpanel" });
 const marcarTodas = h("button", { type: "button", class: "v-btn v-btn--sec", onclick: marcarTodasLeidas }, "Marcar todas como leídas");
 const pest = h("div");
 
-// El aviso no trae a qué asignación se refiere (NOTAS_BACKEND.md §6): se enlaza a la sección.
-function destino(evento = "") {
-  const e = String(evento);
-  if (e.startsWith("program.")) return { texto: "Ver programas de curso", href: RUTAS.programas };
-  if (/submitted|resubmitted/.test(e) && puedeRevisar(yo)) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
-  if (e.startsWith("assignment.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
-  if (e.startsWith("assignment.") && puedeRevisar(yo)) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
+// Cada aviso enlaza a su tarea (assignment_id) o a su programa (program_version_id).
+// Sin ninguno de los dos, a la sección que corresponde por el tipo de evento.
+function destino(n) {
+  if (n.assignment_id != null) return { texto: "Ver la tarea", href: RUTAS.asignacion(n.assignment_id) };
+  if (n.program_version_id != null) return { texto: "Ver el programa", href: RUTAS.programa(n.program_version_id) };
+  const e = String(n.event || "");
   if (e.startsWith("task.") && (yo.roles || []).includes("coordinator")) return { texto: "Ir a Tareas", href: RUTAS.tareas };
   if (e.startsWith("task.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
   return null;
@@ -71,7 +70,7 @@ function pintar() {
 }
 
 function fila(n) {
-  const ir = destino(n.event);
+  const ir = destino(n);
   const boton = n.is_read ? null : h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: async (e) => {
     e.target.disabled = true;
     try {
@@ -86,7 +85,13 @@ function fila(n) {
       h("span", { class: "v-notif__texto" }, n.message || ""),
       h("span", { class: "v-notif__fecha", title: fechaHora(n.created_at) }, fechaCorta(n.created_at))),
     h("div", { class: "v-notif__acciones" },
-      ir ? h("a", { class: "v-btn v-btn--sec v-btn--chico", href: ir.href }, ir.texto) : null,
+      // Abrir el destino cuenta como leer el aviso.
+      ir ? h("a", { class: "v-btn v-btn--sec v-btn--chico", href: ir.href, onclick: async (e) => {
+        if (n.is_read) return;
+        e.preventDefault();
+        await marcarLeida(n).catch(() => {});
+        location.assign(ir.href);
+      } }, ir.texto) : null,
       boton));
 }
 
