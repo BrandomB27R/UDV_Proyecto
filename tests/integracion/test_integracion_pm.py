@@ -1007,3 +1007,22 @@ def test_tipo_de_tarea_se_renombra_se_desactiva_y_queda_en_auditoria(c, s):
     registros = c.get("/api/v1/audit?entity=tipo_tarea&per_page=50", headers=s["auditoria"]).json()["data"]
     propios = [d for d in registros if d["entity_id"] == tipo["id"]]
     assert {d["action"] for d in propios} == {"insert", "update"} and len(propios) == 4
+
+
+def test_la_forma_de_entrega_de_un_tipo_solo_cambia_si_no_se_ha_usado(c, s):
+    tipo = c.post("/api/v1/task-types", headers=s["coordinacion"],
+                  json={"name": f"Tipo editable {uuid.uuid4().hex[:5]}", "delivery": "texto"}).json()
+    url = f"/api/v1/task-types/{tipo['id']}"
+    assert tipo["task_count"] == 0 and tipo["delivery_mode"] == "texto"
+    r = c.patch(url, headers=s["coordinacion"], json={"delivery": "archivo"})
+    assert r.status_code == 200, r.text
+    assert r.json()["delivery_mode"] == "ambos" and r.json()["requires_evidence"] == 1
+    es_error_comun(c.patch(url, headers=s["coordinacion"], json={"delivery": "paloma"}), 422)
+    es_error_comun(c.patch("/api/v1/task-types/1", headers=s["coordinacion"], json={"delivery": "texto"}), 409)
+
+    assert _tarea(c, s, type_id=tipo["id"]).status_code == 201           # ya lo usa una tarea
+    listado = {t["id"]: t for t in _items(c.get("/api/v1/task-types?per_page=100", headers=s["coordinacion"]).json())}
+    assert listado[tipo["id"]]["task_count"] == 1
+    es_error_comun(c.patch(url, headers=s["coordinacion"], json={"delivery": "texto"}), 409)
+    # El nombre, la descripción y el estado sí se cambian aunque esté en uso; repetir la misma forma no falla.
+    assert c.patch(url, headers=s["coordinacion"], json={"description": "Con constancia", "delivery": "archivo"}).status_code == 200
