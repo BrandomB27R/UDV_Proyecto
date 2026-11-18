@@ -338,3 +338,91 @@ def test_con_otro_revisor_designado_no_aparece(c, s):
     accion(c, s["docente1"], a, "start")
     accion(c, s["docente1"], a, "submit")
     assert a not in [x["id"] for x in _bandeja(c, s["revisor"], status="all")["data"]]
+
+
+# ------------------------------------------------------------ conexión compartida con G2
+def test_la_sesion_de_g4_fija_el_actor_y_trabaja_en_utc(c):
+    from sqlalchemy import text
+    import g4_inbox.database as database
+    sesion = database._sesion(3)
+    try:
+        assert sesion.execute(text("SELECT @actor_id")).scalar() == 3
+        assert sesion.execute(text("SELECT @@session.time_zone")).scalar() == "+00:00"
+    finally:
+        sesion.close()
+    # al devolverse al pool, G2 limpia el actor: otra petición no hereda al usuario 3
+    otra = database._sesion()
+    try:
+        assert otra.execute(text("SELECT @actor_id")).scalar() is None
+    finally:
+        otra.close()
+
+
+# ------------------------------------------------------------ comentarios e historial en el detalle
+def test_comentarios_con_autor_y_fecha_y_quien_puede_escribir(c, s):
+    a = publicar(c, s)
+    for quien, texto in (("docente1", "¿El CV va en PDF?"), ("revisor", "Sí, en PDF.")):
+        r = c.post(f"/api/v1/assignments/{a}/comments", headers=s[quien], json={"text": texto})
+        assert r.status_code == 200, r.text
+        assert r.json()["author_name"] and r.json()["at"].endswith("Z")
+    d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert [x["text"] for x in d["comments"]] == ["¿El CV va en PDF?", "Sí, en PDF."]
+    assert d["comments"][0]["author_name"] != d["comments"][1]["author_name"]
+    assert d["viewer"]["can_comment"] is True
+
+
+def test_el_historial_trae_acciones_actor_y_fecha(c, s):
+    a = publicar(c, s, tipo=1)
+    accion(c, s["docente1"], a, "start")
+    accion(c, s["docente1"], a, "submit")
+    h = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["history"]
+    assert [x["action"] for x in h][-2:] == ["start", "submit"]
+    assert all(x["actor"] and x["at"].endswith("Z") for x in h)
+
+
+# ------------------------------------------------------------ formulario según el tipo de tarea
+def test_la_entrega_sigue_al_tipo_de_tarea_y_a_lo_que_acepta_g2(c, s):
+    cv = c.get(f"/api/v1/assignments/{publicar(c, s, tipo=2)}", headers=s["docente1"]).json()["delivery"]
+    assert cv == {"mode": "ambos", "extensions": ["pdf"], "max_mb": 5, "not_accepted": []}
+    evidencia = c.get(f"/api/v1/assignments/{publicar(c, s, tipo=5)}", headers=s["docente1"]).json()["delivery"]
+    # G1 permite docx/xlsx y 20 MB para "Cargar evidencia", pero G2 hoy solo recibe PDF/JPG/PNG de 5 MB
+    assert evidencia["not_accepted"] == ["docx", "xlsx"] and evidencia["max_mb"] == 5
+    assert "docx" not in evidencia["extensions"]
+
+
+def test_varios_archivos_en_una_entrega(c, s):
+    a = publicar(c, s, tipo=3)
+    accion(c, s["docente1"], a, "start")
+    for nombre in ("f1.pdf", "f2.pdf", "f3.pdf"):
+        fid = subir(c, s["docente1"], nombre)
+        assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                      json={"file_id": str(fid), "name": nombre}).status_code == 200
+    accion(c, s["docente1"], a, "submit")
+    archivos = c.get(f"/api/v1/assignments/{a}", headers=s["revisor"]).json()["files"]
+    assert sorted(f["name"] for f in archivos) == ["f1.pdf", "f2.pdf", "f3.pdf"]
+    assert {f["attempt"] for f in archivos} == {1}
+
+
+def test_tarea_de_programa_lleva_la_version_hasta_la_entrega(c, s):
+    """La versión creada en G5 desde la asignación queda en el borrador y G3 la copia a la entrega."""
+    a = publicar(c, s, tipo=1)   # ACTUALIZAR_PROGRAMA
+    d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert d["delivery"]["mode"] == "programa" and d["program_version"] is None
+
+    vigente = _consulta("""SELECT id, periodo_id FROM programa_version
+                           WHERE programa_curso_id = 1 AND estado_codigo = 'authorized'""")
+    if not vigente:
+        pytest.skip("La base no tiene una versión autorizada del programa 1")
+    r = c.post("/api/v1/course-programs/1/versions", headers=s["coordinacion"],
+               json={"clonar": True, "periodo_id": vigente[0][1], "tarea_destinatario_origen_id": a})
+    assert r.status_code == 201, r.text
+    nueva = r.json()["id"]
+
+    d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert d["program_version"]["id"] == nueva and d["program_version"]["program_id"] == 1
+    accion(c, s["docente1"], a, "start")
+    assert c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"],
+                 json={"comment": "Actualicé la bibliografía"}).status_code == 200
+    assert _consulta("SELECT programa_version_id FROM entrega_borrador WHERE tarea_destinatario_id = :a", a=a) == [(nueva,)]
+    accion(c, s["docente1"], a, "submit")
+    assert _consulta("SELECT programa_version_id FROM entrega WHERE tarea_destinatario_id = :a", a=a) == [(nueva,)]
