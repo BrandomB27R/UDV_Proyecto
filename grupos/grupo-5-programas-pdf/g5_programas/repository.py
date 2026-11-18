@@ -300,6 +300,8 @@ def _serialize_version(session: Session, row: dict, include_sections=True) -> di
         "periodo_id": row["periodo_id"],
         "estado": row["estado_codigo"],
         "version_origen_id": row["version_origen_id"],
+        # Asignación (tarea de un docente) desde la que se abrió esta versión, si la hubo.
+        "assignment_id": row.get("tarea_destinatario_origen_id"),
         "nombre": row["nombre"],
         "descripcion": row["descripcion"],
         "resumen_cambios": row["resumen_cambios"],
@@ -989,7 +991,7 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
                 row,
             )
         else:
-            protected = {"id", "programa_id", "programa_curso_id", "numero_version", "estado", "version_origen_id"}
+            protected = {"id", "programa_id", "programa_curso_id", "numero_version", "estado", "version_origen_id", "assignment_id"}
             if protected.intersection(body):
                 raise ApiError(422, "VALIDATION_ERROR", "No puedes modificar la identidad ni el estado de la versión.", {"body": "Campo protegido."})
             if "secciones" in body:
@@ -1459,10 +1461,8 @@ def create_version(session: Session, actor: Actor, program_id: int, body: dict):
             clone=clone,
             summary=body.get("resumen_cambios"),
             responsible_id=source.get("docente_responsable_id", actor.id),
-            assignment_id=(
-                assignment_id if "tarea_destinatario_origen_id" in body
-                else source.get("tarea_destinatario_origen_id")
-            ),
+            # La versión nueva solo queda ligada a una tarea si se indica; no hereda la de su origen.
+            assignment_id=assignment_id if "tarea_destinatario_origen_id" in body else None,
         )
         version = _serialize_version(session, _require_version(session, version_id))
     return version

@@ -665,6 +665,7 @@ def test_la_tarea_abre_el_borrador_del_programa_a_nombre_del_docente(c, s):
     assert r.status_code == 200, r.text
     v = r.json()
     assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"]
+    assert v["assignment_id"] == a          # la pantalla sabe qué tarea mover al revisar el programa
     assert v["secciones"] and v["viewer_actions"] == ["edit", "submit"]
     assert v["nombre"].endswith("2026-2") or "2026-1" not in v["nombre"]
     # Al ser la primera versión de su período, los cambios se comparan con la versión de origen.
@@ -870,3 +871,14 @@ def test_el_resumen_por_docente_cuadra_con_el_panel(c, s):
     assert suma("assigned") == panel["compliance"]["expected"]
     assert c.get("/api/v1/dashboard/teachers", headers=s["auditoria"]).status_code == 200
     es_error_comun(c.get("/api/v1/dashboard/teachers", headers=s["docente1"]), 403)
+
+
+def test_una_version_nueva_no_hereda_la_tarea_de_su_origen(c, s):
+    autorizada = next(v for v in _versiones(c, s) if v["estado"] == "authorized")
+    periodo = c.get(f"/api/v1/program-versions/{autorizada['id']}", headers=s["coordinacion"]).json()["periodo_id"]
+    r = c.post("/api/v1/course-programs/1/versions", headers=s["coordinacion"],
+               json={"periodo_id": periodo, "resumen_cambios": "Ajuste menor"})
+    if r.status_code == 201 or r.status_code == 200:
+        assert r.json()["assignment_id"] is None
+    else:   # ya hay un borrador abierto de ese período: la regla no aplica en esta corrida
+        es_error_comun(r, 409)
