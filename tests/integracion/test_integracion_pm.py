@@ -420,3 +420,114 @@ def test_programa_admite_version_en_otro_periodo(c, s):
     r = c.post("/api/v1/course-programs", headers=s["docente1"], json={
         "curso_id": 1, "sede_id": 1, "modalidad_id": 1, "periodo_id": 2})
     assert r.status_code == 201, f"{r.status_code} {r.text[:200]}"
+
+
+# ------------------------------------------- 9. lo que necesita la interfaz Vinci
+COORD = 2   # coordinacion@demo (coordinator + reviewer + authority desde la migración 1.2.2)
+
+
+def _tarea(c, s, **extra):
+    cuerpo = {"type_id": 1, "title": f"PMINT-{uuid.uuid4().hex[:6].upper()}",
+              "due_date": (date.today() + timedelta(days=10)).isoformat(), **extra}
+    return c.post("/api/v1/tasks", headers=s["coordinacion"], json=cuerpo)
+
+
+def test_la_tarea_guarda_y_devuelve_curso_y_periodo(c, s):
+    r = _tarea(c, s, course_id=1, period_id=2)
+    assert r.status_code == 201, r.text
+    t = r.json()
+    assert (t["course_id"], t["period_id"]) == (1, 2)
+    assert t["course_code"] and t["course_name"] and t["period_code"]
+    leida = c.get(f"/api/v1/tasks/{t['id']}", headers=s["coordinacion"]).json()
+    assert (leida["course_id"], leida["period_id"]) == (1, 2)
+    r = c.patch(f"/api/v1/tasks/{t['id']}", headers=s["coordinacion"], json={"course_id": 3})
+    assert r.status_code == 200 and r.json()["course_id"] == 3 and r.json()["period_id"] == 2
+    sin = _tarea(c, s).json()
+    assert sin["course_id"] is None and sin["period_id"] is None
+
+
+def test_curso_o_periodo_inexistente_responde_422(c, s):
+    es_error_comun(_tarea(c, s, course_id=999999, period_id=1), 422)
+    es_error_comun(_tarea(c, s, course_id=1, period_id=999999), 422)
+
+
+def test_docentes_sugeridos_por_curso(c, s):
+    r = c.get("/api/v1/tasks/eligible-teachers?course_id=1&period_id=2", headers=s["coordinacion"])
+    assert r.status_code == 200, r.text
+    ids = {d["id"] for d in r.json()["data"]}
+    assert DOC1 in ids and r.json()["total"] == len(r.json()["data"])
+    assert all({"id", "name", "email", "period_code", "campus"} <= set(d) for d in r.json()["data"])
+    otro = c.get("/api/v1/tasks/eligible-teachers?course_id=4&period_id=2", headers=s["coordinacion"])
+    assert otro.status_code == 200 and otro.json()["data"] == []
+    es_error_comun(c.get("/api/v1/tasks/eligible-teachers?course_id=1", headers=s["docente1"]), 403)
+    es_error_comun(c.get("/api/v1/tasks/eligible-teachers?course_id=999999", headers=s["coordinacion"]), 422)
+
+
+def test_el_detalle_trae_nombres_tarea_curso_e_intentos(c, s):
+    t = _tarea(c, s, course_id=1, period_id=2, reviewer_id=REVISOR).json()
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Primer intento"})
+    assert c.post(f"/api/v1/assignments/{a}/comments", headers=s["docente1"],
+                  json={"text": "Una duda"}).status_code == 200
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert d["task_id"] == t["id"] and d["created_by"] == COORD and d["reviewer_id"] == REVISOR
+    assert d["reviewer_name"] and d["created_by_name"] and d["assignee_name"]
+    assert (d["course_id"], d["period_id"]) == (1, 2) and d["course_name"] and d["period_code"]
+    com = d["comments"][0]
+    assert com["author_id"] == DOC1 and com["author_name"] and com["created_at"].endswith("Z")
+    assert d["attempts"] == [{"number": 1, "text": "Primer intento", "created_at": d["attempts"][0]["created_at"]}]
+    assert d["history"][0]["action"] == "publish"
+
+
+def test_viewer_actions_cruza_el_estado_con_quien_mira(c, s):
+    """allowed_actions depende del estado; viewer_actions, además, de la persona."""
+    _, asign = publicar(c, s, revisor=None)          # sin revisor designado
+    a = asign[DOC1]
+    ver = lambda quien: c.get(f"/api/v1/assignments/{a}", headers=s[quien]).json()
+    assert ver("docente1")["viewer_actions"] == ["start"]
+    assert ver("coordinacion")["viewer_actions"] == []
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={})
+    assert ver("docente1")["viewer_actions"] == []
+    assert ver("coordinacion")["viewer_actions"] == ["review"]      # la creó: le toca revisar
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["revisor"]).status_code == 403   # no es el designado
+    c.post(f"/api/v1/assignments/{a}/review", headers=s["coordinacion"], json={})
+    assert set(ver("coordinacion")["viewer_actions"]) == {"return", "approve"}
+    assert ver("direccion")["viewer_actions"] == ["approve"]        # la autoridad aprueba cualquiera
+    assert c.post(f"/api/v1/assignments/{a}/approve", headers=s["coordinacion"], json={}).status_code == 200
+    d = ver("coordinacion")
+    assert d["allowed_actions"] == ["close"] and d["viewer_actions"] == ["close"]
+    assert ver("docente1")["viewer_actions"] == []
+    assert c.post(f"/api/v1/assignments/{a}/close", headers=s["coordinacion"], json={}).status_code == 200
+    assert ver("coordinacion")["history"][-1]["action"] == "close"
+
+
+def test_la_cola_de_revision_dice_de_quien_es_cada_entrega(c, s):
+    _, propia = publicar(c, s, revisor=None)          # sin revisor: le toca a quien la creó
+    _, ajena = publicar(c, s, revisor=REVISOR)
+    for a in (propia[DOC1], ajena[DOC1]):
+        c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+        assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    filas = {f["id"]: f for f in c.get("/api/v1/review-queue?per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert filas[propia[DOC1]]["mine"] is True and filas[propia[DOC1]]["reviewer_id"] is None
+    assert filas[ajena[DOC1]]["mine"] is False and filas[ajena[DOC1]]["reviewer_id"] == REVISOR
+    assert filas[ajena[DOC1]]["reviewer_name"] and filas[ajena[DOC1]]["task_id"]
+    del_revisor = c.get("/api/v1/review-queue?per_page=100", headers=s["revisor"]).json()["data"]
+    assert all(f["mine"] for f in del_revisor) and ajena[DOC1] in {f["id"] for f in del_revisor}
+
+
+def test_los_avisos_dicen_a_que_asignacion_se_refieren(c, s):
+    _, asign = publicar(c, s, revisor=None)
+    a = asign[DOC1]
+    avisos = c.get("/api/v1/notifications?per_page=100", headers=s["docente1"]).json()["data"]
+    assert any(n["event"] == "task.published" and n["assignment_id"] == a for n in avisos)
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={})
+    # Sin revisor designado, la entrega le avisa a la coordinación que creó la tarea.
+    avisos = c.get("/api/v1/notifications?per_page=100", headers=s["coordinacion"]).json()["data"]
+    assert any(n["event"] == "assignment.submitted" and n["assignment_id"] == a for n in avisos)
+

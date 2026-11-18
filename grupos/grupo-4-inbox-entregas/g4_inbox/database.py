@@ -20,20 +20,30 @@ VERSIÓN 3 — hallazgos de QA del 12 y 13 de noviembre:
   crea la fila de entrega del intento actual y le pone archivo.entrega_id.
 - @actor_id se limpia al devolver cada conexión al pool, como en G2.
 - La entrega que crea G4 lleva el texto del borrador, como la que crea G3.
+
+VERSIÓN 4 — pendientes técnicos aprobados por el PM (17-nov):
+- Ya no abre su propio grupo de conexiones: usa la sesión compartida de G2
+  (CONTRATO_COMUN §1). Railway permite 10 conexiones por usuario y antes G4
+  ocupaba las suyas además de las de G2. La conexión de G2 ya trabaja en UTC
+  y limpia @actor_id al devolverse; el actor se fija con fijar_actor de G2.
+- El detalle dice cómo se entrega según el tipo de tarea (modalidad,
+  extensiones y tamaño de tipo_tarea, limitados a lo que acepta G2) y, en
+  las tareas de programa, la versión del programa de esa asignación. El
+  borrador guarda esa versión para que G3 la copie a la entrega.
 """
 
 from datetime import date, datetime
 from typing import List, Optional
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
 
-from .config import DATABASE_URL
+# Conexión compartida de G2: un solo grupo de conexiones para toda la app.
+from g2_api.database import SessionLocal, engine, fijar_actor  # noqa: F401
+# Lo que acepta hoy POST /api/v1/files de G2 (tipo y tamaño).
+from g2_api.routers.files import MAX_SIZE as _G2_MAX_BYTES, MIMETYPES_PERMITIDOS as _G2_TIPOS
+
 from .inbox import Asignacion
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 # Estados en los que el docente todavía puede cambiar su entrega. Es el mismo
 # criterio del trigger trg_entrega_borrador_bi de G1.
@@ -48,30 +58,6 @@ class ArchivoNoEncontrado(Exception):
     """El archivo no existe, está eliminado o no es del usuario (se responde 404)."""
 
 
-if engine.dialect.name == "mysql":
-    # Regla del PM (16-nov): la base y la API en UTC; cada pantalla convierte
-    # a hora de Guatemala al mostrar. G2 y G3 también fijan UTC en su conexión.
-    # Importa para la entrega: G3 compara tarea_transicion.creado_en (suya)
-    # con entrega.entregado_en (que puede crear G4), y si una de las dos se
-    # guarda en otra zona hay 6 horas de diferencia con el docker.
-    @event.listens_for(engine, "connect")
-    def _en_utc(conexion_dbapi, _registro):
-        cursor = conexion_dbapi.cursor()
-        cursor.execute("SET time_zone = '+00:00'")
-        cursor.close()
-
-
-    @event.listens_for(engine, "checkin")
-    def _limpiar_actor(conexion_dbapi, _registro):
-        # @actor_id vive en la conexión y el pool la reutiliza en otra petición:
-        # se limpia para que la auditoría nunca culpe al usuario equivocado.
-        try:
-            cursor = conexion_dbapi.cursor()
-            cursor.execute("SET @actor_id = NULL")
-            cursor.close()
-        except Exception:
-            pass
-
 _ACCION_POR_TRANSICION = {
     ("assigned", "in_progress"): "start",
     ("in_progress", "submitted"): "submit",
@@ -79,13 +65,15 @@ _ACCION_POR_TRANSICION = {
     ("submitted", "under_review"): "review",
     ("under_review", "returned"): "return",
     ("under_review", "approved"): "approve",
+    ("approved", "closed"): "close",
+    (None, "assigned"): "publish",
 }
 
 
 def _sesion(actor_id: Optional[int] = None):
     sesion = SessionLocal()
     if actor_id is not None:
-        sesion.execute(text("SET @actor_id = :actor_id"), {"actor_id": actor_id})
+        fijar_actor(sesion, actor_id)   # @actor_id para la auditoría de G1
     return sesion
 
 
@@ -130,28 +118,49 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
         cabecera = sesion.execute(text("""
             SELECT td.id AS asignacion_id, td.usuario_id, td.estado_codigo,
                    t.id AS tarea_id, t.titulo, t.descripcion, t.prioridad,
-                   t.programa_version_id, t.revisor_id, tt.codigo AS tipo_codigo,
-                   tt.requiere_archivo,
-                   COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite
+                   t.programa_version_id, tt.codigo AS tipo_codigo,
+                   tt.requiere_archivo, tt.modalidad_entrega, tt.extensiones, tt.tamano_max_mb,
+                   COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite,
+                   -- Revisor designado como lo lee G3: el de la asignación y, si no tiene, el de la tarea.
+                   COALESCE(td.revisor_id, t.revisor_id) AS revisor_id,
+                   CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
+                   CONCAT(doc.nombres, ' ', doc.apellidos) AS docente_nombre,
+                   t.creado_por, CONCAT(cr.nombres, ' ', cr.apellidos) AS creador_nombre,
+                   t.curso_id, cu.codigo AS curso_codigo, cu.nombre AS curso_nombre,
+                   t.periodo_id, pe.codigo AS periodo_codigo
             FROM tarea_destinatario td
             JOIN tarea t ON t.id = td.tarea_id
             JOIN workflow w ON w.id = t.workflow_id
             JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
+            JOIN usuario doc ON doc.id = td.usuario_id
+            JOIN usuario cr ON cr.id = t.creado_por
+            LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
+            LEFT JOIN curso cu ON cu.id = t.curso_id
+            LEFT JOIN periodo pe ON pe.id = t.periodo_id
             WHERE td.id = :id
         """), {"id": assignment_id}).mappings().first()
         if cabecera is None:
             return None
 
         borrador = sesion.execute(text("""
-            SELECT contenido_texto FROM entrega_borrador
+            SELECT contenido_texto, programa_version_id FROM entrega_borrador
             WHERE tarea_destinatario_id = :id
         """), {"id": assignment_id}).mappings().first()
 
-        comentarios = sesion.execute(text("""
-            SELECT autor_id AS author, contenido AS text
-            FROM comentario
-            WHERE tarea_destinatario_id = :id AND eliminado_en IS NULL
-            ORDER BY creado_en
+        version = None
+        if cabecera["modalidad_entrega"] == "programa":
+            version = _version_de_programa(sesion, assignment_id)
+
+        # Un intento por fila de `entrega`: el texto que quedó en cada uno.
+        intentos = sesion.execute(text("""
+            SELECT numero_intento, contenido_texto, entregado_en
+            FROM entrega WHERE tarea_destinatario_id = :id
+            ORDER BY numero_intento
+        """), {"id": assignment_id}).mappings().all()
+
+        comentarios = sesion.execute(text(_SQL_COMENTARIOS + """
+            WHERE c.tarea_destinatario_id = :id AND c.eliminado_en IS NULL
+            ORDER BY c.id
         """), {"id": assignment_id}).mappings().all()
 
         archivos = sesion.execute(text("""
@@ -198,8 +207,18 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
 
     return {
         "id": cabecera["asignacion_id"],
+        "task_id": cabecera["tarea_id"],
         "assignee_id": cabecera["usuario_id"],
+        "assignee_name": cabecera["docente_nombre"],
         "reviewer_id": cabecera["revisor_id"],
+        "reviewer_name": cabecera["revisor_nombre"],
+        "created_by": cabecera["creado_por"],
+        "created_by_name": cabecera["creador_nombre"],
+        "course_id": cabecera["curso_id"],
+        "course_code": cabecera["curso_codigo"],
+        "course_name": cabecera["curso_nombre"],
+        "period_id": cabecera["periodo_id"],
+        "period_code": cabecera["periodo_codigo"],
         "title": cabecera["titulo"],
         "task_type": cabecera["tipo_codigo"],
         "requiere_archivo": bool(cabecera["requiere_archivo"]),
@@ -208,8 +227,12 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
         "due_at": due_at,
         "instructions": cabecera["descripcion"] or "",
         "program_version_id": cabecera["programa_version_id"],
+        "delivery": _forma_de_entrega(cabecera),
+        "program_version": version,
         "draft_comment": borrador["contenido_texto"] if borrador else None,
-        "comments": [{"author": str(c["author"]), "text": c["text"]} for c in comentarios],
+        "comments": [_comentario(c) for c in comentarios],
+        "attempts": [{"number": i["numero_intento"], "text": i["contenido_texto"],
+                      "created_at": _iso(i["entregado_en"])} for i in intentos],
         # Con sus datos, para que el revisor vea qué se entregó en cada intento.
         "files": [{"file_id": str(f["file_id"]), "name": f["name"], "mime": f["mime"],
                    "size": f["size"], "uploaded_at": _iso(f["uploaded_at"]),
@@ -272,12 +295,23 @@ def guardar_borrador(assignment_id: int, texto: Optional[str], actor_id: int) ->
     """Crea o reemplaza el borrador (hay uno solo por asignación: uq_entrega_borrador_td)."""
     sesion = _sesion(actor_id)
     try:
+        # En las tareas de programa el borrador lleva la versión del programa:
+        # G3 la copia a la entrega al hacer submit (CONTRATO_COMUN §2c A).
+        modalidad = sesion.execute(text("""
+            SELECT tt.modalidad_entrega FROM tarea_destinatario td
+            JOIN tarea t ON t.id = td.tarea_id JOIN workflow w ON w.id = t.workflow_id
+            JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id WHERE td.id = :id
+        """), {"id": assignment_id}).scalar()
+        version = _version_de_programa(sesion, assignment_id) if modalidad == "programa" else None
         sesion.execute(text("""
-            INSERT INTO entrega_borrador (tarea_destinatario_id, contenido_texto, guardado_por)
-            VALUES (:id, :texto, :actor)
+            INSERT INTO entrega_borrador (tarea_destinatario_id, contenido_texto,
+                                          programa_version_id, guardado_por)
+            VALUES (:id, :texto, :pv, :actor)
             ON DUPLICATE KEY UPDATE contenido_texto = VALUES(contenido_texto),
+                                    programa_version_id = VALUES(programa_version_id),
                                     guardado_por = VALUES(guardado_por)
-        """), {"id": assignment_id, "texto": texto, "actor": actor_id})
+        """), {"id": assignment_id, "texto": texto, "actor": actor_id,
+               "pv": version["id"] if version else None})
         sesion.commit()
     except DBAPIError as e:
         sesion.rollback()
@@ -290,19 +324,22 @@ def guardar_borrador(assignment_id: int, texto: Optional[str], actor_id: int) ->
 
 
 def crear_comentario(assignment_id: int, autor_id: int, texto: str) -> dict:
+    """Guarda el comentario y lo devuelve como lo muestra el detalle."""
     sesion = _sesion(autor_id)
     try:
-        sesion.execute(text("""
+        nuevo_id = sesion.execute(text("""
             INSERT INTO comentario (autor_id, tarea_destinatario_id, contenido)
             VALUES (:autor, :id, :texto)
-        """), {"autor": autor_id, "id": assignment_id, "texto": texto})
+        """), {"autor": autor_id, "id": assignment_id, "texto": texto}).lastrowid
         sesion.commit()
+        fila = sesion.execute(text(_SQL_COMENTARIOS + " WHERE c.id = :c"),
+                              {"c": nuevo_id}).mappings().first()
     except DBAPIError:
         sesion.rollback()
         raise
     finally:
         sesion.close()
-    return {"author": str(autor_id), "text": texto}
+    return _comentario(fila)
 
 
 def _envios(sesion, assignment_id: int) -> int:
@@ -311,6 +348,76 @@ def _envios(sesion, assignment_id: int) -> int:
         SELECT COUNT(*) FROM tarea_transicion
         WHERE tarea_destinatario_id = :id AND estado_nuevo = 'submitted'
     """), {"id": assignment_id}).scalar()
+
+
+# Comentarios con el nombre del autor y la fecha (UTC con "Z").
+_SQL_COMENTARIOS = """
+    SELECT c.id, c.autor_id, c.contenido, c.creado_en,
+           CONCAT(u.nombres, ' ', u.apellidos) AS autor_nombre
+    FROM comentario c
+    JOIN usuario u ON u.id = c.autor_id
+"""
+
+
+def _comentario(fila) -> dict:
+    creado = fila["creado_en"]
+    return {
+        "id": fila["id"],
+        "author": str(fila["autor_id"]),
+        "author_id": fila["autor_id"],
+        "author_name": fila["autor_nombre"],
+        "text": fila["contenido"],
+        "at": creado.isoformat(timespec="minutes") + "Z" if isinstance(creado, datetime) else None,
+        "created_at": creado.isoformat(timespec="minutes") + "Z" if isinstance(creado, datetime) else None,
+    }
+
+
+# ---------------------------------------------------------------- tipo de tarea
+_EXT_DE_G2 = {ext.lstrip(".") for ext in _G2_TIPOS.values()} | (
+    {"jpeg"} if ".jpg" in _G2_TIPOS.values() else set())
+
+
+def _forma_de_entrega(cabecera) -> dict:
+    """Cómo se entrega este tipo de tarea, según tipo_tarea de G1.
+
+    Las extensiones y el tamaño son los del tipo, pero nunca más de lo que
+    acepta G2 al subir: si no, el docente elegiría un archivo que G2 rechaza.
+    """
+    del_tipo = {e.strip().lower() for e in (cabecera["extensiones"] or "").split(",") if e.strip()}
+    if "jpg" in del_tipo:
+        del_tipo.add("jpeg")
+    permitidas = sorted((del_tipo & _EXT_DE_G2) if del_tipo else _EXT_DE_G2)
+    maximo_g2 = _G2_MAX_BYTES // (1024 * 1024)
+    return {
+        "mode": cabecera["modalidad_entrega"],
+        "extensions": permitidas,
+        "max_mb": min(cabecera["tamano_max_mb"] or maximo_g2, maximo_g2),
+        # Lo que pide el tipo y G2 no acepta: se muestra para que nadie se sorprenda.
+        "not_accepted": sorted(del_tipo - _EXT_DE_G2 - {"jpeg"}),
+    }
+
+
+def _version_de_programa(sesion, assignment_id: int) -> Optional[dict]:
+    """La versión del programa que trabaja esta asignación.
+
+    Primero la más reciente creada desde esta asignación en G5
+    (programa_version.tarea_destinatario_origen_id); si no hay, la que la
+    coordinación enlazó a la tarea (tarea.programa_version_id).
+    """
+    fila = sesion.execute(text("""
+        SELECT pv.id, pv.numero_version, pv.estado_codigo, pv.nombre, pv.programa_curso_id
+        FROM programa_version pv
+        WHERE pv.id = COALESCE(
+            (SELECT x.id FROM programa_version x
+              WHERE x.tarea_destinatario_origen_id = :id
+              ORDER BY x.numero_version DESC LIMIT 1),
+            (SELECT t.programa_version_id FROM tarea_destinatario td
+               JOIN tarea t ON t.id = td.tarea_id WHERE td.id = :id))
+    """), {"id": assignment_id}).mappings().first()
+    if fila is None:
+        return None
+    return {"id": fila["id"], "number": fila["numero_version"], "status": fila["estado_codigo"],
+            "name": fila["nombre"], "program_id": fila["programa_curso_id"]}
 
 
 def _intento_actual(sesion, assignment_id: int) -> Optional[dict]:
@@ -426,6 +533,9 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             SELECT td.id, td.usuario_id, td.estado_codigo, t.titulo, tt.codigo AS tipo,
                    t.prioridad, COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite,
                    CONCAT(u.nombres, ' ', u.apellidos) AS docente,
+                   t.id AS tarea_id, t.creado_por,
+                   COALESCE(td.revisor_id, t.revisor_id) AS revisor_id,
+                   CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
                    ult.id AS ultima_transicion_id, env.creado_en AS enviado_en,
                    (SELECT COUNT(*) FROM tarea_transicion x
                      WHERE x.tarea_destinatario_id = td.id AND x.estado_nuevo = 'submitted') AS envios,
@@ -436,6 +546,7 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             JOIN workflow w    ON w.id = t.workflow_id
             JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
             JOIN usuario u     ON u.id = td.usuario_id
+            LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
             LEFT JOIN tarea_transicion ult ON ult.id = (
                 SELECT MAX(x.id) FROM tarea_transicion x WHERE x.tarea_destinatario_id = td.id)
             LEFT JOIN tarea_transicion env ON env.id = (
@@ -459,8 +570,15 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
         fecha = f["fecha_limite"]
         resultado.append({
             "id": f["id"],
+            "task_id": f["tarea_id"],
             "assignee_id": f["usuario_id"],
             "teacher": f["docente"],
+            "reviewer_id": f["revisor_id"],
+            "reviewer_name": f["revisor_nombre"],
+            "created_by": f["creado_por"],
+            # Le toca a quien mira: es el revisor designado o, si la tarea no tiene, quien la creó.
+            "mine": (f["revisor_id"] == usuario_id) if f["revisor_id"] is not None
+                    else (f["creado_por"] == usuario_id),
             "title": f["titulo"],
             "task_type": f["tipo"],
             "status": f["estado_codigo"],

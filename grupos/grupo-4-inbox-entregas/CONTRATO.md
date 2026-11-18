@@ -133,6 +133,28 @@ PR aparte y sin cambios en el detalle ni en las acciones.
 - Las acciones (tomar, aprobar, devolver) siguen siendo de G3 y se hacen desde
   el detalle.
 
+## 4.3 Detalle: comentarios, historial y forma de entrega
+
+Pendientes aprobados por el PM el 17-nov.
+
+- `GET /assignments/{id}` agrega:
+  - `delivery`: `{mode, extensions, max_mb, not_accepted}`. `mode` es
+    `tipo_tarea.modalidad_entrega`; `extensions` y `max_mb` son los del tipo,
+    limitados a lo que acepta `POST /api/v1/files` de G2. `not_accepted`
+    lista lo que el tipo admite y G2 todavía no recibe.
+  - `program_version`: solo en tareas de modalidad `programa`. Primero la
+    versión más reciente creada en G5 desde esa asignación
+    (`programa_version.tarea_destinatario_origen_id`); si no hay, la de
+    `tarea.programa_version_id`. `null` si no hay ninguna.
+  - `viewer.can_comment`: si quien mira puede escribir comentarios.
+  - En `comments` cada comentario trae `id`, `author_name` y `at` (UTC con Z);
+    `POST /comments` responde el comentario con esos mismos campos.
+- `PUT /submission-draft`, en tareas de programa, guarda en el borrador la
+  versión de `program_version`. G3 la copia a la entrega al hacer submit.
+- Una entrega puede llevar varios archivos: se suben y se vinculan uno por uno
+  al mismo intento.
+- G4 usa la sesión de base de datos de G2 (`g2_api.database`), no una propia.
+
 ## 5. Definición de HECHO (checklist de cada PR)
 
 - [ ] Corre desde cero con `pip install -r requirements.txt` (raíz) en una
@@ -156,3 +178,5 @@ PR aparte y sin cambios en el detalle ni en las acciones.
 | 2026-09-28 | Jerarquía de fuentes; prefijo `/api/v1`; **nuevo** `PUT /assignments/{id}/submission-draft` (el .docx exige borradores y no había ruta); reparto de responsabilidades con el G3; `program_version_id` con el G5; reglas del .docx que faltaban; checklist con pruebas y OpenAPI | PM | PM |
 | 2026-11-14 | Sección 4.1: comentarios y borrador en la base, validación de archivos, fila de entrega por intento, revisor designado | PM y QA | Pendiente |
 | 2026-11-15 | Sección 4.2: bandeja de revisión (GET /review-queue) | Requerimientos G4, entregable 4 | PM (15-nov) |
+| 2026-11-17 | Sección 4.3: comentarios e historial en el detalle, forma de entrega por tipo de tarea, versión del programa, varios archivos, sesión de G2 | PM (17-nov) | PM (17-nov) |
+| 2026-11-17 | `GET /assignments/{id}` agrega `task_id`, `assignee_name`, `reviewer_name`, `created_by`, `created_by_name`, curso y período de la tarea, `attempts` (texto de cada intento), `viewer_actions` (acciones que puede ejecutar quien mira) y, en `comments`, `author_id`, `author_name` y `created_at`. El revisor se lee como en G3 (`COALESCE` de la asignación y la tarea). `allowed_actions` incluye `close`. La autoridad puede ver el detalle. `GET /review-queue` agrega `task_id`, `reviewer_id`, `reviewer_name`, `created_by` y `mine`. Ningún campo existente cambia | Interfaz Vinci | PM (17-nov), hecho por el PM tras el cierre de entregas |

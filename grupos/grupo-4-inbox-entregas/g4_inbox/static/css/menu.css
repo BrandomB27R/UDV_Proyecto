@@ -1,0 +1,25 @@
+/* Menú de las pantallas de G4 en el teléfono.
+   udv.css oculta el menú por debajo de 768 px y no trae otro (no hay botón
+   de menú): sin esto, en el celular no habría cómo volver al portal ni
+   cambiar de pantalla. Aquí el menú baja a una segunda línea, debajo del
+   logo, y se desliza de lado si no cabe. udv.css no se toca (es del PM). */
+@media (max-width: 768px) {
+  .udv-header {
+    height: auto;
+    flex-wrap: wrap;
+    padding: .6rem 1rem .4rem;
+    row-gap: .35rem;
+  }
+  .udv-header > nav { width: 100%; }
+  .udv-header__nav {
+    display: flex;
+    gap: .25rem;
+    margin: 0;
+    padding: 0 0 .25rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .udv-header__nav::-webkit-scrollbar { display: none; }
+  .udv-header__nav a { white-space: nowrap; display: inline-block; }
+}
