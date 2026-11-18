@@ -106,33 +106,23 @@ muestra `last_return_comment`, y «En espera de revisión» dice quién la tiene
 
 ## Auditoría e inicio de dirección (19-nov)
 
-### 9. Auditoría: nombre de lo que se tocó y fechas en hora de Guatemala (G6)
+### 9. Auditoría (G6) — resuelto en parte (PR #72, vinci-14)
 
-- **`entity_label` en cada registro.** «Sobre qué» muestra un nombre cuando viene en
-  `changes` (`titulo`, `nombre` o `correo`); si no, «n.º <entity_id>». No hay nombre
-  para las transiciones de asignaciones (`tarea_destinatario`, `changes` vacío), los
-  inicios y cierres de sesión, y las altas de versiones de programa. Propuesta: que
-  `/audit` devuelva `entity_label`, por ejemplo «Actualizar el programa del curso ·
-  Daniel López» para una asignación o «ISW-301 · Programación Web · versión 3» para
-  una versión. La pantalla lo usará antes que `changes`.
+Resuelto:
+- `entity_label` en cada registro: «Sobre qué» lo usa antes que `changes`; si viene
+  null, queda «n.º <entity_id>».
+- `name` de cada usuario en `/audit/filters`: el filtro «Usuario» muestra el nombre
+  (con el correo) y los campos como «Revisor» se muestran con el nombre.
+
+Pendiente:
 - **`from` y `to` por día UTC.** La pantalla filtra por días de Guatemala (UTC−6) y,
   para cubrirlos enteros, pide `from` = desde y `to` = hasta + 1. Así pueden entrar
   registros de hasta 6 h antes (la noche anterior) y de las primeras 18 h del día
   siguiente. Propuesta: aceptar fecha y hora con zona (`from=2026-11-17T06:00:00Z`) o
   un parámetro `tz=America/Guatemala`.
-- `/audit/filters` da los usuarios solo con correo; con `name` el filtro «Usuario» y los
-  campos como «Revisor» (hoy «revisor_id» se muestra con el correo) dirían el nombre.
 
-### 10. Programas por autorizar: quién elaboró y quién aprobó (G5)
+### 10. Programas por autorizar (G5) — resuelto (PR #72, vinci-14)
 
-«Te toca autorizar» lista `GET /course-programs?estado=approved` y pide el detalle de
-cada versión aprobada solo para saber quién la elaboró (`responsables.docente`).
-
-- Propuesta: que cada fila de `/course-programs` traiga `docente_responsable`,
-  `aprobado_por` y `aprobado_en` (de `programa_aprobacion`). Con eso se quitan las
-  consultas por fila y aparece la columna «Aprobó» (nombre y hace cuánto), que hoy
-  no se muestra.
-- Defecto: en `responsables` del detalle, lo guardado en la metadata del G5 (copiada
-  de la versión de origen) pisa al revisor real (`revisor_id`). Ejemplo: la versión 4
-  la tomó y aprobó Carlos Coordinador y `responsables.revisor` dice «Rosa Revisora».
-  Por eso la pantalla no lo usa como «Aprobó».
+Cada fila de `/course-programs` trae `docente_responsable`, `aprobado_por` y
+`aprobado_en`. «Te toca autorizar» ya no pide el detalle de cada versión: «Elaboró»
+sale de `docente_responsable` y la columna «Aprobó» muestra quién y hace cuánto.

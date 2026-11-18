@@ -123,18 +123,13 @@ function tablaPorRevisar(filas, totalCola) {
 }
 
 /**
- * Versiones aprobadas que falta autorizar. La lista (/course-programs) no trae quién elaboró: se lee del
- * detalle de cada versión aprobada (responsables.docente; son pocas). Quién aprobó y cuándo no lo da la API
- * de forma fiable (responsables.revisor puede venir copiado de la versión de origen): la columna «Aprobó»
- * aparece cuando la lista traiga aprobado_por y aprobado_en (NOTAS_BACKEND §10).
+ * Versiones aprobadas que falta autorizar. Cada fila de /course-programs trae quién la elaboró y quién
+ * la aprobó y cuándo (vinci-14): sin consultas por fila.
  */
 async function programasPorAutorizar() {
   const r = await todasLasPaginas(api, "/course-programs?estado=approved");
-  const filas = (r.data || []).filter((x) => x.estado === "approved" && x.programa_version_id);
-  return Promise.all(filas.map(async (x) => {
-    const v = await api(`/program-versions/${encodeURIComponent(x.programa_version_id)}`).catch(() => null);
-    const resp = v?.secciones?.responsables?.contenido || {};
-    return { ...x, elaboro: x.docente_responsable || resp.docente || null, aprobo: x.aprobado_por || null, aprobadoEn: x.aprobado_en || null };
+  return (r.data || []).filter((x) => x.estado === "approved" && x.programa_version_id).map((x) => ({
+    ...x, elaboro: x.docente_responsable || null, aprobo: x.aprobado_por || null, aprobadoEn: x.aprobado_en || null,
   }));
 }
 
