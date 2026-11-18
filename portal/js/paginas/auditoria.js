@@ -28,7 +28,9 @@ try {
 } catch (e) {
   await sinAcceso(raiz, "Auditoría", textoDeError(e, SIN_PERMISO));
 }
-const usuarios = new Map((opciones.users || []).map((u) => [Number(u.id), u.email]));
+// Usuarios con nombre y correo (vinci-14): el filtro muestra el nombre y el correo como dato secundario.
+const usuarios = new Map((opciones.users || []).map((u) => [Number(u.id), { name: u.name || null, email: u.email || null }]));
+const textoUsuario = (id, u) => (u.name && u.email ? `${u.name} · ${u.email}` : u.name || u.email || `usuario n.º ${id}`);
 
 // ── Estado (desde la URL) ────────────────────────────────────
 const leerURL = () => {
@@ -60,7 +62,8 @@ const campo = (id, etiqueta, nodo) => h("div", { class: "v-campo au-control" }, 
 
 const form = h("form", { class: "au-filtros", "aria-label": "Filtrar la auditoría" },
   campo("f-usuario", "Usuario", sel("f-usuario",
-    [{ valor: "", texto: "Todos" }, ...[...usuarios].map(([id, correo]) => ({ valor: String(id), texto: correo || `usuario n.º ${id}` }))], st.user_id)),
+    [{ valor: "", texto: "Todos" }, ...[...usuarios].sort((a, b) => textoUsuario(...a).localeCompare(textoUsuario(...b), "es"))
+      .map(([id, u]) => ({ valor: String(id), texto: textoUsuario(id, u) }))], st.user_id)),
   campo("f-desde", "Desde", h("input", { id: "f-desde", type: "date", value: st.desde })),
   campo("f-hasta", "Hasta", h("input", { id: "f-hasta", type: "date", value: st.hasta })),
   campo("f-entidad", "Qué se tocó", sel("f-entidad", [{ valor: "", texto: "Todo" }, ...opcionesEntidad(opciones.entities)], st.entity)),

@@ -55,13 +55,13 @@ function nombreEstado(entidad, v) {
   return ESTADOS[v] || legible(v);
 }
 
-/** Valor legible de un campo. ctx.usuarios: Map id → correo (de /audit/filters). */
+/** Valor legible de un campo. ctx.usuarios: Map id → {name, email} (de /audit/filters). */
 export function valorLegible(entidad, campo, v, ctx = {}) {
   if (v === null || v === undefined || v === "") return "—";
   if (campo === "estado") return nombreEstado(entidad, v);
   if (campo === "prioridad") return PRIORIDADES[v] || legible(v);
   if (typeof v === "boolean" || ((campo === "activo") && (v === 0 || v === 1))) return v ? "Sí" : "No";
-  if (CAMPOS_USUARIO.has(campo)) return ctx.usuarios?.get(Number(v)) || `usuario n.º ${v}`;
+  if (CAMPOS_USUARIO.has(campo)) { const u = ctx.usuarios?.get(Number(v)); return u?.name || u?.email || `usuario n.º ${v}`; }
   if (campo === "fecha_limite") return fechaLarga(v);
   if (typeof v === "string" && FECHA_HORA.test(v)) return fechaCorta(v.replace(" ", "T"));
   if (typeof v === "object") return "(varios datos)";
@@ -102,25 +102,29 @@ export function accionMostrada(r, cambios) {
 
 /**
  * Un update sin cambios visibles (casi la mitad de la auditoría) no se oculta: se explica qué pasó.
- *   programa_version: guardar una sección (el contenido vive en otras tablas; aquí solo se toca la versión).
+ *   programa_version: neutro, porque puede ser una sección del docente o coordinación que toma la revisión.
  *   usuario, hecho por el mismo usuario: el registro interno de su inicio de sesión.
  *   cualquier otro: «Modificó» sin cambios en los datos que se registran.
  */
 function updateSinCambios(r, cambios) {
   if (r.action !== "update" || cambios.length) return null;
-  if (r.entity === "programa_version") return { accion: "Guardó el programa", texto: "Guardó contenido de una sección." };
+  if (r.entity === "programa_version") return { accion: "Actualizó el programa", texto: "Guardó datos del programa." };
   if (r.entity === "usuario" && r.actor_id != null && Number(r.actor_id) === Number(r.entity_id)) {
     return { accion: "Actualizó su acceso", texto: "Registro interno del inicio de sesión." };
   }
   return { accion: etiquetaAccion(r.action), texto: "Sin cambios en los datos que se registran." };
 }
 
-/** Sobre qué: {entidad, nombre, href}. El nombre sale de changes (titulo, nombre, correo) o es «n.º id». */
+/**
+ * Sobre qué: {entidad, nombre, href}. El nombre es entity_label de la API (vinci-14); si viene null,
+ * el de changes (titulo, nombre, correo) y, si tampoco, «n.º id».
+ */
 export function sobreQue(r) {
   const ch = r.changes || {};
   const datos = { ...(ch.antes || {}), ...(ch.despues || {}) };
   const sesion = ["auth", "sesion_token"].includes(r.entity);
-  const nombre = datos.titulo || datos.nombre || datos.correo || (sesion ? null : r.entity_id != null && r.entity_id !== 0 ? `n.º ${r.entity_id}` : null);
+  const nombre = r.entity_label || datos.titulo || datos.nombre || datos.correo
+    || (sesion ? null : r.entity_id != null && r.entity_id !== 0 ? `n.º ${r.entity_id}` : null);
   // Solo páginas que administración y auditoría pueden abrir (el detalle de una tarea es de coordinación).
   const href = r.entity === "tarea_destinatario" && r.entity_id ? RUTAS.asignacion(r.entity_id)
     : r.entity === "programa_version" && r.entity_id ? RUTAS.programa(r.entity_id) : null;
