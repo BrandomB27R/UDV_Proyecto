@@ -86,7 +86,7 @@ export function capacidades(a) {
 /**
  * Qué pide la entrega según delivery.mode (texto, archivo, ambos, formulario o programa).
  * archivos: se pueden adjuntar; archivoObligatorio: el tipo lo exige (requiere_archivo);
- * textoObligatorio: el texto es la entrega (texto o formulario); programa: se hace en el editor.
+ * textoObligatorio: el texto es la entrega (modo texto, o formulario sin archivo obligatorio); programa: se hace en el editor.
  */
 export function formaDeEntrega(a) {
   const d = a.delivery || {};
@@ -97,7 +97,8 @@ export function formaDeEntrega(a) {
     programa: modo === "programa",
     archivos: archivoObligatorio || modo === "archivo" || modo === "ambos",
     archivoObligatorio,
-    textoObligatorio: modo === "texto" || modo === "formulario",
+    // El texto es la entrega solo en modo "texto" o en "formulario" sin archivo obligatorio (p. ej. Confirmar actividad).
+    textoObligatorio: modo === "texto" || (modo === "formulario" && !archivoObligatorio),
     extensiones: (d.extensions || []).map((x) => String(x).toLowerCase()),
     noAceptadas: (d.not_accepted || []).map((x) => String(x).toLowerCase()),
     maxMb: Number(d.max_mb) || 5,
@@ -135,17 +136,17 @@ export function pasoActual(a, yo, ctx = {}) {
     const reentrega = c.resubmit;
     const req = [];
     if (reentrega) {
-      req.push({ id: "leer", titulo: "Lee la observación del revisor", estado: ctx.leyoDevolucion ? ETQ.hecho : ETQ.pendiente,
+      req.push({ id: "leer", titulo: "Lee la observación del revisor", obligatorio: true, estado: ctx.leyoDevolucion ? ETQ.hecho : ETQ.pendiente,
         detalle: ctx.leyoDevolucion ? "Leída." : "Es el recuadro de aquí arriba. Cuando la leas, márcala como leída." });
     } else {
-      req.push({ id: "iniciar", titulo: "Iniciar la tarea", estado: ETQ.hecho, detalle: inicio ? `Hecho el ${fechaCorta(inicio.at)}` : "Hecho." });
+      req.push({ id: "iniciar", titulo: "Iniciar la tarea", obligatorio: true, estado: ETQ.hecho, detalle: inicio ? `Hecho el ${fechaCorta(inicio.at)}` : "Hecho." });
     }
     if (forma.programa) {
       // ctx.programa: {avance: {listas, total, faltan}} de la versión ligada, o null si todavía no hay.
       const pv = a.program_version;
       const av = ctx.programa?.avance;
       const listo = !!av && av.listas === av.total;
-      req.push({ id: "programa", titulo: "Completar el programa del curso", estado: listo ? ETQ.hecho : ETQ.pendiente,
+      req.push({ id: "programa", titulo: "Completar el programa del curso", obligatorio: true, estado: listo ? ETQ.hecho : ETQ.pendiente,
         detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso."
           : !av ? `Versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}.`
             : listo ? `Las ${av.total} secciones están listas (versión ${pv.number}).`
@@ -154,15 +155,17 @@ export function pasoActual(a, yo, ctx = {}) {
     }
     // En una reentrega el texto anterior sigue en el borrador: solo cuenta si se cambió.
     const textoHecho = reentrega ? ctx.textoCambiado || (forma.textoObligatorio && textoListo) : textoListo;
-    req.push({ id: "texto", titulo: reentrega ? "Ajusta el texto de tu entrega" : "Escribe tu entrega",
+    // Si el texto es la entrega se llama "Escribe tu entrega" y es obligatorio; si no, es un mensaje opcional.
+    req.push({ id: "texto", titulo: forma.textoObligatorio ? "Escribe tu entrega" : "Mensaje para quien revisa",
+      obligatorio: forma.textoObligatorio,
       estado: textoHecho ? ETQ.hecho : forma.textoObligatorio ? ETQ.pendiente : ETQ.opcional,
-      nota: forma.textoObligatorio ? "es la entrega en este tipo de tarea" : null,
+      nota: forma.textoObligatorio ? "obligatorio" : null,
       detalle: "Puedes escribirlo abajo, en «Tu entrega». Lo leerá quien revisa." });
     const tituloArchivo = reentrega ? "Adjunta un archivo nuevo" : "Adjunta un archivo";
     if (!forma.archivos) {
       // Este tipo no pide archivos: no se agrega el requisito.
     } else if (forma.archivoObligatorio) {
-      req.push({ id: "archivo", titulo: tituloArchivo, estado: actuales.length ? ETQ.hecho : ETQ.pendiente,
+      req.push({ id: "archivo", titulo: tituloArchivo, obligatorio: true, estado: actuales.length ? ETQ.hecho : ETQ.pendiente,
         nota: "obligatorio en este tipo de tarea",
         detalle: actuales.length
           ? `${actuales.length} ${actuales.length === 1 ? "archivo adjunto" : "archivos adjuntos"} en este intento.`
