@@ -14,7 +14,7 @@ import {
   lineaDeEstados, capacidades, formaDeEntrega, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial,
 } from "../flujo.js";
 import { requerirSesion, perfiles, puedeRevisar, tieneRol } from "../sesion.js";
-import { sinAcceso, tomarAviso, TEXTO_MARCA } from "../componentes.js";
+import { sinAcceso, tomarAviso, TEXTO_MARCA, botonVolver, origenConocido } from "../componentes.js";
 import { bloqueDecision } from "../decision.js";
 import { leerVersion, abrirVersionDeAsignacion } from "../programa/api-programa.js";
 import { avanceDe } from "../programa/secciones.js";
@@ -124,8 +124,7 @@ function cabecera() {
   const a = st.a;
   const c = capacidades(a);
   const p = plazo(a.due_at, { terminada: TERMINADAS.includes(a.status) });
-  const [volver, href] = c.esDestinatario ? ["Mis tareas", RUTAS.misTareas]
-    : puedeRevisar(yo) ? ["Por revisar", RUTAS.porRevisar] : ["Inicio", RUTAS.inicio];
+  const volver = destinoVolver(c);
   const curso = a.course_code ? [a.course_code, a.period_code].filter(Boolean).join(" · ") : null;
   const fechaTxt = p.texto.replace(/ de \d{4}/, "");     // "15 de diciembre · faltan 28 días"
   const [fecha, resto] = fechaTxt.split(" · ");
@@ -142,9 +141,9 @@ function cabecera() {
       : null,
   ].filter(Boolean);
   return h("div", { class: "d-cab" }, h("div", { class: "d-cab__in" },
+    botonVolver(volver),
     h("div", { class: "d-cab__fila" },
       h("div", { class: "d-cab__titulo" },
-        h("a", { class: "d-volver", href }, `← ${volver}`),
         h("h1", { class: "d-cab__h1" }, a.title),
         h("span", { class: "d-etiqueta" }, etiquetaTipo(a.task_type)),
         chipPrioridad(a.priority),
@@ -152,6 +151,27 @@ function cabecera() {
       h("p", { class: `d-cab__meta${p.estado ? ` d-cab__meta--${p.estado}` : ""}` },
         meta)),
     tira()));
+}
+
+/**
+ * A dónde regresa el botón: a la página de la que se llegó, si es una lista o el seguimiento de la
+ * tarea; si no se sabe (enlace directo, aviso, vuelta del programa), al destino natural del perfil:
+ * docente de esta tarea a Mis tareas, su revisor a Por revisar (si la entrega está en esa lista),
+ * coordinación a Tareas.
+ */
+function destinoVolver(c) {
+  const origen = origenConocido({
+    "/app/mis-tareas.html": "Mis tareas", "/app/por-revisar.html": "Por revisar", "/app/tarea.html": "la tarea",
+    "/app/tareas.html": "Tareas", "/app/inicio.html": "el inicio", "/app/panel.html": "el panel",
+  });
+  if (origen) return origen;
+  if (c.esDestinatario) return { texto: "Mis tareas", href: RUTAS.misTareas };
+  // La cola de revisión lista las entregas de «Entregada» en adelante (G4): solo ahí tiene sentido volver.
+  const enLaCola = ["submitted", "under_review", "returned", "approved", "closed"].includes(st.a.status);
+  if (enLaCola && st.a.viewer?.is_reviewer && puedeRevisar(yo)) return { texto: "Por revisar", href: RUTAS.porRevisar };
+  if (tieneRol(yo, "coordinator")) return { texto: "Tareas", href: RUTAS.tareas };
+  if (puedeRevisar(yo)) return { texto: "Por revisar", href: RUTAS.porRevisar };
+  return { texto: "el inicio", href: RUTAS.inicio };
 }
 
 /** La línea de estados como tira delgada: barra de 4 px y etiqueta pequeña. */

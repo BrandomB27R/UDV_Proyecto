@@ -7,7 +7,7 @@ import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, icono, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora, fechaLarga, etiquetaEstado } from "../formato.js";
-import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso, marcaRequisito } from "../componentes.js";
+import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso, marcaRequisito, botonVolver } from "../componentes.js";
 import { api } from "../api.js";
 import { requerirSesion, tieneRol } from "../sesion.js";
 import { bloqueDecision } from "../decision.js";
@@ -142,7 +142,7 @@ function pintar() {
   st.aviso = null;
   const ref = {};
   poner(raiz,
-    rutaDeMigas(),
+    botonVolver({ texto: "Programas de curso", href: RUTAS.programas }),
     franjaTarea(),
     cabecera(),
     aviso ? avisoConEnlace(aviso) : null,
@@ -162,14 +162,6 @@ function pintar() {
   };
   pintarSeccion(ref.seccion);
   refrescarEstado();
-}
-
-function rutaDeMigas() {
-  const g = contenidoDe(st.v, "general");
-  return h("nav", { class: "v-ruta", "aria-label": "Ruta" },
-    h("a", { href: RUTAS.programas }, "Programas de curso"),
-    h("span", { "aria-hidden": "true" }, "/"),
-    h("span", { "aria-current": "page" }, `${g.codigo || ""} · versión ${st.v.numero_version}`));
 }
 
 /** La tarea de la que viene el programa (mockup vinci-revision): siempre que la versión tenga una y se pueda leer. */

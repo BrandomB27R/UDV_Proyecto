@@ -5,7 +5,7 @@ import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { chipEstado, chipPrioridad, plazo, fechaCorta, fechaHora, PRIORIDADES } from "../formato.js";
-import { barraAvance, vacio, todasLasPaginas, tomarAviso, sinAcceso, textoDeError } from "../componentes.js";
+import { barraAvance, vacio, todasLasPaginas, tomarAviso, sinAcceso, textoDeError, botonVolver } from "../componentes.js";
 import { requerirSesion } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
@@ -56,9 +56,7 @@ function pintar() {
   st.aviso = null;
   const p = plazo(t.due_date, { terminada: t.status !== "published" });
   poner(raiz,
-    h("nav", { class: "v-ruta", "aria-label": "Ruta" },
-      h("a", { href: RUTAS.tareas }, "Tareas"), h("span", { "aria-hidden": "true" }, "/"),
-      h("span", { "aria-current": "page" }, st.tipo?.name || "Tarea")),
+    botonVolver({ texto: "Tareas", href: RUTAS.tareas }),
     aviso ? mensaje(aviso.tipo, aviso.texto) : null,
     h("div", { class: "v-cabecera" },
       h("div", { class: "v-fila" },
