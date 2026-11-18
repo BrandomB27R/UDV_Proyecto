@@ -206,10 +206,10 @@ def _call_proc(conn, name, args):
 
 # ---------------------------------------------------------------- task types
 def create_task_type(conn, actor, data):
-    if not _roles(actor) & {COORDINATOR, AUTHORITY}:
+    if not _roles(actor) & {COORDINATOR, AUTHORITY, "admin"}:
         raise Forbidden("Solo coordinación o autoridad pueden crear tipos de tarea")
     if _is_mysql(conn):
-        raise Forbidden("Los tipos de tarea (con su workflow) los administra el Grupo 1")
+        return _create_task_type_mysql(conn, actor, data)
     code = (data.get("code") or "").strip()
     name = (data.get("name") or "").strip()
     flow = data.get("flow", "standard")
@@ -229,13 +229,78 @@ def create_task_type(conn, actor, data):
                                  (cur.lastrowid,)).fetchone())
 
 
+_TYPE_COLS_MYSQL = ("SELECT id, codigo AS code, nombre AS name,"
+                    " requiere_archivo AS requires_evidence, extensiones AS evidence_type,"
+                    " 'standard' AS flow, creado_en AS created_at,"
+                    " modalidad_entrega AS delivery_mode, descripcion AS description")
+# Formas de entrega que se pueden elegir al crear un tipo: (modalidad de G1, exige archivo, extensiones).
+_DELIVERIES = {"texto": ("texto", 0, None), "ambos": ("ambos", 0, "pdf"), "archivo": ("ambos", 1, "pdf")}
+
+
+def _create_task_type_mysql(conn, actor, data):
+    """Crea un tipo de tarea con su workflow estándar (el mismo recorrido de los tipos de G1).
+
+    El tipo solo decide cómo se entrega: `texto` (sin archivos), `ambos` (texto y archivo
+    opcional) o `archivo` (texto y al menos un archivo). Los estados y quién ejecuta cada
+    acción se copian del workflow estándar, así que el flujo es el mismo para todos.
+    """
+    name = " ".join((data.get("name") or "").split())
+    if not name:
+        raise ValidationFailed("name es obligatorio", details={"field": "name"})
+    if len(name) > 100:
+        raise ValidationFailed("name admite hasta 100 caracteres", details={"field": "name"})
+    description = (data.get("description") or "").strip() or None
+    if description and len(description) > 300:
+        raise ValidationFailed("description admite hasta 300 caracteres", details={"field": "description"})
+    delivery = data.get("delivery") or ("archivo" if data.get("requires_evidence") else "ambos")
+    if delivery not in _DELIVERIES:
+        raise ValidationFailed("delivery inválido", details={"field": "delivery", "valid": sorted(_DELIVERIES)})
+    mode, requires_file, extensions = _DELIVERIES[delivery]
+    code = (data.get("code") or "").strip().upper()
+    if not code:
+        import re
+        import unicodedata
+        plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+        code = re.sub(r"[^A-Z0-9]+", "_", plain.upper()).strip("_")[:30].strip("_")
+    if not code or len(code) > 30:
+        raise ValidationFailed("code debe tener entre 1 y 30 caracteres", details={"field": "code"})
+    with transaction(conn):
+        set_actor(conn, actor["id"])
+        if conn.execute("SELECT 1 FROM tipo_tarea WHERE codigo = ? OR LOWER(nombre) = LOWER(?)",
+                        (code, name)).fetchone():
+            raise Conflict(f"Ya existe un tipo de tarea llamado '{name}'")
+        template = conn.execute(
+            "SELECT w.id FROM workflow w WHERE w.activo = 1"
+            " AND EXISTS (SELECT 1 FROM workflow_detalle wd WHERE wd.workflow_id = w.id)"
+            " ORDER BY w.id LIMIT 1").fetchone()
+        if template is None:
+            raise Conflict("No hay un workflow estándar del cual copiar las transiciones")
+        type_id = conn.execute(
+            "INSERT INTO tipo_tarea(codigo, nombre, descripcion, modalidad_entrega,"
+            " requiere_archivo, extensiones, tamano_max_mb) VALUES (?,?,?,?,?,?,5)",
+            (code, name, description, mode, requires_file, extensions)).lastrowid
+        workflow_id = conn.execute(
+            "INSERT INTO workflow(nombre, tipo_tarea_id) VALUES (?, ?)",
+            (f"Flujo estandar - {name}"[:100], type_id)).lastrowid
+        conn.execute(
+            "INSERT INTO workflow_detalle(workflow_id, estado_origen, estado_destino, accion)"
+            " SELECT ?, estado_origen, estado_destino, accion FROM workflow_detalle"
+            " WHERE workflow_id = ? ORDER BY id", (workflow_id, template["id"]))
+        conn.execute(
+            "INSERT INTO workflow_detalle_rol(workflow_detalle_id, rol_id)"
+            " SELECT n.id, r.rol_id FROM workflow_detalle o"
+            " JOIN workflow_detalle_rol r ON r.workflow_detalle_id = o.id"
+            " JOIN workflow_detalle n ON n.workflow_id = ? AND n.estado_origen <=> o.estado_origen"
+            "  AND n.estado_destino = o.estado_destino"
+            " WHERE o.workflow_id = ?", (workflow_id, template["id"]))
+        return dict(conn.execute(_TYPE_COLS_MYSQL + " FROM tipo_tarea WHERE id = ?",
+                                 (type_id,)).fetchone())
+
+
 def list_task_types(conn, page=1, page_size=20):
     if _is_mysql(conn):
-        return _paged(
-            conn, "SELECT id, codigo AS code, nombre AS name,"
-                  " requiere_archivo AS requires_evidence, extensiones AS evidence_type,"
-                  " 'standard' AS flow, creado_en AS created_at",
-            "FROM tipo_tarea WHERE activo = 1", [], "id", page, page_size)
+        return _paged(conn, _TYPE_COLS_MYSQL,
+                      "FROM tipo_tarea WHERE activo = 1", [], "id", page, page_size)
     return _paged(conn, "SELECT *", "FROM task_types", [], "id", page, page_size)
 
 

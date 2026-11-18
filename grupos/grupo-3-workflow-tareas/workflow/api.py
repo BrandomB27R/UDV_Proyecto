@@ -116,11 +116,13 @@ router = APIRouter(prefix=PREFIX, route_class=FormatoErrorRoute)
 
 # ---------------------------------------------------------------- esquemas
 class TaskTypeIn(BaseModel):
-    code: str
+    code: Optional[str] = None             # si falta, se arma a partir del nombre
     name: str
     requires_evidence: bool = False
     evidence_type: Optional[str] = None
     flow: str = "standard"
+    delivery: Optional[str] = None         # texto | ambos | archivo
+    description: Optional[str] = None
 
 
 class TaskIn(BaseModel):
