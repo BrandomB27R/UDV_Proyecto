@@ -98,7 +98,11 @@ camino de MySQL. Hay dos archivos que sí usan una base de verdad:
    restos viejos ni cambios fuera de la carpeta, y corre todas las
    pruebas: las nuestras, las de MySQL y las de integración del PM que
    tocan a G4. Si algo falla, se detiene y dice qué.
-4. Si pasa, otra persona del equipo revisa el cambio antes del push.
+4. Si cambiaste un archivo de `g4_inbox/static/js` o `g4_inbox/static/css`,
+   cambia también el `?v=` en `inbox.html`, `detalle.html` y `revision.html`
+   (el mismo valor en las tres; la prueba lo revisa). Si no, el navegador de
+   quien prueba sigue usando el archivo viejo.
+5. Si pasa, otra persona del equipo revisa el cambio antes del push.
 
 `py verificar.py --sin-mysql` sirve para revisar rápido mientras se
 trabaja, pero ese resultado no vale para abrir el PR.

@@ -53,23 +53,29 @@ ROLES_CON_ACCESO_GLOBAL = {"coordinator", "admin"}
 ROLES_SOLO_LECTURA = {"auditor"}
 
 
-def _exigir_acceso(asignacion: dict, usuario: Usuario, permiso: str) -> None:
-    """Corta con 403 si el usuario no puede hacer `permiso` sobre esta asignación.
+def _puede(asignacion: dict, usuario: Usuario, permiso: str) -> bool:
+    """True si el usuario puede hacer `permiso` sobre esta asignación.
 
     permiso: "ver", "comentar" o "modificar" (borrador y archivos del docente).
     """
     assert permiso in ("ver", "comentar", "modificar")
     if asignacion["assignee_id"] == usuario.id:
-        return
+        return True
     roles = {r.codigo for r in (usuario.roles or [])}
     if "reviewer" in roles and asignacion.get("reviewer_id") == usuario.id:
         roles.add("revisor_designado")
-    puede_ver_y_comentar = roles & (ROLES_CON_ACCESO_GLOBAL | {"revisor_designado"})
-    if permiso == "ver" and (puede_ver_y_comentar or roles & ROLES_SOLO_LECTURA):
-        return
-    if permiso == "comentar" and puede_ver_y_comentar:
-        return
-    raise HTTPException(status_code=403, detail="No tienes acceso a esta asignación")
+    puede_ver_y_comentar = bool(roles & (ROLES_CON_ACCESO_GLOBAL | {"revisor_designado"}))
+    if permiso == "ver":
+        return puede_ver_y_comentar or bool(roles & ROLES_SOLO_LECTURA)
+    if permiso == "comentar":
+        return puede_ver_y_comentar
+    return False
+
+
+def _exigir_acceso(asignacion: dict, usuario: Usuario, permiso: str) -> None:
+    """Corta con 403 si el usuario no puede hacer `permiso` sobre esta asignación."""
+    if not _puede(asignacion, usuario, permiso):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta asignación")
 
 
 # ============================================================================
@@ -120,6 +126,10 @@ def _construir_db() -> List[dict]:
         item.update(DETALLE_EXTRA.get(item["id"], {}))
         item["requiere_archivo"] = REQUIERE_ARCHIVO_POR_TIPO.get(item["task_type"], True)
         item["reviewer_id"] = 5  # en los datos de ejemplo el revisor designado es el usuario 5
+        # Cómo se entrega, como lo manda database.py con tipo_tarea de G1
+        item["delivery"] = {"mode": "ambos" if item["requiere_archivo"] else "texto",
+                            "extensions": ["jpeg", "jpg", "pdf", "png"], "max_mb": 5, "not_accepted": []}
+        item["program_version"] = None
         item["history"] = [{"action": "publish", "new_status": "assigned", "actor": "coordinacion"}]
         item["last_return"] = None
         item["last_approval"] = None
@@ -252,7 +262,8 @@ def _papel_del_usuario(asignacion: dict, usuario: Usuario) -> dict:
         es_revisor = revisor == usuario.id
     else:
         es_revisor = bool(roles & {"coordinator", "admin"})
-    return {"is_assignee": asignacion["assignee_id"] == usuario.id, "is_reviewer": es_revisor}
+    return {"is_assignee": asignacion["assignee_id"] == usuario.id, "is_reviewer": es_revisor,
+            "can_comment": _puede(asignacion, usuario, "comentar")}
 
 
 # ============================================================================
@@ -296,7 +307,8 @@ def crear_comentario(assignment_id: int, comentario: ComentarioIn,
     _exigir_acceso(a, usuario, "comentar")
     if USAR_MYSQL:
         return database.crear_comentario(assignment_id, usuario.id, comentario.text)
-    nuevo = {"author": str(usuario.id), "text": comentario.text}
+    nuevo = {"id": len(a["comments"]) + 1, "author": str(usuario.id),
+             "author_name": f"Usuario {usuario.id}", "text": comentario.text, "at": None}
     a["comments"].append(nuevo)
     return nuevo
 
