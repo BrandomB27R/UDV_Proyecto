@@ -141,3 +141,21 @@ asignación (y los devuelve en `viewer_actions`). Así la tarea podría quedar
 aprobada con el programa sin aprobar, o devuelta con el programa en revisión. Si el
 PM lo decide, el G4 puede rechazar con 409 approve y return directos cuando la
 asignación tiene `program_version` (y quitarlos de `viewer_actions`).
+
+## Aprobadas y por cerrar (18-nov)
+
+### 12. Quién aprobó y cuándo, en las listas (G4)
+
+«Listas para cerrar» (inicio de coordinación) y «Terminadas hace poco» (inicio del
+docente) muestran quién aprobó y hace cuánto. `/review-queue` y `/inbox` no lo traen,
+así que la pantalla pide `GET /assignments/{id}` de cada fila (`last_approval` e
+`history`):
+- coordinación: una consulta por entrega aprobada de las tareas que creó; con el
+  detalle también confirma `close` en `viewer_actions`;
+- docente: una consulta por asignación aprobada o cerrada, como mucho las 20 más
+  nuevas, para saber cuáles terminaron en los últimos 14 días.
+
+Propuesta: que las filas de `/review-queue` y `/inbox` traigan `approved_by_name`,
+`approved_at` y `closed_at` (y en la cola, `can_close` con la misma regla de
+`viewer_actions`). Con eso se quitan las consultas por fila y el tope de 20.
+
