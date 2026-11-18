@@ -5,7 +5,7 @@ import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
 import { pestanas, vacio, sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
-import { requerirSesion, perfiles } from "../sesion.js";
+import { requerirSesion, perfiles, puedeRevisar } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -26,9 +26,9 @@ const pest = h("div");
 function destino(evento = "") {
   const e = String(evento);
   if (e.startsWith("program.")) return { texto: "Ver programas de curso", href: RUTAS.programas };
-  if (/submitted|resubmitted/.test(e) && p.coordinacion) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
+  if (/submitted|resubmitted/.test(e) && puedeRevisar(yo)) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
   if (e.startsWith("assignment.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
-  if (e.startsWith("assignment.") && p.coordinacion) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
+  if (e.startsWith("assignment.") && puedeRevisar(yo)) return { texto: "Ir a Por revisar", href: RUTAS.porRevisar };
   if (e.startsWith("task.") && (yo.roles || []).includes("coordinator")) return { texto: "Ir a Tareas", href: RUTAS.tareas };
   if (e.startsWith("task.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
   return null;

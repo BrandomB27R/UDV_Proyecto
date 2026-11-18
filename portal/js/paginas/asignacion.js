@@ -9,7 +9,7 @@ import {
 import {
   LINEA, lineaDeEstados, capacidades, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial,
 } from "../flujo.js";
-import { requerirSesion, tienePermiso, perfiles } from "../sesion.js";
+import { requerirSesion, tienePermiso, perfiles, puedeRevisar } from "../sesion.js";
 import { sinAcceso } from "../componentes.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;          // límite del G2
@@ -44,7 +44,7 @@ const st = {
 
 function seccionDeOrigen() {
   const p = perfiles(yo.roles);
-  return p.docente && !p.coordinacion ? "mis-tareas" : p.coordinacion ? "por-revisar" : "inicio";
+  return p.docente && !puedeRevisar(yo) ? "mis-tareas" : puedeRevisar(yo) ? "por-revisar" : "inicio";
 }
 
 async function cargar() {
@@ -128,7 +128,7 @@ function pintar() {
 function rutaDeMigas(c) {
   const p = perfiles(yo.roles);
   const [texto, href] = c.esDestinatario ? ["Mis tareas", RUTAS.misTareas]
-    : p.coordinacion ? ["Por revisar", RUTAS.porRevisar] : ["Inicio", RUTAS.inicio];
+    : puedeRevisar(yo) ? ["Por revisar", RUTAS.porRevisar] : ["Inicio", RUTAS.inicio];
   return h("nav", { class: "v-ruta", "aria-label": "Ruta" },
     h("a", { href }, texto), h("span", { "aria-hidden": "true" }, "/"),
     h("span", { "aria-current": "page" }, etiquetaTipo(st.a.task_type)));

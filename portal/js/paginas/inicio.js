@@ -1,11 +1,11 @@
 // Inicio según el perfil (requisito 4): una frase de qué le toca hoy y solo sus secciones.
 // Versión mínima de la etapa 1: las listas completas viven en Mis tareas y Por revisar.
 import { api, lista } from "../api.js";
-import { montarBarra } from "../barra.js";
+import { montarBarra, puedeVerPanel } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { filaAsignacion, vacio } from "../componentes.js";
-import { requerirSesion, perfiles } from "../sesion.js";
+import { requerirSesion, perfiles, puedeRevisar } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -17,7 +17,7 @@ const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 const bloques = [];
 const frases = [];
 
-if (p.coordinacion) {
+if (puedeRevisar(yo)) {
   try {
     const r = await api("/review-queue?per_page=5");
     const s = r.summary || {};
@@ -59,6 +59,26 @@ if (p.docente) {
   } catch (e) { bloques.push(mensaje("error", e.message)); }
 }
 
+// Quien ve el panel pero no revisa (dirección o auditoría solas): el inicio es el resumen del panel.
+if (puedeVerPanel(yo) && !puedeRevisar(yo)) {
+  try {
+    const d = await api("/dashboard?limit=1");
+    const c = d.compliance || {};
+    const vencidas = Number(d.overdue?.total) || 0;
+    const pronto = Number(d.due_soon?.total) || 0;
+    if (c.percentage != null) frases.push(`Cumplimiento del ${Number(c.percentage).toLocaleString("es-GT", { maximumFractionDigits: 1 })} %`);
+    if (vencidas) frases.push(plural(vencidas, "asignación vencida", "asignaciones vencidas"));
+    bloques.push(h("section", { class: "v-card", "aria-label": "Panel de cumplimiento" },
+      h("h2", { class: "v-h2" }, "Panel de cumplimiento"),
+      h("p", { class: "v-texto" }, [
+        c.expected ? `${c.completed} de ${c.expected} asignaciones ya entregadas` : "Todavía no hay asignaciones",
+        plural(vencidas, "vencida", "vencidas"),
+        `${pronto} por vencer en ${d.due_soon_days ?? 3} días`,
+      ].join(" · ") + "."),
+      h("div", { class: "v-acciones" }, h("a", { class: "v-btn", href: RUTAS.panel }, "Abrir el panel"))));
+  } catch (e) { bloques.push(mensaje("error", e.message)); }
+}
+
 if (p.administracion) {
   bloques.push(h("section", { class: "v-card" },
     h("h2", { class: "v-h2" }, "Administración"),
@@ -67,7 +87,7 @@ if (p.administracion) {
       h("a", { class: "v-btn v-btn--sec", href: RUTAS.panel }, "Panel"),
       h("a", { class: "v-btn v-btn--sec", href: RUTAS.catalogos }, "Catálogos"),
       h("a", { class: "v-btn v-btn--sec", href: RUTAS.auditoria }, "Auditoría"))));
-  if (!p.docente && !p.coordinacion) frases.push("Consulta el panel, los catálogos y la auditoría");
+  if (!p.docente && !p.coordinacion && !frases.length) frases.push("Consulta el panel, los catálogos y la auditoría");
 }
 
 const frase = frases.length ? `${frases.join(" · ")}.` : "No tienes nada pendiente por hoy.";
