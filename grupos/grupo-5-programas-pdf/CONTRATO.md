@@ -43,6 +43,8 @@ Todas las rutas llevan el prefijo `/api/v1` (CONTRATO_COMUN.md §1).
 | POST | /program-versions/{id}/authorize | Autorizar y declarar vigente |
 | GET | /program-versions/{id}/pdf | Generar o descargar PDF |
 | GET | /program-versions/{id}/changes | Comparar con versión anterior |
+| POST | /program-versions/for-assignment/{assignment_id} | Abrir (o devolver) el borrador del programa que pide una tarea asignada |
+| GET | /graduate-profiles | Catálogo de perfiles de egreso: `{data:[{id, codigo, descripcion, programa_academico}], total}` |
 
 Transiciones válidas de una versión de programa:
 
@@ -130,3 +132,4 @@ integración con el mecanismo compartido de eventos.
 | 2026-11-13 | Docente elabora y envía; coordinación y revisor aprueban; dirección autoriza | Decisión del PM con el ingeniero | PM |
 | 2026-11-16 | Listas del formulario alineadas con la API; responsables persistidos; lectura docente limitada a sus versiones; quien crea o envía no aprueba; texto del PDF normaliza entidades HTML | Auditoría de integración | PM |
 | 2026-11-17 | **Lectura:** un docente lee sus propias versiones en cualquier estado y las versiones autorizadas (vigentes o anteriores) de cualquier programa; un borrador ajeno responde 404. Aplica a `GET /course-programs`, `/course-programs/{id}`, `/program-versions/{id}`, `/changes` y `/pdf`. **PDF:** se arma como documento (encabezado con escudo, ficha de datos generales, una tabla o lista por sección, contenidos por unidad, evaluación con total, firmas y pie con número de página), sin identificadores internos ni secciones vacías. Los errores de los triggers del G1 llegan como mensaje limpio | El historial del programa es del curso, no del docente (PM, 17-nov); hallazgo de QA G5 sobre el PDF | PM (17-nov), hecho por el PM tras el cierre de entregas |
+| 2026-11-17 | **Programa desde la tarea:** `POST /program-versions/for-assignment/{assignment_id}` lo llama el docente de la asignación (otro usuario: 403). Si ya hay una versión ligada a la asignación la devuelve; si no, abre un borrador copiando la última versión autorizada del curso de la tarea (de cualquier período), con el período de la tarea, el docente como responsable y la asignación como origen. 422 si la tarea no indica curso y período; 409 si el curso no tiene un programa autorizado. **`viewer_actions`** en `GET /program-versions/{id}` y en la respuesta anterior: subconjunto de `edit, submit, review, return, approve, authorize` según rol, estado y la regla de que quien elaboró, es responsable o envió no aprueba. **Catálogo** `GET /graduate-profiles` | La tarea «Actualizar programa» debe llevar al docente a su programa y la pantalla debe mostrar solo los botones que funcionan (interfaz Vinci) | PM (17-nov), hecho por el PM tras el cierre de entregas |
