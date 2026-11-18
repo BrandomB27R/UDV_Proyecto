@@ -137,10 +137,12 @@ export function queSigue(item) {
 
 /**
  * Lo que toca ahora. ctx: {texto, textoCambiado, leyoDevolucion, motivo, nombres: {docente, revisor, creador}, programa}
- * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria}
+ * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria, decision, irAlPrograma}
  *   turno: "tuyo" | "espera" | "fin"
  *   requisitos: [{id, titulo, estado, detalle, nota}]
  *   principal/secundaria: {accion, etiqueta, habilitada, motivo}
+ *   decision: quien revisa elige entre aprobar y devolver (js/decision.js); sin requisitos ni barra fija
+ *   irAlPrograma: la entrega es un programa y se aprueba o devuelve en su página
  */
 export function pasoActual(a, yo, ctx = {}) {
   const c = capacidades(a);
@@ -232,29 +234,27 @@ export function pasoActual(a, yo, ctx = {}) {
     };
   }
   if (c.return || c.approve) {
-    const motivoListo = !!(ctx.motivo || "").trim();
-    const req = [
-      { id: "revisar", titulo: "Revisa el texto y los archivos", estado: ETQ.opcional, detalle: "Están abajo, en «La entrega»." },
-    ];
-    if (c.return) {
-      req.push({ id: "motivo", titulo: "Para devolver, escribe el motivo", estado: motivoListo ? ETQ.hecho : ETQ.pendiente,
-        nota: "obligatorio para devolver", detalle: "El docente lo verá como «Observación del revisor»." });
-    }
-    const devolver = c.return ? { accion: "return", etiqueta: "Devolver", habilitada: motivoListo, motivo: motivoListo ? "" : "«Devolver» se habilita cuando escribas el motivo." } : null;
-    if (c.approve) {
+    // La entrega de una tarea de programa es la versión: se aprueba o devuelve en su página y la tarea
+    // la sigue (programa.js encadena). Aquí no se ofrece aprobar ni devolver la asignación directo.
+    if (forma.programa && a.program_version?.id) {
       return {
-        turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Aprueba o devuelve la entrega",
-        resumen: "Si todo está bien, apruébala. Si falta algo, devuélvela con una observación.",
-        requisitos: req,
-        principal: { accion: "approve", etiqueta: "Aprobar", habilitada: true },
-        secundaria: devolver,
-        conMotivo: !!c.return,
+        turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Revisa el programa",
+        resumen: "La entrega de esta tarea es el programa de curso. Apruébalo o devuélvelo desde su página; la tarea avanza con él.",
+        requisitos: [], principal: null, irAlPrograma: true,
       };
     }
+    const creador = ctx.nombres?.creador || "coordinación";
     return {
-      turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Revisa la entrega",
-      resumen: "Puedes devolverla con una observación. Aprobarla le corresponde a dirección.",
-      requisitos: req, principal: devolver, conMotivo: true,
+      turno: "tuyo", eyebrow: "Te toca a ti", titulo: c.approve ? "Aprueba o devuelve la entrega" : "Revisa la entrega",
+      resumen: "", requisitos: [], principal: null,
+      decision: {
+        guia: c.approve ? "Revisa el texto y los archivos, que están abajo, y elige una de las dos opciones." : "Revisa el texto y los archivos, que están abajo.",
+        irA: "Ir a la entrega ↓",
+        aprobar: c.approve ? { texto: `La entrega queda «Aprobada». Después ${creador} cierra la tarea.`, etiqueta: "Aprobar la entrega" } : null,
+        devolver: c.return ? { texto: `La entrega vuelve a ${docente} con tu observación, para que la corrija y la entregue de nuevo.`, docente,
+          placeholder: "Por ejemplo: falta la bibliografía actualizada de la unidad 3." } : null,
+        nota: c.approve ? null : "Aprobarla le corresponde a dirección.",
+      },
     };
   }
   if (c.close) {
