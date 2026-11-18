@@ -137,7 +137,8 @@ class ViewerActionsTests(unittest.TestCase):
         cases = (
             ({"teacher"}, 3, "draft", None, ["edit", "submit"]),
             ({"teacher"}, 4, "draft", None, []),
-            ({"coordinator", "reviewer", "authority"}, 2, "returned", None, ["edit", "submit"]),
+            ({"coordinator", "reviewer", "authority"}, 2, "returned", None, ["edit_responsibles"]),
+            ({"reviewer", "teacher"}, 3, "draft", None, ["edit", "edit_responsibles", "submit"]),
             ({"teacher"}, 3, "submitted", None, []),
             ({"reviewer"}, 5, "submitted", None, ["review"]),
             ({"reviewer"}, 5, "under_review", 3, ["return", "approve"]),

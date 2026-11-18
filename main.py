@@ -90,11 +90,29 @@ PANTALLAS = [
     ("/app/g6",     "grupos/grupo-6-administracion/g6_admin/pantallas"),# G6: panel, catálogos, auditoría
     ("/app",        "portal"),                                          # inicio y login (PM)
 ]
+
+
+class PantallasSinCacheVieja(StaticFiles):
+    """Sirve las pantallas pidiendo al navegador que revalide cada archivo.
+
+    Sin esta cabecera el navegador decide por su cuenta cuánto guardar cada
+    archivo, y tras un despliegue puede mezclar un módulo nuevo con uno viejo
+    (pantalla en blanco: "does not provide an export named ..."). Con
+    ``no-cache`` sigue guardando, pero antes de usar la copia pregunta si
+    cambió (ETag); si no cambió, la respuesta es un 304 sin contenido.
+    """
+
+    async def get_response(self, path, scope):
+        respuesta = await super().get_response(path, scope)
+        respuesta.headers["Cache-Control"] = "no-cache"
+        return respuesta
+
+
 pantallas_montadas = []
 for ruta, carpeta in PANTALLAS:
     directorio = RAIZ / carpeta
     if directorio.is_dir():
-        app.mount(ruta, StaticFiles(directory=str(directorio), html=True), name=ruta.strip("/").replace("/", "-"))
+        app.mount(ruta, PantallasSinCacheVieja(directory=str(directorio), html=True), name=ruta.strip("/").replace("/", "-"))
         pantallas_montadas.append(ruta)
     else:
         log.warning("Pantalla omitida %s -> no existe %s", ruta, carpeta)

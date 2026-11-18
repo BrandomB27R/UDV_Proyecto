@@ -720,7 +720,16 @@ def test_viewer_actions_del_programa_sigue_el_flujo(c, s):
         assert r.status_code == 200, f"{accion}: {r.status_code} {r.text[:300]}"
 
     assert puede("docente2") == ["edit", "submit"]
-    assert puede("revisor") == ["edit"]            # gestiona programas, pero no es quien lo envía
+    assert puede("revisor") == ["edit_responsibles"]   # gestiona programas: no escribe el contenido
+    assert puede("coordinacion") == ["edit_responsibles"]
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/submit", headers=s["coordinacion"], json={}), 403)
+    seccion = f"/api/v1/program-versions/{vid}/sections"
+    texto = {"contenido": {"texto": "Corregido por coordinación"}}
+    es_error_comun(c.put(f"{seccion}/descripcion", headers=s["coordinacion"], json=texto), 403)
+    es_error_comun(c.put(f"{seccion}/descripcion", headers=s["revisor"], json=texto), 403)
+    es_error_comun(c.put(f"{seccion}/descripcion", headers=s["admin"], json=texto), 403)
+    assert c.put(f"{seccion}/responsables", headers=s["coordinacion"], json={"contenido": {"coordinador": "Coordinación Demo"}}).status_code == 200
+    assert c.put(f"{seccion}/descripcion", headers=s["docente2"], json={"contenido": {"texto": "Escrito por el docente"}}).status_code == 200
     assert puede("auditoria") == [] and puede("direccion") == []
     hacer("submit", "docente2")
     assert puede("docente2") == [] and puede("revisor") == ["review"]
@@ -738,16 +747,17 @@ def test_viewer_actions_del_programa_sigue_el_flujo(c, s):
     assert puede("direccion") == [] and puede("docente2") == []
 
 
-def test_quien_envio_el_programa_no_tiene_la_accion_de_aprobarlo(c, s):
+def test_solo_el_docente_responsable_envia_el_programa(c, s):
     a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
     vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
-    # La coordinación lo envía en nombre del docente y luego lo toma en revisión.
-    assert c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["coordinacion"]).status_code == 200
+    # Coordinación ya no lo envía en nombre del docente: lo elabora y lo envía su responsable.
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["coordinacion"]), 403)
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["docente2"]), 403)
+    assert c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["docente1"]).status_code == 200
     assert c.post(f"/api/v1/program-versions/{vid}/review", json={}, headers=s["coordinacion"]).status_code == 200
     acciones = c.get(f"/api/v1/program-versions/{vid}", headers=s["coordinacion"]).json()["viewer_actions"]
-    assert acciones == ["return"]
-    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/approve", json={}, headers=s["coordinacion"]), 409)
-    assert c.get(f"/api/v1/program-versions/{vid}", headers=s["revisor"]).json()["viewer_actions"] == ["return", "approve"]
+    assert acciones == ["return", "approve"]
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/approve", json={}, headers=s["docente1"]), 403)
 
 
 def test_catalogo_de_perfiles_de_egreso(c, s):
@@ -917,3 +927,14 @@ def test_la_bandeja_del_docente_dice_quien_revisa_cuando_entrego_y_por_que_se_de
     assert fila()["last_return_comment"] == "Falta el horario."
     assert _accion(c, s["docente1"], a, "resubmit").status_code == 200
     assert fila()["last_return_comment"] is None          # ya no está devuelta
+
+
+def test_pantallas_piden_revalidar_para_no_mezclar_versiones(c):
+    """Tras un despliegue el navegador no debe usar módulos viejos sin preguntar."""
+    r = c.get("/app/js/formato.js")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    etag = r.headers["etag"]
+    r2 = c.get("/app/js/formato.js", headers={"If-None-Match": etag})
+    assert r2.status_code == 304
+    assert r2.headers["cache-control"] == "no-cache"

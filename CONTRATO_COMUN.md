@@ -115,6 +115,15 @@ con sus roles, con el revisor designado o el creador de la tarea y con la
 regla de que quien elaboró o envió un programa no lo aprueba. La interfaz
 pinta solo esos botones.
 
+**K. Quién escribe el programa (G5).** El contenido de una versión en
+`draft` o `returned` lo guarda (`PUT /program-versions/{id}` y
+`/sections/{section}`) y lo envía (`/submit`) solo su docente responsable; a
+los demás responde `403`. Quien gestiona programas (coordinación, revisión,
+administración) conserva la sección `responsables` y el cambio de docente
+responsable. En `viewer_actions` eso se ve así: `edit` y `submit` para el
+responsable, `edit_responsibles` para quien gestiona. Una versión sin docente
+responsable sigue la regla anterior, para que no quede sin nadie que la trabaje.
+
 **H. El programa nace de la tarea (G3, G4 y G5).** Una tarea de tipo
 «Actualizar programa» guarda `course_id` y `period_id` (G3). El docente de la
 asignación llama a `POST /program-versions/for-assignment/{assignment_id}`
@@ -175,3 +184,4 @@ Cada CONTRATO.md traduce esta definición a su checklist de PR.
 | 2026-11-17 (noche) | §2c: regla D como quedó implementada; nueva regla E (perfil de coordinación) | Cierre de entregas; decisión del PM |
 | 2026-11-17 (noche, 2) | §2c A: el texto del intento abierto se actualiza al entregar; un intento enviado sigue inmutable | Decisión del PM; migración 1.2.3 |
 | 2026-11-18 | §1b: Vinci es la entrada y la aplicación; los botones salen de `viewer_actions`. §2b: `for-assignment` y `/graduate-profiles` son del G5. §2c: reglas G (acciones de quien mira), H (el programa nace de la tarea), I (tipos de tarea) y J (quitar un archivo) | Interfaz unificada y los cambios de backend que la acompañan, hechos por el PM tras el cierre de entregas (PR #49 a #57) |
+| 2026-11-18 (2) | §2c: regla K (el contenido del programa lo escribe y lo envía su docente responsable; nueva acción `edit_responsibles`) | Hallazgo de QA: coordinación podía corregir el programa del docente en vez de devolverlo |

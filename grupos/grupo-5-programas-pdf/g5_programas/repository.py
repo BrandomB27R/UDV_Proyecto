@@ -744,11 +744,11 @@ def _viewer_actions(session: Session, actor: Actor, row: dict) -> list[str]:
     responsible_id = row.get("docente_responsable_id")
     actions = []
     if status in {"draft", "returned"}:
-        is_assigned_teacher = "teacher" in actor.roles and actor.id == responsible_id
-        if has_role(actor, "manager") or (has_role(actor, "author") and is_assigned_teacher):
+        if _can_edit_content(actor, row):
             actions.append("edit")
-        only_teacher = "teacher" in actor.roles and "coordinator" not in actor.roles
-        if has_role(actor, "author") and not (only_teacher and actor.id != responsible_id):
+        if has_role(actor, "manager"):
+            actions.append("edit_responsibles")
+        if has_role(actor, "author") and _can_submit(actor, responsible_id):
             actions.append("submit")
     if status == "submitted" and has_role(actor, "reviewer"):
         actions.append("review")
@@ -759,6 +759,46 @@ def _viewer_actions(session: Session, actor: Actor, row: dict) -> list[str]:
     if status == "approved" and has_role(actor, "authority"):
         actions.append("authorize")
     return actions
+
+
+def _can_edit_content(actor: Actor, row: dict) -> bool:
+    """Indica si el usuario puede escribir el contenido del programa.
+
+    El contenido lo escribe el docente responsable. Quien gestiona programas
+    (coordinación, revisión, administración) lo lee, lo devuelve o lo aprueba,
+    pero no lo corrige: si algo está mal, se devuelve con un comentario. La
+    única salvedad es una versión que todavía no tiene docente responsable,
+    para que no quede sin nadie que pueda trabajarla.
+    """
+    responsible_id = row.get("docente_responsable_id")
+    if responsible_id is None:
+        return has_role(actor, "manager")
+    return (
+        has_role(actor, "author")
+        and "teacher" in actor.roles
+        and actor.id == responsible_id
+    )
+
+
+def _can_submit(actor: Actor, responsible_id: int | None) -> bool:
+    """Envía a revisión quien lo elaboró: el docente responsable.
+
+    Si la versión aún no tiene responsable se conserva la regla anterior:
+    coordinación puede enviarla y un docente ajeno no.
+    """
+    if responsible_id is None:
+        return not ("teacher" in actor.roles and "coordinator" not in actor.roles)
+    return actor.id == responsible_id
+
+
+def _require_can_edit_content(actor: Actor, row: dict) -> None:
+    if not _can_edit_content(actor, row):
+        raise ApiError(
+            403,
+            "FORBIDDEN",
+            "Solo el docente responsable puede editar el contenido del programa. "
+            "Si necesita cambios, devuélvelo con un comentario.",
+        )
 
 
 def _took_part_in_authoring(session: Session, actor: Actor, row: dict) -> bool:
@@ -950,12 +990,7 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
         set_database_actor(session, actor)
         row = _require_version(session, version_id, lock=True)
         is_manager = has_role(actor, "manager")
-        is_author = has_role(actor, "author")
-        is_assigned_teacher = (
-            "teacher" in actor.roles
-            and actor.id == row.get("docente_responsable_id")
-        )
-        if not is_manager and not (is_author and is_assigned_teacher):
+        if not is_manager and not _can_edit_content(actor, row):
             raise ApiError(
                 403,
                 "FORBIDDEN",
@@ -976,7 +1011,9 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
             content = body.get("contenido")
             if not isinstance(content, (dict, list)):
                 raise ApiError(422, "VALIDATION_ERROR", "El contenido debe ser un objeto o una lista.", {"contenido": "Formato no válido."})
-            if section == "responsables" and isinstance(content, dict):
+            if section != "responsables":
+                _require_can_edit_content(actor, row)
+            elif isinstance(content, dict):
                 _require_manager_for_responsible_change(actor, row, content)
             content = _merge_section_content(
                 current_sections[section]["contenido"],
@@ -997,6 +1034,8 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
             if "secciones" in body:
                 _validate_sections(body["secciones"])
                 for name, value in body["secciones"].items():
+                    if name != "responsables":
+                        _require_can_edit_content(actor, row)
                     content = _merge_section_content(
                         current_sections[name]["contenido"],
                         value["contenido"],
@@ -1016,6 +1055,7 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
                         row,
                     )
             if "resumen_cambios" in body:
+                _require_can_edit_content(actor, row)
                 session.execute(
                     text("UPDATE programa_version SET resumen_cambios = :value WHERE id = :id"),
                     {"value": body["resumen_cambios"], "id": version_id},
@@ -1077,7 +1117,12 @@ def transition(
             )
 
         if action == "submit":
-            _require_teacher_is_responsible(actor, row.get("docente_responsable_id"))
+            if not _can_submit(actor, row.get("docente_responsable_id")):
+                raise ApiError(
+                    403,
+                    "FORBIDDEN",
+                    "Solo el docente responsable puede enviar el programa a revisión.",
+                )
             _validate_for_submit(session, version_id, row)
         if action == "return" and not (comment and comment.strip()):
             raise ApiError(422, "VALIDATION_ERROR", "La devolución requiere una observación.", {"comentario": "Este campo es obligatorio."})
