@@ -9,7 +9,7 @@ Prioridad: **Alta** → **Media** → **Baja**. El Planner de Allison tiene tres
 | Aviso | Quién | Estado al 18-nov |
 |-|-|-|
 | Pantalla de login apuntaba a `localhost` y no guardaba el token | Robert (archivo de Fulvio) | 🔵 `script.js`: ruta relativa `/api/v1/auth/login`, `sessionStorage.setItem("udv_token", ...)` y redirección a `/app/`. Falta que Fulvio lo revise y el PR 14-nov: QA probó el login integrado en Railway y dio 5/5 PASS (portal, autenticación, `udv_token`, acceso a G4 y logout). |
-| Avisar en el grupo antes de cambiar algo compartido (errores, auth, Swagger); el cambio de formato rompió 3 pruebas del G6 | Todos (Edgar, Randy, Daniel) |  Regla para la semana 6 |
+| Avisar en el grupo antes de cambiar algo compartido (errores, auth, Swagger); el cambio de formato rompió 3 pruebas del G6 | Todos (Edgar, Randy, Daniel) | 🔵 Regla para la semana 6 |
 | El bloqueo tras 5 intentos no estaba en Swagger ni decía cuánto falta | Robert | 🔵 `openapi_docs.py`: login documenta 200, 401, 422 y 429 (5 fallos = 15 minutos, mensaje con los minutos que faltan); `tests/test_openapi.py` al día |
 | `.env.example` sin valores reales | Robert | 🔵 Solo marcadores (`TU_USUARIO`, `TU_CLAVE`, `TU_HOST`, `TU_PUERTO`, `TU_CLAVE_SECRETA`) |
 | MySQL antes del PR, convención única de pantalla (`udv_token`, rutas relativas, `udv.css`) y avisar cada PR | Daniel y todos | 🔵 `index.html` carga `/udv-styles/udv.css`. Falta `pytest` contra MySQL y el PR (Daniel) |
