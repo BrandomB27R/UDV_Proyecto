@@ -50,7 +50,8 @@ router = APIRouter(prefix="/api/v1", tags=["G4 - Inbox y entregas"])
 #     (tarea.revisor_id). Un revisor cualquiera no ve entregas ajenas.
 #   - auditor: solo ver (ni comentar ni modificar)
 ROLES_CON_ACCESO_GLOBAL = {"coordinator", "admin"}
-ROLES_SOLO_LECTURA = {"auditor"}
+# La autoridad puede aprobar cualquier entrega en G3 (workflow.matrix): necesita verla para decidir.
+ROLES_SOLO_LECTURA = {"auditor", "authority"}
 
 
 def _exigir_acceso(asignacion: dict, usuario: Usuario, permiso: str) -> None:
@@ -236,7 +237,33 @@ def detalle_asignacion(assignment_id: int, usuario: Usuario = Depends(obtener_us
     if not a:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "ver")
-    return {**a, "allowed_actions": acciones_permitidas(a), "viewer": _papel_del_usuario(a, usuario)}
+    permitidas = acciones_permitidas(a)
+    return {**a, "allowed_actions": permitidas,
+            "viewer": _papel_del_usuario(a, usuario),
+            "viewer_actions": _acciones_de_quien_mira(a, usuario, permitidas)}
+
+
+def _acciones_de_quien_mira(asignacion: dict, usuario: Usuario, permitidas: List[str]) -> List[str]:
+    """De las acciones que el estado permite, las que puede ejecutar quien está viendo.
+
+    `allowed_actions` depende solo del estado; esto lo cruza con la persona, con las
+    mismas reglas de workflow.matrix (G3). Es una ayuda para la pantalla: quien decide
+    es G3 al ejecutar la acción.
+    """
+    roles = {r.codigo for r in (usuario.roles or [])}
+    yo = usuario.id
+    revisor = asignacion.get("reviewer_id")
+    creador = asignacion.get("created_by")
+    es_docente = asignacion["assignee_id"] == yo
+    if revisor is not None:
+        revisa = revisor == yo and bool(roles & {"reviewer", "coordinator", "admin"})
+    else:
+        revisa = "admin" in roles or ("coordinator" in roles and creador == yo)
+    aprueba = "authority" in roles or ("reviewer" in roles and revisor == yo)
+    cierra = "coordinator" in roles and creador == yo
+    puede = {"start": es_docente, "submit": es_docente, "resubmit": es_docente,
+             "review": revisa, "return": revisa, "approve": aprueba, "close": cierra}
+    return [accion for accion in permitidas if puede.get(accion, False)]
 
 
 def _papel_del_usuario(asignacion: dict, usuario: Usuario) -> dict:

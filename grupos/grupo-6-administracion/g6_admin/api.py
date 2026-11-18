@@ -126,6 +126,8 @@ class NotificacionSalida(BaseModel):
     is_read: bool
     created_at: str
     read_at: str | None
+    assignment_id: int | None = None
+    program_version_id: int | None = None
 
 
 class PaginaNotificaciones(BaseModel):
