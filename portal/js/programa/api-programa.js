@@ -1,7 +1,5 @@
-// Llamadas del programa de curso (G5). Las tres rutas que el PM agrega en el backend
-// (for-assignment, viewer_actions y graduate-profiles) están aisladas aquí, por si al
-// llegar cambia algún nombre.
-import { api, ApiError, lista } from "../api.js";
+// Llamadas del programa de curso (G5), en un solo lugar.
+import { api, lista } from "../api.js";
 import { todasLasPaginas } from "../componentes.js";
 
 // ── Lectura ──────────────────────────────────────────────────
@@ -39,52 +37,24 @@ export async function descargarPdf(versionId, nombre) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-// ── Contrato nuevo (PM) ──────────────────────────────────────
+// ── Rutas agregadas para Vinci (PR #53) ─────────────────────
 
 /**
  * Abre o crea la versión ligada a una asignación de "Actualizar programa".
  * POST /program-versions/for-assignment/{assignment_id} → la versión (misma forma que GET /program-versions/{id}).
+ * 422 si la tarea no tiene curso y período; 409 si no hay versión de la cual partir.
  */
 export const abrirVersionDeAsignacion = (assignmentId) =>
   api(`/program-versions/for-assignment/${encodeURIComponent(assignmentId)}`, { method: "POST" });
 
 const ACCIONES = ["edit", "submit", "review", "return", "approve", "authorize"];
 
-/**
- * Lo que puede hacer quien mira con la versión: viewer_actions del backend.
- * Mientras esa lista no llegue (backend pendiente), se calcula una provisional por rol y
- * estado para poder probar la pantalla; se quita cuando el backend la traiga.
- */
-export function accionesDeVersion(version, yo) {
-  if (Array.isArray(version?.viewer_actions)) return new Set(version.viewer_actions.filter((a) => ACCIONES.includes(a)));
-  return accionesProvisionales(version, yo);
+/** Lo que puede hacer quien mira con la versión: solo viewer_actions del backend. */
+export function accionesDeVersion(version) {
+  return new Set((version?.viewer_actions || []).filter((a) => ACCIONES.includes(a)));
 }
 
-// PROVISIONAL: misma regla que el G5 (auth.py y repository.py). Se borra con viewer_actions.
-function accionesProvisionales(v, yo) {
-  const roles = new Set(yo?.roles || []);
-  const gestor = ["admin", "coordinator", "reviewer"].some((r) => roles.has(r));
-  const responsable = roles.has("teacher") && v?.secciones?.responsables?.contenido?.docente_responsable_id === yo?.id;
-  const revisa = roles.has("reviewer") || roles.has("coordinator");
-  const s = new Set();
-  const e = v?.estado;
-  if ((e === "draft" || e === "returned") && (gestor || responsable)) s.add("edit");
-  if ((e === "draft" || e === "returned") && (responsable || roles.has("coordinator"))) s.add("submit");
-  if (e === "submitted" && revisa) s.add("review");
-  if (e === "under_review" && revisa) { s.add("return"); s.add("approve"); }
-  if (e === "approved" && roles.has("authority")) s.add("authorize");
-  return s;
-}
-
-/**
- * Catálogo de perfil de egreso: GET /graduate-profiles → [{id, codigo, descripcion}].
- * Si la ruta todavía no existe (404), devuelve null y el editor ofrece escribir el código.
- */
+/** Catálogo de perfil de egreso: GET /graduate-profiles → [{id, codigo, descripcion}]. */
 export async function perfilesDeEgreso() {
-  try {
-    return lista(await api("/graduate-profiles?per_page=100"));
-  } catch (e) {
-    if (e instanceof ApiError && (e.status === 404 || e.status === 405)) return null;
-    throw e;
-  }
+  return lista(await api("/graduate-profiles?per_page=100"));
 }

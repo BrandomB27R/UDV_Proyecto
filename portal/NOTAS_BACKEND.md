@@ -4,7 +4,7 @@ Lo que la interfaz de `portal/` todavía necesita de la API y resuelve con rodeo
 Ninguno de estos cambios va en `pm/ui-unificada`: esta rama solo toca `portal/` y
 `grupos/udv-styles/`.
 
-## Ya resuelto con la API nueva (PR #47, #49 y #52)
+## Ya resuelto con la API nueva (PR #47, #49, #52 y #53)
 
 Se quitaron los rodeos que dependían de esto:
 
@@ -23,6 +23,10 @@ Se quitaron los rodeos que dependían de esto:
 - `/inbox` y `/review-queue` traen el curso: se muestra en Mis tareas y Por revisar.
 - `GET /tasks` y `/tasks/{id}` traen `created_by_name` y `reviewer_name`: el
   seguimiento y la lista de Tareas ya no consultan `/users`.
+- Programa de curso: `POST /program-versions/for-assignment/{id}` ("Completar el
+  programa" desde la tarea), `viewer_actions` en la versión (los botones salen solo
+  de ahí) y `GET /graduate-profiles` (selector de Perfil de egreso). `/changes`
+  compara la primera versión de un período con la versión de la que se copió.
 
 ## Pendiente
 
@@ -47,41 +51,26 @@ Lo correcto: columna `archivo.descripcion` (migración del G1) y devolverla en
 
 ## Programas de curso (etapa 2)
 
-### 3. Las tres rutas acordadas con el PM (en camino)
-
-La pantalla ya está escrita contra este contrato; las llamadas están en
-`portal/js/programa/api-programa.js`, una función cada una:
-
-- `POST /program-versions/for-assignment/{assignment_id}` → abre o crea la versión
-  de la asignación (botón "Completar el programa"). Mientras no exista, la pantalla
-  dice que todavía no está disponible.
-- `viewer_actions` en `GET /program-versions/{id}` (`edit`, `submit`, `review`,
-  `return`, `approve`, `authorize`). Mientras no llegue, `accionesDeVersion` calcula
-  una lista **provisional** con la misma regla del G5 (rol y estado); se borra
-  cuando el backend la traiga.
-- `GET /graduate-profiles` → selector de Perfil de egreso. Mientras dé 404, el
-  editor conserva los rasgos que ya hay y para agregar uno pide su código.
-
-### 4. Contenidos por unidad y módulo (G5)
+### 3. Contenidos por unidad y módulo (G5)
 
 El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e ignora
 `unidad_padre_id`. La pantalla edita unidades (título y horas) con temas,
 reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
 `unidad_padre_id`.
 
-### 5. "Sin prerrequisitos" no se guarda (G5)
+### 4. "Sin prerrequisitos" no se guarda (G5)
 
 La sección se da por completa con al menos un curso o con la casilla "Sin
 prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
 navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
 
-### 6. `/changes` devuelve identificadores internos (G5)
+### 5. `/changes` devuelve identificadores internos (G5)
 
 Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
 contenido sea el mismo. La pantalla los filtra y muestra etiquetas legibles; lo
 correcto es que `/changes` compare solo el contenido.
 
-### 7. Versión enlazada a la tarea y lectura del docente (G4 y G5)
+### 6. Versión enlazada a la tarea y lectura del docente (G4 y G5)
 
 Si la tarea tiene `programa_version_id` (la de la semilla), el detalle de cada
 asignación trae esa misma versión aunque el docente no sea su responsable; ese

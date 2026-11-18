@@ -136,7 +136,7 @@ function listaFilas({ filas, nombre, campos, nueva, agregar, alCambiar, vacio })
 
 // ── Editores ─────────────────────────────────────────────────
 /**
- * Crea el editor de una sección. ctx: {cursos, perfiles (lista o null), versionId, alCambiar}.
+ * Crea el editor de una sección. ctx: {cursos, perfiles, versionId, alCambiar}.
  * Devuelve {nodo, valor(), error()} — error() da el texto que impide guardar, o null.
  */
 export function crearEditor(id, contenido, ctx) {
@@ -210,25 +210,21 @@ export function crearEditor(id, contenido, ctx) {
   }
 
   if (id === "perfil") {
-    const filas = (c || []).map((x) => ({ perfil_egreso_id: x.perfil_egreso_id ?? null, codigo: x.codigo || "", descripcion: x.descripcion || "", contribucion: x.contribucion || "" }));
-    const catalogo = ctx.perfiles;   // null: la ruta del catálogo todavía no existe
-    const opciones = catalogo ? Object.fromEntries(catalogo.map((p) => [p.id, `${p.codigo} · ${p.descripcion}`])) : null;
+    const filas = (c || []).map((x) => ({ perfil_egreso_id: x.perfil_egreso_id ?? null, contribucion: x.contribucion || "" }));
+    const catalogo = ctx.perfiles || [];
+    const opciones = Object.fromEntries(catalogo.map((p) => [p.id, `${p.codigo} · ${p.descripcion}`]));
+    // Un rasgo ya guardado que no esté en el catálogo activo se conserva con su texto.
+    for (const x of c || []) if (x.perfil_egreso_id && !opciones[x.perfil_egreso_id]) opciones[x.perfil_egreso_id] = `${x.codigo || ""} · ${x.descripcion || ""}`;
     return {
       nodo: h("div", { class: "v-editor" },
-        catalogo ? null : h("p", { class: "v-msg v-msg--aviso" }, "El catálogo de perfil de egreso todavía no está disponible: para agregar un rasgo escribe su código."),
+        catalogo.length ? null : h("p", { class: "v-msg v-msg--aviso" }, "No se pudo cargar el catálogo de perfil de egreso. Recarga la página para intentarlo de nuevo."),
         listaFilas({ filas, nombre: "Rasgo", agregar: "Agregar rasgo del perfil", vacio: "Todavía no hay rasgos del perfil de egreso.", alCambiar: avisar,
-          nueva: () => ({ perfil_egreso_id: null, codigo: "", descripcion: "", contribucion: "" }),
+          nueva: () => ({ perfil_egreso_id: null, contribucion: "" }),
           campos: (f, ok) => [
-            opciones
-              ? campoSelect("Rasgo del perfil de egreso", f.perfil_egreso_id, opciones, (x) => { f.perfil_egreso_id = num(x); ok(); }, { vacio: "Elige el rasgo" })
-              : f.perfil_egreso_id
-                ? h("p", { class: "v-texto" }, h("strong", {}, f.codigo || "Rasgo"), ` · ${f.descripcion}`)
-                : campoTexto("Código del rasgo", f.codigo, (x) => { f.codigo = x.trim(); ok(); }, { max: 20 }),
+            campoSelect("Rasgo del perfil de egreso", f.perfil_egreso_id, opciones, (x) => { f.perfil_egreso_id = num(x); ok(); }, { vacio: "Elige el rasgo" }),
             campoTexto("Cómo contribuye el curso", f.contribucion, (x) => { f.contribucion = x; ok(); }, { multilinea: true, filas: 2, max: 1000 })] })),
-      valor: () => filas.filter((f) => (f.perfil_egreso_id || f.codigo) && f.contribucion.trim()).map((f, i) => ({
-        orden: i + 1, ...(f.perfil_egreso_id ? { perfil_egreso_id: f.perfil_egreso_id } : { codigo: f.codigo }), contribucion: f.contribucion.trim(),
-      })),
-      error: () => (filas.some((f) => !(f.perfil_egreso_id || f.codigo)) ? "Elige el rasgo en cada fila o quita la fila vacía."
+      valor: () => filas.filter((f) => f.perfil_egreso_id && f.contribucion.trim()).map((f, i) => ({ orden: i + 1, perfil_egreso_id: f.perfil_egreso_id, contribucion: f.contribucion.trim() })),
+      error: () => (filas.some((f) => !f.perfil_egreso_id) ? "Elige el rasgo en cada fila o quita la fila vacía."
         : filas.some((f) => !f.contribucion.trim()) ? "Escribe cómo contribuye el curso en cada rasgo." : null),
     };
   }

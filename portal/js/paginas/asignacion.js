@@ -282,10 +282,7 @@ function filaRequisito(r) {
           location.assign(RUTAS.programa(v.id, st.a.id));
         } catch (e) {
           // 422: la tarea no tiene curso y período; 409: no hay versión de la cual partir.
-          // 404 genérico de FastAPI: la ruta todavía no está en el backend.
-          zona.textContent = e.status === 404 && /^not found$/i.test(e.message)
-            ? "Abrir el programa desde la tarea todavía no está disponible. Avisa a coordinación."
-            : e.message;
+          zona.textContent = e.message;
           boton.disabled = false; boton.textContent = "Completar el programa";
         }
       } }, "Completar el programa");

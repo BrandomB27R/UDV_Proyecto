@@ -55,7 +55,7 @@ async function cargar() {
     st.programa = p.programa;
     st.versiones = [...(p.versiones || [])].sort((a, b) => b.numero_version - a.numero_version);
   } catch { st.versiones = [st.v]; }
-  st.acciones = accionesDeVersion(st.v, yo);
+  st.acciones = accionesDeVersion(st.v);
   st.editores.clear();
   if (st.acciones.has("edit")) await cargarCatalogos();
   const g = contenidoDe(st.v, "general");
@@ -65,7 +65,7 @@ async function cargar() {
 
 async function cargarCatalogos() {
   if (!st.cursos) st.cursos = (await todasLasPaginas(api, "/courses").catch(() => ({ data: [] }))).data || [];
-  if (st.perfiles === undefined) st.perfiles = await perfilesDeEgreso().catch(() => null);
+  if (st.perfiles === undefined) st.perfiles = await perfilesDeEgreso().catch(() => []);
 }
 
 const editable = () => st.acciones.has("edit");
@@ -375,8 +375,12 @@ function bloqueCambios() {
     const anterior = st.versiones.find((x) => x.id === r.version_anterior);
     poner(zona,
       h("h2", { id: "t-cambios", class: "v-h2" }, "Cambios frente a la versión anterior"),
-      !r.version_anterior ? h("p", { class: "v-nota" }, "Esta es la primera versión del período: no hay con qué compararla.")
-        : h("p", { class: "v-nota" }, `Comparada con la versión ${anterior?.numero_version ?? ""} (${etiquetaEstadoPrograma(anterior?.estado)}).`),
+      !r.version_anterior ? h("p", { class: "v-nota" }, "Es la primera versión del programa: no hay con qué compararla.")
+        : h("p", { class: "v-nota" }, [
+          `Comparada con la versión ${anterior?.numero_version ?? ""}`,
+          anterior ? ` · ${periodoDe(anterior)} (${etiquetaEstadoPrograma(anterior.estado)})` : "",
+          r.version_anterior === st.v.version_origen_id ? ", de la que se copió esta versión." : ", la anterior del mismo período.",
+        ].join("")),
       r.version_anterior && !grupos.length ? h("p", { class: "v-texto" }, "No hay diferencias de contenido.") : null,
       grupos.map((g) => h("div", { class: "p-cambios" },
         h("h3", { class: "p-cambios__titulo" }, g.titulo),
