@@ -51,7 +51,8 @@ const consulta = { q: "", status: "pending", page: 1, per_page: 5 };
 // ---------- Tarjeta ----------
 
 function crearTarjeta(a) {
-  const enlace = `detalle.html?id=${encodeURIComponent(a.id)}`;
+  // "desde=revision": el detalle cambia su botón para volver a esta bandeja.
+  const enlace = `detalle.html?id=${encodeURIComponent(a.id)}&desde=revision`;
   const datos = [
     a.submitted_at ? `Entregada: ${escapar(horaGuatemala(a.submitted_at))}` : null,
     a.attempt ? `Intento ${escapar(a.attempt)}` : null,

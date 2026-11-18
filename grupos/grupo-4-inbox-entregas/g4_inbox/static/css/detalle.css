@@ -5,3 +5,17 @@
 
 #detBotones button,
 #entregaBotones button { margin: 0; }
+
+/* Comentarios e historial */
+.g4-seccion { margin-top: 2rem; border-top: 1px solid #E5E7EB; padding-top: 1.5rem; max-width: 640px; }
+.g4-lista { list-style: none; padding: 0; margin: .5rem 0 1rem; }
+.g4-lista li { padding: .6rem 0; border-bottom: 1px solid #F0F1F3; }
+.g4-lista__meta { font-size: .8rem; color: var(--udv-text-muted); }
+.g4-lista__texto { margin: .25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.g4-vacio { color: var(--udv-text-muted); font-size: .9rem; }
+#nuevoComentario .udv-textarea { margin-bottom: .5rem; }
+
+/* Versión del programa en tareas de programa */
+.g4-programa { padding: 1rem; margin-bottom: 1rem; }
+.g4-programa p { margin: 0 0 .5rem; }
+#archivoInfo ul { margin: .25rem 0 0; padding-left: 1.1rem; }
