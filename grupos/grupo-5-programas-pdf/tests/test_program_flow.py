@@ -118,5 +118,40 @@ class ProgramFlowTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, 403)
 
 
+class ViewerActionsTests(unittest.TestCase):
+    """Lo que la pantalla ofrece a quien mira una versión."""
+
+    @staticmethod
+    def _actions(roles, actor_id, status, submitter_id=None):
+        from unittest.mock import MagicMock
+        from g5_programas.repository import _viewer_actions
+
+        session = MagicMock()
+        session.execute.return_value.mappings.return_value.first.return_value = (
+            {"actor_id": submitter_id} if submitter_id else None
+        )
+        row = {"id": 7, "estado_codigo": status, "creado_por": 3, "docente_responsable_id": 3}
+        return _viewer_actions(session, Actor(id=actor_id, name="", roles=frozenset(roles)), row)
+
+    def test_actions_follow_role_state_and_authorship(self):
+        cases = (
+            ({"teacher"}, 3, "draft", None, ["edit", "submit"]),
+            ({"teacher"}, 4, "draft", None, []),
+            ({"coordinator", "reviewer", "authority"}, 2, "returned", None, ["edit", "submit"]),
+            ({"teacher"}, 3, "submitted", None, []),
+            ({"reviewer"}, 5, "submitted", None, ["review"]),
+            ({"reviewer"}, 5, "under_review", 3, ["return", "approve"]),
+            ({"coordinator"}, 2, "under_review", 2, ["return"]),
+            ({"reviewer", "teacher"}, 3, "under_review", 3, ["return"]),
+            ({"authority"}, 6, "approved", None, ["authorize"]),
+            ({"reviewer"}, 5, "approved", None, []),
+            ({"admin"}, 1, "authorized", None, []),
+            ({"auditor"}, 7, "draft", None, []),
+        )
+        for roles, actor_id, status, submitter, expected in cases:
+            with self.subTest(roles=roles, status=status):
+                self.assertEqual(self._actions(roles, actor_id, status, submitter), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -103,7 +103,22 @@ def read_version(version_id: int, session: DbSession, actor: CurrentActor):
         session,
         version_id,
         docente_responsable_id=_teacher_scope(actor),
+        actor=actor,
     )
+
+
+@router.post("/program-versions/for-assignment/{assignment_id}")
+def post_version_for_assignment(assignment_id: int, session: DbSession, actor: CurrentActor):
+    """Abre (o devuelve) el borrador del programa que pide una tarea asignada."""
+    require_role(actor, "author")
+    return repository.start_version_for_assignment(session, actor, assignment_id)
+
+
+@router.get("/graduate-profiles")
+def graduate_profiles(session: DbSession, actor: CurrentActor):
+    """Catálogo de perfiles de egreso para la sección de perfil."""
+    require_role(actor, "reader")
+    return repository.list_graduate_profiles(session)
 
 
 @router.put("/program-versions/{version_id}")

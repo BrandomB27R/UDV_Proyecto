@@ -42,7 +42,17 @@ END$$
 
 CREATE TRIGGER trg_entrega_no_update BEFORE UPDATE ON entrega FOR EACH ROW
 BEGIN
-SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+-- Un intento ya enviado no se modifica nunca. Mientras el docente lo prepara (aun no hay
+-- una transicion 'submitted' posterior a su creacion) solo pueden cambiar el texto y la
+-- version de programa; lo demas identifica al intento y queda fijo. (1.2.3)
+IF EXISTS (SELECT 1 FROM tarea_transicion tt
+            WHERE tt.tarea_destinatario_id = OLD.tarea_destinatario_id
+              AND tt.estado_nuevo = 'submitted' AND tt.creado_en >= OLD.entregado_en)
+   OR NOT (NEW.id <=> OLD.id AND NEW.tarea_destinatario_id <=> OLD.tarea_destinatario_id
+           AND NEW.numero_intento <=> OLD.numero_intento AND NEW.entregado_por <=> OLD.entregado_por
+           AND NEW.entregado_en <=> OLD.entregado_en) THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+END IF;
 END$$
 
 CREATE TRIGGER trg_entrega_valor_no_update BEFORE UPDATE ON entrega_valor FOR EACH ROW
