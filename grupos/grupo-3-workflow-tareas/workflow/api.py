@@ -179,9 +179,11 @@ def post_task_type(body: TaskTypeIn, conn=Depends(get_conn), user=Depends(curren
 # ------------------------------------------------------------------ tasks
 @router.get("/tasks", tags=["tasks"])
 def get_tasks(status: Optional[str] = None, page: int = Query(1),
-              per_page: int = Query(20), conn=Depends(get_conn),
-              user=Depends(current_user)):
-    return tasks.list_tasks(conn, user, status, page, per_page)
+              per_page: int = Query(20),
+              include: Optional[str] = Query(None, description="progress: agrega el avance de cada tarea"),
+              conn=Depends(get_conn), user=Depends(current_user)):
+    return tasks.list_tasks(conn, user, status, page, per_page,
+                            include=tuple(x.strip() for x in (include or "").split(",") if x.strip()))
 
 
 @router.post("/tasks", status_code=201, tags=["tasks"])
