@@ -21,8 +21,9 @@ export const chipEstado = (s) => h("span", { class: `v-chip v-chip--${ESTADOS[s]
 
 // ── Prioridad ───────────────────────────────────────────────
 export const PRIORIDADES = { low: "Baja", medium: "Media", high: "Alta", urgent: "Urgente" };
-export const chipPrioridad = (p) =>
-  h("span", { class: `v-chip v-chip--p-${PRIORIDADES[p] ? p : "medium"}` }, `Prioridad ${(PRIORIDADES[p] || legible(p)).toLowerCase()}`);
+/** Solo alta y urgente se marcan (rectángulo con contorno, no parece un estado); baja y media no se muestran. */
+export const chipPrioridad = (p) => (p === "high" ? h("span", { class: "v-prio v-prio--high", title: "Prioridad alta" }, "▲ Alta")
+  : p === "urgent" ? h("span", { class: "v-prio v-prio--urgent", title: "Prioridad urgente" }, "▲▲ Urgente") : null);
 
 // ── Tipos de tarea (catálogo fijo del G1) ───────────────────
 export const TIPOS = {
@@ -115,15 +116,16 @@ export function plazo(due, { terminada = false, diasAviso = 3 } = {}) {
   const dia = diaCalendario(due);
   if (!dia) return { texto: "Sin fecha límite", estado: "" };
   const larga = fechaLarga(dia);
-  if (terminada) return { texto: larga, estado: "" };
+  if (terminada) return { texto: larga, larga, rel: "", estado: "" };
   const faltan = diasEntre(hoyGuatemala(), dia);
+  const con = (rel, estado) => ({ texto: `${larga} · ${rel}`, larga, rel, estado });
   if (faltan < 0) {
     const n = -faltan;
-    return { texto: `${larga} · venció hace ${n} ${n === 1 ? "día" : "días"}`, estado: "vencida" };
+    return con(`venció hace ${n} ${n === 1 ? "día" : "días"}`, "vencida");
   }
-  if (faltan === 0) return { texto: `${larga} · vence hoy`, estado: "por-vencer" };
-  if (faltan === 1) return { texto: `${larga} · vence mañana`, estado: "por-vencer" };
-  return { texto: `${larga} · faltan ${faltan} días`, estado: faltan <= diasAviso ? "por-vencer" : "" };
+  if (faltan === 0) return con("vence hoy", "por-vencer");
+  if (faltan === 1) return con("vence mañana", "por-vencer");
+  return con(`faltan ${faltan} días`, faltan <= diasAviso ? "por-vencer" : "");
 }
 
 /** Tamaño legible de un archivo. */
