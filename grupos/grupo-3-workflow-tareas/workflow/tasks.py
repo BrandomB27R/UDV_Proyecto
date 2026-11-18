@@ -17,7 +17,7 @@ from .matrix import AUTHORITY, COORDINATOR, FLOWS, REVIEWER, STATES, TEACHER
 
 PRIORITIES = ("low", "medium", "high")
 EDITABLE_FIELDS = ("type_id", "title", "description", "priority", "due_date",
-                   "responsible_id", "reviewer_id")
+                   "responsible_id", "reviewer_id", "course_id", "period_id")
 
 
 def _is_mysql(conn) -> bool:
@@ -62,8 +62,14 @@ _TASK_COLS_MYSQL = (
     " COALESCE(t.eliminado_en, CASE WHEN t.estado_codigo = 'cancelled'"
     "                              THEN t.actualizado_en END) AS cancelled_at,"
     " t.creado_en AS created_at, t.actualizado_en AS updated_at,"
+    # Curso y período de la tarea (columnas de G1 que ya existían): dicen de qué programa se trata.
+    " t.curso_id AS course_id, cu.codigo AS course_code, cu.nombre AS course_name,"
+    " t.periodo_id AS period_id, pe.codigo AS period_code,"
+    " t.programa_version_id AS program_version_id,"
     " t.alcance, t.sede_destino_id, t.unidad_destino_id, 'standard' AS flow")
-_TASK_FROM_MYSQL = "FROM tarea t JOIN workflow w ON w.id = t.workflow_id"
+_TASK_FROM_MYSQL = ("FROM tarea t JOIN workflow w ON w.id = t.workflow_id"
+                    " LEFT JOIN curso cu ON cu.id = t.curso_id"
+                    " LEFT JOIN periodo pe ON pe.id = t.periodo_id")
 
 _STATUS_SQL_MYSQL = {
     "draft": "(t.estado_codigo = 'draft' AND t.eliminado_en IS NULL)",
@@ -71,6 +77,8 @@ _STATUS_SQL_MYSQL = {
     "cancelled": "(t.estado_codigo = 'cancelled' OR t.eliminado_en IS NOT NULL)",
 }
 _INTERNAL_KEYS = ("alcance", "sede_destino_id", "unidad_destino_id")
+_COURSE_KEYS = ("course_id", "course_code", "course_name", "period_id", "period_code",
+                "program_version_id")
 
 
 def _end_of_day(iso_date):
@@ -106,6 +114,8 @@ def _task_out(row, conn=None):
             d.pop(k, None)
         return d
     d["recipient_rule"] = json.loads(d["recipient_rule"]) if d.get("recipient_rule") else None
+    for k in _COURSE_KEYS:              # solo la base de G1 guarda curso y período
+        d.setdefault(k, None)
     return d
 
 
@@ -259,6 +269,24 @@ def _validate_fields(conn, data):
         _require_user(conn, data["responsible_id"], "responsible_id", COORDINATOR)
     if data.get("reviewer_id") is not None:
         _require_user(conn, data["reviewer_id"], "reviewer_id", REVIEWER)
+    _validate_course(conn, data)
+
+
+def _validate_course(conn, data):
+    """Curso y período de la tarea: opcionales, pero si vienen deben existir en los catálogos de G1."""
+    course_id, period_id = data.get("course_id"), data.get("period_id")
+    if course_id is None and period_id is None:
+        return
+    if not _is_mysql(conn):
+        raise ValidationFailed("course_id y period_id solo existen con la base de G1",
+                               details={"field": "course_id"})
+    if course_id is not None and conn.execute(
+            "SELECT 1 FROM curso WHERE id = ? AND activo = 1 AND eliminado_en IS NULL",
+            (course_id,)).fetchone() is None:
+        raise ValidationFailed("course_id no existe o no está activo", details={"field": "course_id"})
+    if period_id is not None and conn.execute(
+            "SELECT 1 FROM periodo WHERE id = ?", (period_id,)).fetchone() is None:
+        raise ValidationFailed("period_id no existe", details={"field": "period_id"})
 
 
 def create_task(conn, actor, data):
@@ -279,10 +307,12 @@ def create_task(conn, actor, data):
             set_actor(conn, actor["id"])
             cur = conn.execute(
                 "INSERT INTO tarea(workflow_id, estado_codigo, titulo, descripcion, prioridad,"
-                " creado_por, revisor_id, fecha_limite) VALUES (?, 'draft', ?,?,?,?,?,?)",
+                " creado_por, revisor_id, fecha_limite, curso_id, periodo_id)"
+                " VALUES (?, 'draft', ?,?,?,?,?,?,?,?)",
                 (_workflow_for_type(conn, data["type_id"]), data["title"].strip(),
                  data["description"], data["priority"], actor["id"],
-                 data.get("reviewer_id"), _end_of_day(data["due_date"])))
+                 data.get("reviewer_id"), _end_of_day(data["due_date"]),
+                 data.get("course_id"), data.get("period_id")))
             return _out(conn, _load_task(conn, cur.lastrowid))
         now = utcnow()
         cur = conn.execute(
@@ -293,6 +323,34 @@ def create_task(conn, actor, data):
              data["due_date"], actor["id"], data.get("responsible_id"),
              data.get("reviewer_id"), now, now))
         return _out(conn, _load_task(conn, cur.lastrowid))
+
+
+def list_course_teachers(conn, actor, course_id, period_id=None):
+    """Docentes que dan un curso (tabla docente_curso de G1), para proponerlos como destinatarios.
+
+    Con period_id se limita a ese período; sin él, a cualquier período. Solo coordinación.
+    """
+    if COORDINATOR not in _roles(actor):
+        raise Forbidden("Solo coordinación puede consultar los docentes de un curso")
+    if not _is_mysql(conn):
+        return {"data": [], "total": 0}
+    _validate_course(conn, {"course_id": course_id, "period_id": period_id})
+    sql = ("SELECT u.id, CONCAT(u.nombres, ' ', u.apellidos) AS name, u.correo AS email,"
+           " pe.id AS period_id, pe.codigo AS period_code, s.nombre AS campus"
+           " FROM docente_curso dc"
+           " JOIN usuario u ON u.id = dc.usuario_id AND u.activo = 1 AND u.eliminado_en IS NULL"
+           " JOIN periodo pe ON pe.id = dc.periodo_id"
+           " JOIN sede s ON s.id = dc.sede_id"
+           " WHERE dc.curso_id = ? AND dc.activo = 1"
+           " AND EXISTS (SELECT 1 FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id"
+           "             WHERE ur.usuario_id = u.id AND r.codigo = 'teacher')")
+    params = [course_id]
+    if period_id is not None:
+        sql += " AND dc.periodo_id = ?"
+        params.append(period_id)
+    sql += " ORDER BY pe.codigo DESC, name, s.nombre"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    return {"data": rows, "total": len(rows)}
 
 
 def get_task(conn, actor, task_id):
@@ -368,7 +426,8 @@ def update_task(conn, actor, task_id, changes):
         if changes and _is_mysql(conn):
             set_actor(conn, actor["id"])
             names = {"title": "titulo", "description": "descripcion",
-                     "priority": "prioridad", "reviewer_id": "revisor_id"}
+                     "priority": "prioridad", "reviewer_id": "revisor_id",
+                     "course_id": "curso_id", "period_id": "periodo_id"}
             sets, values = [], []
             for key, value in changes.items():
                 if key == "type_id":
@@ -384,6 +443,8 @@ def update_task(conn, actor, task_id, changes):
             if sets:
                 conn.execute(f"UPDATE tarea SET {', '.join(sets)} WHERE id = ?", [*values, task_id])
         elif changes:
+            changes = {k: v for k, v in changes.items() if k not in ("course_id", "period_id")}
+        if changes and not _is_mysql(conn):
             sets = ", ".join(f"{k} = ?" for k in changes)
             conn.execute(f"UPDATE tasks SET {sets}, updated_at = ? WHERE id = ?",
                          [*changes.values(), utcnow(), task_id])

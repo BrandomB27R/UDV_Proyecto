@@ -65,6 +65,8 @@ _ACCION_POR_TRANSICION = {
     ("submitted", "under_review"): "review",
     ("under_review", "returned"): "return",
     ("under_review", "approved"): "approve",
+    ("approved", "closed"): "close",
+    (None, "assigned"): "publish",
 }
 
 
@@ -116,13 +118,25 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
         cabecera = sesion.execute(text("""
             SELECT td.id AS asignacion_id, td.usuario_id, td.estado_codigo,
                    t.id AS tarea_id, t.titulo, t.descripcion, t.prioridad,
-                   t.programa_version_id, t.revisor_id, tt.codigo AS tipo_codigo,
+                   t.programa_version_id, tt.codigo AS tipo_codigo,
                    tt.requiere_archivo, tt.modalidad_entrega, tt.extensiones, tt.tamano_max_mb,
-                   COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite
+                   COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite,
+                   -- Revisor designado como lo lee G3: el de la asignación y, si no tiene, el de la tarea.
+                   COALESCE(td.revisor_id, t.revisor_id) AS revisor_id,
+                   CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
+                   CONCAT(doc.nombres, ' ', doc.apellidos) AS docente_nombre,
+                   t.creado_por, CONCAT(cr.nombres, ' ', cr.apellidos) AS creador_nombre,
+                   t.curso_id, cu.codigo AS curso_codigo, cu.nombre AS curso_nombre,
+                   t.periodo_id, pe.codigo AS periodo_codigo
             FROM tarea_destinatario td
             JOIN tarea t ON t.id = td.tarea_id
             JOIN workflow w ON w.id = t.workflow_id
             JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
+            JOIN usuario doc ON doc.id = td.usuario_id
+            JOIN usuario cr ON cr.id = t.creado_por
+            LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
+            LEFT JOIN curso cu ON cu.id = t.curso_id
+            LEFT JOIN periodo pe ON pe.id = t.periodo_id
             WHERE td.id = :id
         """), {"id": assignment_id}).mappings().first()
         if cabecera is None:
@@ -136,6 +150,13 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
         version = None
         if cabecera["modalidad_entrega"] == "programa":
             version = _version_de_programa(sesion, assignment_id)
+
+        # Un intento por fila de `entrega`: el texto que quedó en cada uno.
+        intentos = sesion.execute(text("""
+            SELECT numero_intento, contenido_texto, entregado_en
+            FROM entrega WHERE tarea_destinatario_id = :id
+            ORDER BY numero_intento
+        """), {"id": assignment_id}).mappings().all()
 
         comentarios = sesion.execute(text(_SQL_COMENTARIOS + """
             WHERE c.tarea_destinatario_id = :id AND c.eliminado_en IS NULL
@@ -186,8 +207,18 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
 
     return {
         "id": cabecera["asignacion_id"],
+        "task_id": cabecera["tarea_id"],
         "assignee_id": cabecera["usuario_id"],
+        "assignee_name": cabecera["docente_nombre"],
         "reviewer_id": cabecera["revisor_id"],
+        "reviewer_name": cabecera["revisor_nombre"],
+        "created_by": cabecera["creado_por"],
+        "created_by_name": cabecera["creador_nombre"],
+        "course_id": cabecera["curso_id"],
+        "course_code": cabecera["curso_codigo"],
+        "course_name": cabecera["curso_nombre"],
+        "period_id": cabecera["periodo_id"],
+        "period_code": cabecera["periodo_codigo"],
         "title": cabecera["titulo"],
         "task_type": cabecera["tipo_codigo"],
         "requiere_archivo": bool(cabecera["requiere_archivo"]),
@@ -200,6 +231,8 @@ def fetch_detalle_asignacion(assignment_id: int) -> Optional[dict]:
         "program_version": version,
         "draft_comment": borrador["contenido_texto"] if borrador else None,
         "comments": [_comentario(c) for c in comentarios],
+        "attempts": [{"number": i["numero_intento"], "text": i["contenido_texto"],
+                      "created_at": _iso(i["entregado_en"])} for i in intentos],
         # Con sus datos, para que el revisor vea qué se entregó en cada intento.
         "files": [{"file_id": str(f["file_id"]), "name": f["name"], "mime": f["mime"],
                    "size": f["size"], "uploaded_at": _iso(f["uploaded_at"]),
@@ -331,9 +364,11 @@ def _comentario(fila) -> dict:
     return {
         "id": fila["id"],
         "author": str(fila["autor_id"]),
+        "author_id": fila["autor_id"],
         "author_name": fila["autor_nombre"],
         "text": fila["contenido"],
         "at": creado.isoformat(timespec="minutes") + "Z" if isinstance(creado, datetime) else None,
+        "created_at": creado.isoformat(timespec="minutes") + "Z" if isinstance(creado, datetime) else None,
     }
 
 
@@ -498,6 +533,9 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             SELECT td.id, td.usuario_id, td.estado_codigo, t.titulo, tt.codigo AS tipo,
                    t.prioridad, COALESCE(td.fecha_limite, t.fecha_limite) AS fecha_limite,
                    CONCAT(u.nombres, ' ', u.apellidos) AS docente,
+                   t.id AS tarea_id, t.creado_por,
+                   COALESCE(td.revisor_id, t.revisor_id) AS revisor_id,
+                   CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
                    ult.id AS ultima_transicion_id, env.creado_en AS enviado_en,
                    (SELECT COUNT(*) FROM tarea_transicion x
                      WHERE x.tarea_destinatario_id = td.id AND x.estado_nuevo = 'submitted') AS envios,
@@ -508,6 +546,7 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             JOIN workflow w    ON w.id = t.workflow_id
             JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
             JOIN usuario u     ON u.id = td.usuario_id
+            LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
             LEFT JOIN tarea_transicion ult ON ult.id = (
                 SELECT MAX(x.id) FROM tarea_transicion x WHERE x.tarea_destinatario_id = td.id)
             LEFT JOIN tarea_transicion env ON env.id = (
@@ -531,8 +570,15 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
         fecha = f["fecha_limite"]
         resultado.append({
             "id": f["id"],
+            "task_id": f["tarea_id"],
             "assignee_id": f["usuario_id"],
             "teacher": f["docente"],
+            "reviewer_id": f["revisor_id"],
+            "reviewer_name": f["revisor_nombre"],
+            "created_by": f["creado_por"],
+            # Le toca a quien mira: es el revisor designado o, si la tarea no tiene, quien la creó.
+            "mine": (f["revisor_id"] == usuario_id) if f["revisor_id"] is not None
+                    else (f["creado_por"] == usuario_id),
             "title": f["titulo"],
             "task_type": f["tipo"],
             "status": f["estado_codigo"],

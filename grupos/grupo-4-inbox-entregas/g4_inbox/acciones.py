@@ -32,6 +32,8 @@ TABLA_TRANSICIONES = {
     ("submitted", "review"):     {"nuevo_estado": "under_review", "actor": "revisor"},
     ("under_review", "return"):  {"nuevo_estado": "returned",    "actor": "revisor"},
     ("under_review", "approve"): {"nuevo_estado": "approved",    "actor": "revisor"},
+    # El cierre también es de G3 (workflow.matrix): la coordinación que creó la tarea cierra lo aprobado.
+    ("approved", "close"):       {"nuevo_estado": "closed",      "actor": "coordinador"},
 }
 
 

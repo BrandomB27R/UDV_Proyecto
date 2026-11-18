@@ -131,6 +131,8 @@ class TaskIn(BaseModel):
     due_date: str
     responsible_id: Optional[int] = None
     reviewer_id: Optional[int] = None
+    course_id: Optional[int] = None      # curso del que trata la tarea (catálogo de G1)
+    period_id: Optional[int] = None      # período académico
 
 
 class TaskPatch(BaseModel):
@@ -141,6 +143,8 @@ class TaskPatch(BaseModel):
     due_date: Optional[str] = None
     responsible_id: Optional[int] = None
     reviewer_id: Optional[int] = None
+    course_id: Optional[int] = None
+    period_id: Optional[int] = None
 
 
 class RecipientsIn(BaseModel):
@@ -181,6 +185,15 @@ def get_tasks(status: Optional[str] = None, page: int = Query(1),
 @router.post("/tasks", status_code=201, tags=["tasks"])
 def post_task(body: TaskIn, conn=Depends(get_conn), user=Depends(current_user)):
     return tasks.create_task(conn, user, body.model_dump())
+
+
+# Va antes de /tasks/{task_id}: si no, "eligible-teachers" se leería como un id.
+@router.get("/tasks/eligible-teachers", tags=["tasks"],
+            summary="Docentes que dan un curso, para proponerlos como destinatarios")
+def get_eligible_teachers(course_id: int = Query(..., ge=1),
+                          period_id: Optional[int] = Query(None, ge=1),
+                          conn=Depends(get_conn), user=Depends(current_user)):
+    return tasks.list_course_teachers(conn, user, course_id, period_id)
 
 
 @router.get("/tasks/{task_id}", tags=["tasks"])
