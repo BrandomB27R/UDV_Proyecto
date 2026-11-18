@@ -41,8 +41,7 @@ poner(raiz,
   docente?.bloques || [],
   p.administracion ? h("section", { class: "v-card" },
     h("h2", { class: "v-h2" }, "Administración"),
-    h("p", { class: "v-texto" }, "Panel de cumplimiento, catálogos y registro de auditoría."),
+    h("p", { class: "v-texto" }, "Panel de cumplimiento y catálogos. La auditoría está en la barra."),
     h("div", { class: "v-acciones" },
       h("a", { class: "v-btn v-btn--sec", href: RUTAS.panel }, "Panel"),
-      h("a", { class: "v-btn v-btn--sec", href: RUTAS.catalogos }, "Catálogos"),
-      h("a", { class: "v-btn v-btn--sec", href: RUTAS.auditoria }, "Auditoría"))) : null);
+      h("a", { class: "v-btn v-btn--sec", href: RUTAS.catalogos }, "Catálogos"))) : null);

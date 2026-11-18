@@ -20,6 +20,8 @@ export function secciones(yo) {
   if (p.docente) s.push({ id: "mis-tareas", texto: "Mis tareas", href: RUTAS.misTareas });
   if (roles.some((r) => ROLES_PANEL.includes(r))) s.push({ id: "panel", texto: "Panel", href: RUTAS.panel });
   if (p.docente || p.coordinacion || p.administracion) s.push({ id: "programas", texto: "Programas de curso", href: RUTAS.programas });
+  // GET /audit acepta administración y auditoría (G6).
+  if (roles.includes("admin") || roles.includes("auditor")) s.push({ id: "auditoria", texto: "Auditoría", href: RUTAS.auditoria });
   return s;
 }
 
