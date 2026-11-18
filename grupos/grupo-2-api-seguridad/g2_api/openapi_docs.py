@@ -108,9 +108,14 @@ def completar_openapi(app: FastAPI):
                     r["429"]["description"] = (
                         f"Cuenta bloqueada: {config.LOGIN_MAX_INTENTOS} intentos fallidos seguidos bloquean "
                         f"el acceso {config.LOGIN_BLOQUEO_MINUTOS} minutos. El mensaje indica cuántos minutos faltan "
-                        "y el bloqueo aplica aunque la contraseña sea correcta. También responde 429 si la misma IP "
-                        f"acumula {config.LOGIN_MAX_INTENTOS_IP} intentos fallidos en esos minutos."
+                        "y el bloqueo aplica aunque la contraseña sea correcta."
                     )
+                    # el limite por IP se documenta solo si esta activo (en Railway el PM lo deja en 0)
+                    if config.LOGIN_MAX_INTENTOS_IP > 0:
+                        r["429"]["description"] += (
+                            " También responde 429 si la misma IP acumula "
+                            f"{config.LOGIN_MAX_INTENTOS_IP} intentos fallidos en esos minutos."
+                        )
                     r["200"] = _resp_ok("Sesión iniciada: token y datos del usuario.", {
                         "access_token": "eyJhbGciOiJIUzI1NiIs...", "token_type": "bearer", "expires_in": 7200,
                         "usuario": {"id": 12, "correo": "docente@udv.edu.gt", "nombres": "Carlos",
@@ -124,7 +129,7 @@ def completar_openapi(app: FastAPI):
                         r["200"]["description"] = (
                             "Archivo descargado. Lo descargan su dueño y un admin; auditoría, si el archivo ya está "
                             "vinculado; revisor y coordinación, solo si el archivo es de una entrega de una tarea donde "
-                            "son el revisor designado (o cualquier revisor, si la tarea no tiene uno) o que ellos crearon. "
+                            "son el revisor designado o que ellos crearon. "
                             "Un archivo sin vincular solo lo descargan su dueño y un admin. Cualquier otro usuario recibe 403."
                         )
                 if "422" in r:
