@@ -4,7 +4,7 @@ import { api, lista } from "./api.js";
 import { APP_NAME, RUTAS, INTERVALO_AVISOS_MS } from "./config.js";
 import { h, poner, icono } from "./dom.js";
 import { fechaCorta } from "./formato.js";
-import { perfiles, nombrePerfil, cerrarSesion } from "./sesion.js";
+import { perfiles, nombrePerfil, cerrarSesion, puedeRevisar } from "./sesion.js";
 
 // Roles que ven el panel de /dashboard (los mismos que acepta el G6).
 const ROLES_PANEL = ["coordinator", "authority", "admin", "auditor"];
@@ -14,10 +14,8 @@ export function secciones(yo) {
   const roles = yo.roles || [];
   const p = perfiles(roles);
   const s = [];
-  if (p.coordinacion) {
-    s.push({ id: "por-revisar", texto: "Por revisar", href: RUTAS.porRevisar });
-    if (roles.includes("coordinator")) s.push({ id: "tareas", texto: "Tareas", href: RUTAS.tareas });
-  }
+  if (puedeRevisar(yo)) s.push({ id: "por-revisar", texto: "Por revisar", href: RUTAS.porRevisar });
+  if (roles.includes("coordinator")) s.push({ id: "tareas", texto: "Tareas", href: RUTAS.tareas });
   if (p.docente) s.push({ id: "mis-tareas", texto: "Mis tareas", href: RUTAS.misTareas });
   if (roles.some((r) => ROLES_PANEL.includes(r))) s.push({ id: "panel", texto: "Panel", href: RUTAS.panel });
   if (p.docente || p.coordinacion) s.push({ id: "programas", texto: "Programas de curso", href: RUTAS.programas });

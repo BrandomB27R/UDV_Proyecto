@@ -17,13 +17,16 @@ export function perfiles(roles = []) {
 export function nombrePerfil(roles = []) {
   const p = perfiles(roles);
   const partes = [];
-  if (p.coordinacion) partes.push("Coordinación");
+  // Dirección sola (authority sin coordinator ni reviewer) se nombra como tal.
+  if (p.coordinacion) partes.push(roles.includes("coordinator") || roles.includes("reviewer") ? "Coordinación" : "Dirección");
   if (p.docente) partes.push("Docente");
   if (p.administracion) partes.push(new Set(roles).has("admin") ? "Administración" : "Auditoría");
   return partes.join(" · ") || "Sin perfil";
 }
 
 export const tieneRol = (yo, ...roles) => roles.some((r) => (yo?.roles || []).includes(r));
+/** "Por revisar" y GET /review-queue: solo revisión, coordinación o administración (no dirección sola). */
+export const puedeRevisar = (yo) => tieneRol(yo, "reviewer", "coordinator", "admin");
 export const tienePermiso = (yo, permiso) => (yo?.permisos || []).includes(permiso);
 
 export async function iniciarSesion(correo, password) {
