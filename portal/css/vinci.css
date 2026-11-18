@@ -586,3 +586,16 @@ body.d-pagina { display: flex; flex-direction: column; }
   .d-accion__botones .v-btn { flex: 1 1 auto; }
   .d-accion__principal { padding: 14px 24px; }
 }
+
+/* ── Nueva tarea: "Otro tipo…" y destinatarios ───────────── */
+.v-opcion--otro { border-style: dashed; }
+.v-otro-tipo { display: flex; flex-direction: column; gap: 14px; padding: 18px; border: 1px solid var(--v-line); border-radius: 12px; background: #F7F9FB; }
+.v-opciones--3 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.v-campo__error { font-size: 13px; font-weight: 600; color: var(--v-danger); }
+.v-destinatarios { display: flex; flex-direction: column; gap: 16px; margin-top: 4px; }
+.v-acciones--lista { gap: 10px 12px; }
+@media (max-width: 600px) {
+  .v-destinatarios { gap: 14px; }
+  .v-acciones--lista .v-btn { width: 100%; }
+  .v-otro-tipo { padding: 14px; }
+}

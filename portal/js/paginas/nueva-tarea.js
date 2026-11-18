@@ -25,7 +25,8 @@ const PASOS = [
 const f = {
   type_id: null, title: "", description: "", due_date: "", priority: "medium",
   modo: "users", user_ids: new Set(), filtro: "",          // filtro: "campus:<nombre>" | "unit:<nombre>"
-  reviewer_id: yo.id,                                       // por defecto revisa quien crea la tarea
+  // Por defecto revisa quien crea la tarea, si tiene el rol de revisión; si no, sin revisor designado.
+  reviewer_id: (yo.roles || []).includes("reviewer") ? yo.id : null,
   course_id: null, period_id: null,                         // obligatorios si el tipo es "Actualizar programa"
 };
 // Docentes que dan el curso en el período (GET /tasks/eligible-teachers), por "curso:período".
@@ -89,7 +90,8 @@ async function cargarSugeridos() {
 const docentes = usuarios.filter((u) => (u.roles || []).includes("teacher"))
   .sort((a, b) => nombreCompleto(a).localeCompare(nombreCompleto(b)));
 // Quien puede revisar: revisión, coordinación o dirección (la base conserva los seis roles).
-const revisores = usuarios.filter((u) => (u.roles || []).some((r) => ["reviewer", "coordinator"].includes(r)))
+// La API solo acepta como revisor a quien tiene el rol reviewer (422 si no).
+const revisores = usuarios.filter((u) => (u.roles || []).includes("reviewer"))
   .sort((a, b) => (a.id === yo.id ? -1 : b.id === yo.id ? 1 : nombreCompleto(a).localeCompare(nombreCompleto(b))));
 
 async function cargarBorrador(id) {
@@ -107,6 +109,21 @@ async function cargarBorrador(id) {
   else if (r?.mode === "filter") { f.modo = "filter"; f.filtro = r.unit ? `unit:${r.unit}` : `campus:${r.campus}`; }
   else if (r?.mode === "users") { f.modo = "users"; f.user_ids = new Set(r.user_ids || []); }
 }
+
+// ── Tipos de tarea ──
+const FORMAS = {
+  texto: { titulo: "Solo texto", detalle: "Se entrega escribiendo; no lleva archivos." },
+  ambos: { titulo: "Texto y archivo opcional", detalle: "Se escribe y, si hace falta, se adjunta un archivo." },
+  archivo: { titulo: "Archivo obligatorio", detalle: "No se puede entregar sin adjuntar un archivo." },
+};
+/** Una línea que dice cómo se entrega cada tipo. */
+function comoSeEntrega(t) {
+  if (t.delivery_mode === "programa" || t.code === "ACTUALIZAR_PROGRAMA") return "Se entrega el programa del curso; pide curso y período.";
+  if (t.requires_evidence) return "La entrega exige un archivo.";
+  if (t.delivery_mode === "texto" || t.delivery_mode === "formulario") return "Se entrega solo con texto.";
+  return "Texto y archivo opcional.";
+}
+const otro = { abierto: false, nombre: "", forma: "ambos", error: "", ocupado: false };
 
 // ── Pintado ──
 const zonaError = h("div", { "aria-live": "assertive" });
@@ -160,6 +177,7 @@ async function siguiente() {
 
 function validar(i) {
   if (i === 0) {
+    if (otro.abierto && !f.type_id) return { texto: "Crea el tipo nuevo con «Crear y elegir este tipo» o elige uno de la lista.", campo: "nombre-tipo" };
     if (!f.type_id) return { texto: "Elige el tipo de tarea.", campo: `tipo-${tipos[0]?.id}` };
     if (f.title.trim().length < 3) return { texto: "Escribe un título (al menos 3 letras).", campo: "titulo" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.due_date)) return { texto: "Elige la fecha límite.", campo: "fecha" };
@@ -172,6 +190,27 @@ function validar(i) {
     if (f.modo === "filter" && !f.filtro) return { texto: "Elige la sede o la unidad.", campo: "filtro" };
   }
   return null;
+}
+
+
+async function crearTipo(zonaError, boton) {
+  const nombre = otro.nombre.trim();
+  if (nombre.length < 3) { otro.error = "Escribe el nombre del tipo (al menos 3 letras)."; pintar(); document.getElementById("nombre-tipo")?.focus(); return; }
+  boton.disabled = true; boton.textContent = "Creando…";
+  try {
+    const nuevo = await api("/task-types", { method: "POST", body: { name: nombre, delivery: otro.forma } });
+    tipos = (await api("/task-types?per_page=100")).data || [];
+    f.type_id = nuevo?.id ?? tipos.find((t) => t.name === nombre)?.id ?? null;
+    Object.assign(otro, { abierto: false, nombre: "", forma: "ambos", error: "" });
+    pintar();
+    // Después de repintar: pintar() limpia la zona de mensajes.
+    poner(zonaError, mensaje("ok", `Tipo «${nombre}» creado y elegido.`));
+    return;
+  } catch (e) {
+    otro.error = e instanceof ApiError && e.status === 409 ? "Ya existe un tipo con ese nombre: elígelo de la lista." : e.message;
+  }
+  pintar();
+  if (otro.error) document.getElementById("nombre-tipo")?.focus();
 }
 
 // ── Paso 1: datos ──
@@ -193,14 +232,17 @@ function pasoDatos() {
     h("fieldset", { class: "v-grupo" },
       h("legend", { class: "v-campo__etq" }, "Tipo de tarea"),
       h("p", { class: "v-campo__ayuda" },
-        "El tipo es un catálogo fijo: define si la entrega exige un archivo. Todo lo demás (título, instrucciones, fecha, prioridad y destinatarios) lo escribes tú."),
-      h("div", { class: "v-opciones" }, tipos.map((t) => h("label", { class: "v-opcion" },
-        h("input", { type: "radio", name: "tipo", id: `tipo-${t.id}`, value: String(t.id), checked: f.type_id === t.id,
-          onchange: () => { f.type_id = t.id; pintarCurso(); } }),
-        h("span", { class: "v-opcion__txt" },
-          h("strong", {}, t.name),
-          h("span", {}, t.code === "ACTUALIZAR_PROGRAMA" ? "Se entrega el programa del curso; pide curso y período."
-            : t.requires_evidence ? "La entrega exige un archivo." : "Adjuntar archivos es opcional.")))))),
+        "El tipo dice cómo se entrega: solo texto, texto con archivo opcional o archivo obligatorio. Si ninguno sirve, crea otro con «Otro tipo…». Todo lo demás (título, instrucciones, fecha, prioridad y destinatarios) lo escribes tú."),
+      h("div", { class: "v-opciones" },
+        tipos.map((t) => h("label", { class: "v-opcion" },
+          h("input", { type: "radio", name: "tipo", id: `tipo-${t.id}`, value: String(t.id), checked: !otro.abierto && f.type_id === t.id,
+            onchange: () => { f.type_id = t.id; otro.abierto = false; pintar(); } }),
+          h("span", { class: "v-opcion__txt" }, h("strong", {}, t.name), h("span", {}, comoSeEntrega(t))))),
+        h("label", { class: "v-opcion v-opcion--otro" },
+          h("input", { type: "radio", name: "tipo", id: "tipo-otro", value: "otro", checked: otro.abierto,
+            onchange: () => { otro.abierto = true; f.type_id = null; pintar(); document.getElementById("nombre-tipo")?.focus(); } }),
+          h("span", { class: "v-opcion__txt" }, h("strong", {}, "Otro tipo…"), h("span", {}, "Crea un tipo nuevo con su forma de entrega."))))),
+    otro.abierto ? formularioOtroTipo() : null,
     zonaCurso,
     campo("titulo", "Título", h("input", { id: "titulo", type: "text", maxlength: 200, value: f.title, autocomplete: "off",
       placeholder: "Por ejemplo: Actualizar CV para la acreditación 2027",
@@ -214,6 +256,26 @@ function pasoDatos() {
       campo("prioridad", "Prioridad", h("select", { id: "prioridad", onchange: (e) => { f.priority = e.target.value; } },
         Object.entries(PRIORIDADES).map(([v, t]) => h("option", { value: v, selected: f.priority === v }, t))))),
   ];
+}
+
+function formularioOtroTipo() {
+  const zona = h("div", { "aria-live": "polite" });
+  const boton = h("button", { type: "button", class: "v-btn v-btn--chico", onclick: () => crearTipo(zonaError, boton) }, "Crear y elegir este tipo");
+  return h("div", { class: "v-otro-tipo" },
+    h("div", { class: "v-campo" },
+      h("label", { for: "nombre-tipo" }, "Nombre del tipo"),
+      h("input", { id: "nombre-tipo", type: "text", maxlength: 100, value: otro.nombre, autocomplete: "off",
+        placeholder: "Por ejemplo: Entregar planificación semestral", "aria-invalid": otro.error ? "true" : null,
+        "aria-describedby": otro.error ? "error-tipo" : null,
+        oninput: (e) => { otro.nombre = e.target.value; } }),
+      otro.error ? h("span", { id: "error-tipo", class: "v-campo__error", role: "alert" }, otro.error) : null),
+    h("fieldset", { class: "v-grupo" },
+      h("legend", { class: "v-campo__etq" }, "Cómo se entrega"),
+      h("div", { class: "v-opciones v-opciones--3" }, Object.entries(FORMAS).map(([v, x]) => h("label", { class: "v-opcion" },
+        h("input", { type: "radio", name: "forma-tipo", value: v, checked: otro.forma === v, onchange: () => { otro.forma = v; } }),
+        h("span", { class: "v-opcion__txt" }, h("strong", {}, x.titulo), h("span", {}, x.detalle)))))),
+    h("div", { class: "v-acciones" }, boton),
+    zona);
 }
 
 // ── Paso 2: destinatarios ──
@@ -259,13 +321,13 @@ function pasoDestinatarios() {
     };
     const buscar = h("input", { id: "buscar-docente", type: "search", placeholder: "Buscar por nombre o correo", value: buscarDocente, autocomplete: "off",
       oninput: (e) => { buscarDocente = e.target.value.trim().toLowerCase(); e.target.removeAttribute("aria-invalid"); pintarCasillas(); } });
-    poner(lista,
+    poner(lista, h("div", { class: "v-destinatarios" },
       h("div", { class: "v-campo" }, h("label", { for: "buscar-docente" }, "Docentes"), buscar),
-      h("div", { class: "v-acciones" },
+      h("div", { class: "v-acciones v-acciones--lista" },
         h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { visibles().forEach((u) => f.user_ids.add(u.id)); pintarCasillas(); } }, "Elegir todos los de la lista"),
         h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { f.user_ids.clear(); pintarCasillas(); } }, "Quitar todos"),
         contador),
-      casillas);
+      casillas));
     pintarCasillas();
   }
 
@@ -299,7 +361,7 @@ function pasoRevisor() {
   return [
     h("fieldset", { class: "v-grupo" },
       h("legend", { class: "v-campo__etq" }, "¿Quién revisa las entregas?"),
-      h("p", { class: "v-campo__ayuda" }, "El revisor toma cada entrega, la aprueba o la devuelve con una observación. Por defecto revisas tú."),
+      h("p", { class: "v-campo__ayuda" }, "El revisor toma cada entrega, la aprueba o la devuelve con una observación. Solo aparecen quienes tienen el rol de revisión."),
       h("div", { class: "v-opciones" },
         revisores.map((u) => opcion(u.id, u.id === yo.id ? `${nombreCompleto(u)} (tú)` : nombreCompleto(u), rolesDe(u))),
         opcion(null, "Sin revisor designado", "La revisa la coordinación que crea la tarea; la aprueba quien tenga el rol de dirección."))),
@@ -325,7 +387,7 @@ function pasoConfirmar() {
     h("p", { class: "v-texto", style: "color: var(--v-muted-2)" },
       "Revisa los datos. Al publicar, a cada docente le llega su aviso y la tarea aparece en sus pendientes. Si prefieres terminarla después, guárdala como borrador."),
     h("dl", { class: "v-resumen" },
-      fila("Tipo", tipo ? `${tipo.name} · ${tipo.code === "ACTUALIZAR_PROGRAMA" ? "se entrega el programa" : tipo.requires_evidence ? "exige archivo" : "archivo opcional"}` : "—", 0),
+      fila("Tipo", tipo ? `${tipo.name} · ${comoSeEntrega(tipo).toLowerCase().replace(/\.$/, "")}` : "—", 0),
       esPrograma() ? fila("Curso", nombreCurso(f.course_id), 0) : null,
       esPrograma() ? fila("Período", nombrePeriodo(f.period_id), 0) : null,
       fila("Título", f.title.trim(), 0),
@@ -335,6 +397,29 @@ function pasoConfirmar() {
       fila("Destinatarios", describirDestinatarios(), 1),
       fila("Revisor", revisor, 2)),
   ];
+}
+
+// Errores de validación de la API por campo: mensaje en español y el paso donde se corrige.
+const CAMPOS = {
+  type_id: { paso: 0, control: () => `tipo-${tipos[0]?.id}`, texto: "El tipo de tarea elegido ya no es válido. Elige otro." },
+  title: { paso: 0, control: () => "titulo", texto: "Revisa el título: falta o es demasiado largo." },
+  description: { paso: 0, control: () => "instrucciones", texto: "Revisa las instrucciones: son demasiado largas." },
+  due_date: { paso: 0, control: () => "fecha", texto: "Revisa la fecha límite: no es una fecha válida." },
+  priority: { paso: 0, control: () => "prioridad", texto: "Elige una prioridad de la lista." },
+  course_id: { paso: 0, control: () => "curso", texto: "Ese curso no existe o ya no está activo. Elige otro." },
+  period_id: { paso: 0, control: () => "periodo", texto: "Ese período no existe o ya no está activo. Elige otro." },
+  user_ids: { paso: 1, control: () => "buscar-docente", texto: "Hay personas elegidas que no son docentes activos. Revisa la lista." },
+  invalid_user_ids: { paso: 1, control: () => "buscar-docente", texto: "Hay personas elegidas que no son docentes activos. Revisa la lista." },
+  campus: { paso: 1, control: () => "filtro", texto: "Esa sede no existe o ya no está activa. Elige otra." },
+  unit: { paso: 1, control: () => "filtro", texto: "Esa unidad académica no existe o ya no está activa. Elige otra." },
+  reviewer_id: { paso: 2, control: () => null, texto: "La persona elegida no puede revisar: necesita el rol de revisión. Elige otra o deja la tarea sin revisor designado." },
+};
+function errorDeCampo(e) {
+  if (!(e instanceof ApiError) || e.status !== 422 || !e.details || typeof e.details !== "object") return null;
+  const claves = [e.details.field, ...(Array.isArray(e.details.fields) ? e.details.fields : []), ...Object.keys(e.details)].filter(Boolean);
+  const k = claves.find((x) => CAMPOS[x]);
+  if (!k) return null;
+  return { paso: CAMPOS[k].paso, control: CAMPOS[k].control(), texto: CAMPOS[k].texto };
 }
 
 // ── Guardar y publicar ──
@@ -368,9 +453,10 @@ async function guardar(publicar) {
     location.assign(`/app/tarea.html?id=${tareaId}`);
   } catch (e) {
     btns.forEach((b) => { b.disabled = false; });
-    let texto = e.message;
-    if (e instanceof ApiError && e.status === 422 && e.details?.invalid_user_ids) texto = "Hay usuarios elegidos que no son docentes activos. Revisa la lista.";
+    const campo = errorDeCampo(e);
+    let texto = campo ? campo.texto : e.message;
     if (tareaId) texto += " La tarea quedó guardada como borrador; puedes intentarlo otra vez.";
-    error(texto);
+    if (campo) { paso = campo.paso; pintar(true); }
+    error(texto, campo?.control);
   }
 }
