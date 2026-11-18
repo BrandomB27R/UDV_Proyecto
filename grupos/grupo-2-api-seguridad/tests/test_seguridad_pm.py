@@ -210,10 +210,19 @@ def test_descarga_de_una_entrega_segun_la_tarea(client, db, tablas_de_tareas, ro
     archivo_id = _archivo_de_entrega(db, tmp_path, creador_id=7, revisor_tarea=5)
     assert _descargar(client, correo, archivo_id) == esperado
 
-def test_tarea_sin_revisor_designado_cualquier_revisor_descarga(client, db, tablas_de_tareas, roles_de_descarga, tmp_path):
+def test_tarea_sin_revisor_designado_no_descarga_cualquier_revisor(client, db, tablas_de_tareas, roles_de_descarga, tmp_path):
+    # Decision B (revisada el 16-nov): Sin revisor designado revisa la coordinacion que creo la tarea o un admin.
     archivo_id = _archivo_de_entrega(db, tmp_path, creador_id=7)
-    assert _descargar(client, "revisor@demo.udv.edu.gt", archivo_id) == 200
-    assert _descargar(client, "revisor2@demo.udv.edu.gt", archivo_id) == 200
+    assert _descargar(client, "revisor@demo.udv.edu.gt", archivo_id) == 403
+    assert _descargar(client, "revisor2@demo.udv.edu.gt", archivo_id) == 403
+    assert _descargar(client, "coord@demo.udv.edu.gt", archivo_id) == 200
+
+def test_coordinacion_designada_como_revisor_descarga_sin_haber_creado_la_tarea(client, db, tablas_de_tareas, roles_de_descarga, tmp_path):
+    # la tarea es de la coordinacion 7, pero el revisor designado es la coordinacion 8
+    archivo_id = _archivo_de_entrega(db, tmp_path, creador_id=7, revisor_tarea=8)
+    assert _descargar(client, "coord2@demo.udv.edu.gt", archivo_id) == 200
+    assert _descargar(client, "coord@demo.udv.edu.gt", archivo_id) == 200 # la dueña sigue pudiendo
+    assert _descargar(client, "revisor@demo.udv.edu.gt", archivo_id) == 403
 
 def test_el_revisor_del_destinatario_manda_sobre_el_de_la_tarea(client, db, tablas_de_tareas, roles_de_descarga, tmp_path):
     archivo_id = _archivo_de_entrega(db, tmp_path, creador_id=7, revisor_tarea=5, revisor_destinatario=6)
