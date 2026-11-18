@@ -38,7 +38,9 @@ const st = {
   cursos: null, perfiles: undefined,
   seccion: SECCIONES.find((s) => `#${s.id}` === location.hash)?.id || "general",
   editores: new Map(),          // seccion -> {editor, base, guardadoEn}
-  motivo: "", aviso: null, ocupado: false, verCambios: false,
+  motivo: "", aviso: null, ocupado: false,
+  // #historial (desde la lista de programas) abre el historial; #cambios, la comparación.
+  verCambios: location.hash === "#cambios", verHistorial: location.hash === "#historial",
 };
 
 // ── Carga ────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ function pintar() {
     rutaDeMigas(),
     cabecera(),
     aviso ? mensaje(aviso.tipo, aviso.texto) : null,
+    st.verHistorial ? bloqueHistorial() : null,
     st.verCambios ? bloqueCambios() : null,
     linea(),
     ref.paso = h("div"),
@@ -132,9 +135,9 @@ function cabecera() {
   const pdf = ["authorized", "superseded"].includes(v.estado);
   // Si el PDF falla, aviso de error destacado bajo los botones del encabezado.
   const zonaPdf = h("div", { class: "p-cabecera__aviso" });
-  const selector = h("select", { id: "selector-version", "aria-label": "Versión", onchange: (e) => {
+  const selector = h("select", { id: "selector-version", "aria-label": "Versión", class: v.estado === "authorized" ? "p-opcion--autorizada" : null, onchange: (e) => {
     location.assign(`/app/programa.html?version=${encodeURIComponent(e.target.value)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}`);
-  } }, st.versiones.map((x) => h("option", { value: String(x.id), selected: x.id === v.id },
+  } }, st.versiones.map((x) => h("option", { value: String(x.id), selected: x.id === v.id, class: x.estado === "authorized" ? "p-opcion--autorizada" : "p-opcion" },
     `Versión ${x.numero_version} · ${periodoDe(x)} · ${etiquetaEstadoPrograma(x.estado)}`)));
   return h("header", { class: "p-cabecera" },
     h("div", { class: "p-cabecera__titulo" },
@@ -146,6 +149,8 @@ function cabecera() {
         h("div", {}, h("dt", {}, "Estado"), h("dd", {}, h("span", { class: `v-chip v-chip--${claseEstadoPrograma(v.estado)}` }, etiquetaEstadoPrograma(v.estado)))))),
     h("div", { class: "p-cabecera__acciones" },
       st.versiones.length > 1 ? h("div", { class: "v-campo p-selector" }, h("label", { for: "selector-version", class: "v-sr" }, "Versión"), selector) : null,
+      st.versiones.length > 1 ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", "aria-expanded": String(st.verHistorial), "aria-controls": "historial-versiones",
+        onclick: () => { alternarHistorial(!st.verHistorial); } }, st.verHistorial ? "Ocultar historial" : `Historial (${st.versiones.length})`) : null,
       v.version_origen_id || st.versiones.length > 1 ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", "aria-expanded": String(st.verCambios),
         onclick: () => { st.verCambios = !st.verCambios; pintar(); } }, st.verCambios ? "Ocultar cambios" : "Ver cambios") : null,
       pdf ? h("button", { type: "button", class: "v-btn v-btn--chico", onclick: async (e) => {
@@ -366,6 +371,75 @@ function bloqueResponsables() {
     zona);
 }
 
+// ── Historial de versiones ───────────────────────────────────
+const urlVersion = (id, hash = "") =>
+  `/app/programa.html?version=${encodeURIComponent(id)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}${hash}`;
+
+function alternarHistorial(abrir) {
+  st.verHistorial = abrir;
+  if (!abrir && location.hash === "#historial") history.replaceState(null, "", `${location.pathname}${location.search}`);
+  pintar();
+  if (abrir) irAlHistorial();
+}
+
+function irAlHistorial() {
+  desplazarA(document.getElementById("historial-versiones"));
+  document.getElementById("t-historial")?.focus({ preventScroll: true });
+}
+
+/** Lleva un bloque arriba, debajo de la barra y del encabezado si están fijos. */
+function desplazarA(el) {
+  if (!el) return;
+  const fijos = [document.getElementById("barra"), document.querySelector(".p-cabecera")]
+    .filter((x) => x && ["sticky", "fixed"].includes(getComputedStyle(x).position))
+    .reduce((t, x) => t + x.offsetHeight, 0);
+  window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - fijos - 12) });
+}
+
+/** Tabla de todas las versiones, de la más nueva a la más vieja. st.versiones ya viene ordenada así. */
+function bloqueHistorial() {
+  const masVieja = st.versiones[st.versiones.length - 1];
+  const zonaError = h("div", { "aria-live": "polite" });
+  const codigo = contenidoDe(st.v, "general").codigo || st.programa?.codigo || "programa";
+  const filas = st.versiones.map((x) => {
+    const actual = x.id === st.v.id;
+    const conPdf = ["authorized", "superseded"].includes(x.estado);
+    const conCambios = !!x.version_origen_id || x.id !== masVieja.id;
+    const pdf = conPdf ? h("button", { type: "button", class: "v-enlace", onclick: async (e) => {
+      e.currentTarget.disabled = true; const b = e.currentTarget; poner(zonaError);
+      try { await descargarPdf(x.id, `${codigo}-version-${x.numero_version}.pdf`); }
+      catch (err) { poner(zonaError, mensaje("error", `No se pudo descargar el PDF de la versión ${x.numero_version}: ${err.message}`)); }
+      b.disabled = false;
+    } }, "PDF", h("span", { class: "v-sr" }, ` de la versión ${x.numero_version}`)) : null;
+    const cambios = !conCambios ? null : actual
+      ? h("button", { type: "button", class: "v-enlace", "aria-expanded": String(st.verCambios),
+        onclick: () => { st.verCambios = !st.verCambios; pintar(); if (st.verCambios) desplazarA(document.getElementById("t-cambios")?.closest("section")); } },
+        st.verCambios ? "Ocultar cambios" : "Ver cambios")
+      : h("a", { class: "v-enlace", href: urlVersion(x.id, "#cambios") }, "Ver cambios", h("span", { class: "v-sr" }, ` de la versión ${x.numero_version}`));
+    const autorizada = x.autorizado_en && ["authorized", "superseded"].includes(x.estado) ? fechaCorta(x.autorizado_en) : "—";
+    return h("tr", { class: actual ? "p-historial__actual" : null, "aria-current": actual ? "true" : null },
+      h("th", { scope: "row", "data-etq": "Versión" }, `Versión ${x.numero_version}`, actual ? h("span", { class: "p-historial__aqui" }, " · abierta") : null),
+      h("td", { "data-etq": "Período" }, periodoDe(x)),
+      h("td", { "data-etq": "Estado" }, h("span", { class: `v-chip v-chip--${claseEstadoPrograma(x.estado)}` }, etiquetaEstadoPrograma(x.estado))),
+      h("td", { "data-etq": "Elaboró" }, contenidoDe(x, "responsables")?.docente || "—"),
+      h("td", { "data-etq": "Autorizada el" }, autorizada),
+      h("td", {}, h("div", { class: "p-historial__acciones" },
+        actual ? null : h("a", { class: "v-enlace", href: urlVersion(x.id) }, "Abrir", h("span", { class: "v-sr" }, ` la versión ${x.numero_version}`)),
+        pdf, cambios)));
+  });
+  return h("section", { id: "historial-versiones", class: "v-card p-historial", "aria-labelledby": "t-historial" },
+    h("div", { class: "p-historial__cab" },
+      h("h2", { id: "t-historial", class: "v-h2", tabindex: "-1" }, "Historial de versiones"),
+      h("button", { type: "button", class: "v-enlace", onclick: () => alternarHistorial(false) }, "Ocultar historial")),
+    h("p", { class: "v-nota" }, `${st.versiones.length} versiones, de la más nueva a la más vieja. La vigente es la última autorizada; el PDF existe solo para las autorizadas y las reemplazadas.`),
+    h("div", { class: "p-historial__marco" },
+      h("table", { class: "v-tabla-lectura p-historial__tabla" },
+        h("thead", {}, h("tr", {}, ["Versión", "Período", "Estado", "Elaboró", "Autorizada el"].map((t) => h("th", { scope: "col" }, t)),
+          h("th", { scope: "col" }, h("span", { class: "v-sr" }, "Acciones")))),
+        h("tbody", {}, filas))),
+    zonaError);
+}
+
 // ── Cambios frente a la versión anterior ─────────────────────
 function bloqueCambios() {
   const zona = h("section", { class: "v-card", "aria-labelledby": "t-cambios" },
@@ -398,6 +472,11 @@ if (!versionId || !/^\d+$/.test(versionId)) {
   await sinAcceso(raiz, "Programa de curso", "Falta indicar qué versión abrir. Ábrela desde «Programas de curso».");
 } else {
   await cargar();
+  // Llegó desde «y N anteriores» o desde «Ver cambios» de otra versión. El id del bloque no
+  // coincide con el ancla (#historial) para que el navegador no salte solo, sin descontar la barra.
+  await document.fonts?.ready;
+  if (st.verHistorial) irAlHistorial();
+  else if (st.verCambios) desplazarA(document.getElementById("t-cambios")?.closest("section"));
 }
 // El encabezado fijo va debajo de la barra: su alto cambia con el ancho.
 const barra = document.getElementById("barra");

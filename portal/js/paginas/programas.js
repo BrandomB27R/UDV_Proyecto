@@ -76,15 +76,24 @@ function pintar() {
         : "No hay programas en este grupo."));
 }
 
+// La tarjeta muestra a lo sumo dos versiones: la vigente y la que está en trabajo.
+// Las demás quedan en el historial del programa ("y N anteriores").
 function fila(p) {
   const principal = p.abierta || p.vigente || p.versiones[0];
+  const visibles = [p.vigente, p.abierta].filter(Boolean);
+  if (!visibles.length) visibles.push(p.versiones[0]);
+  const resto = p.versiones.length - visibles.length;
   return h("li", { class: "v-programa-fila" },
     h("div", { class: "v-programa-fila__info" },
       h("a", { class: "v-programa-fila__titulo", href: enlace(principal) }, `${p.codigo} · ${p.asignatura}`),
       h("span", { class: "v-tarea__dato" }, [p.sede, p.modalidad].filter(Boolean).join(" · ")),
       h("span", { class: "v-tarea__dato" }, p.vigente ? `Vigente: versión ${p.vigente.numero} (${p.vigente.periodo})` : "Sin versión vigente")),
-    h("ul", { class: "v-versiones", "aria-label": `Versiones de ${p.codigo}` }, p.versiones.map((v) => h("li", {},
-      h("a", { class: "v-version-chip", href: enlace(v) },
-        h("span", {}, `Versión ${v.numero} · ${v.periodo}`),
-        h("span", { class: `v-chip v-chip--${claseEstadoPrograma(v.estado)}` }, etiquetaEstadoPrograma(v.estado)))))));
+    h("div", { class: "v-programa-fila__versiones" },
+      h("ul", { class: "v-versiones", "aria-label": `Versiones de ${p.codigo}` }, visibles.map((v) => h("li", {},
+        h("a", { class: "v-version-chip", href: enlace(v) },
+          h("span", {}, `Versión ${v.numero} · ${v.periodo}`),
+          h("span", { class: `v-chip v-chip--${claseEstadoPrograma(v.estado)}` }, etiquetaEstadoPrograma(v.estado)))))),
+      resto > 0 ? h("a", { class: "v-programa-fila__mas", href: `${enlace(principal)}#historial`,
+        "aria-label": `Historial de versiones de ${p.codigo}: ${resto} ${resto === 1 ? "versión anterior" : "versiones anteriores"}` },
+        `y ${resto} ${resto === 1 ? "anterior" : "anteriores"}`) : null));
 }

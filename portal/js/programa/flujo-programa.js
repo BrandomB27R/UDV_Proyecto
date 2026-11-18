@@ -8,7 +8,8 @@ export const ESTADOS_PROGRAMA = {
 };
 export const etiquetaEstadoPrograma = (s) => ESTADOS_PROGRAMA[s] || s || "Sin estado";
 // Clase de etiqueta: se reutilizan los colores de las tareas (mismo significado).
-export const claseEstadoPrograma = (s) => ({ draft: "draft", submitted: "submitted", under_review: "under_review", returned: "returned", approved: "approved", authorized: "closed", superseded: "cancelled" }[s] || "draft");
+// Autorizada en verde (el de «Aprobada» en las tareas) para que la vigente destaque de las reemplazadas y borradores.
+export const claseEstadoPrograma = (s) => ({ draft: "draft", submitted: "submitted", under_review: "under_review", returned: "returned", approved: "approved", authorized: "approved", superseded: "cancelled" }[s] || "draft");
 
 export const LINEA_PROGRAMA = ["draft", "submitted", "under_review", "approved", "authorized"];
 const NOMBRE_PASO = { draft: "Borrador", submitted: "Enviada", under_review: "En revisión", approved: "Aprobada", authorized: "Autorizada" };
