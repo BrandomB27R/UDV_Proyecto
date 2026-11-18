@@ -37,6 +37,12 @@ export function indicador(titulo, valor, detalle, tono = "") {
     h("span", { class: "v-indicador__detalle" }, detalle));
 }
 
+/** Marca de un requisito como texto (no parece una casilla): «✓ Listo», «Falta» u «Opcional». */
+export const TEXTO_MARCA = { hecho: "✓ Listo", pendiente: "Falta", opcional: "Opcional" };
+export function marcaRequisito(estado) {
+  return h("span", { class: `v-req__marca-txt v-req__marca-txt--${TEXTO_MARCA[estado] ? estado : "opcional"}` }, TEXTO_MARCA[estado] || TEXTO_MARCA.opcional);
+}
+
 /** Estado vacío: una frase y, si aplica, una acción. */
 export function vacio(frase, accion) {
   return h("div", { class: "v-vacio" },

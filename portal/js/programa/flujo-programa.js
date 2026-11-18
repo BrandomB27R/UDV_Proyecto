@@ -85,19 +85,26 @@ export function pasoPrograma(v, ctx) {
     };
   }
   if (a.has("approve") || a.has("return")) {
-    const motivoListo = !!(ctx.motivo || "").trim();
-    const req = [{ id: "leer", titulo: "Revisa las nueve secciones", estado: "opcional", detalle: "Están abajo, cada una con su contenido." }];
-    if (a.has("return")) req.push({ id: "motivo", titulo: "Para devolver, escribe la observación", estado: motivoListo ? "hecho" : "pendiente", nota: "obligatoria para devolver" });
-    const devolver = a.has("return") ? { accion: "return", etiqueta: "Devolver", habilitada: motivoListo, motivo: motivoListo ? "" : "«Devolver» se habilita cuando escribas la observación." } : null;
-    const tareaDevuelta = a.has("return") && t.return ? ` También devuelve la tarea${t.docente ? ` a ${t.docente}` : ""}.` : "";
+    // Dos recuadros (js/decision.js): «Si está bien» y «Si falta algo», con lo que pasa con la tarea en cada uno.
+    const aprueba = a.has("approve");
     return {
-      turno: "tuyo", eyebrow: "Te toca a ti", titulo: a.has("approve") ? "Aprueba o devuelve el programa" : "Revisa el programa",
-      resumen: (a.has("approve") ? `Si está bien, apruébalo; luego dirección lo autoriza. Si falta algo, devuélvelo con una observación.${tareaDevuelta}`
-        + (t.return ? " Aprobar no mueve la tarea: se aprueba cuando dirección autorice el programa." : "")
-        : `Puedes devolverlo con una observación.${tareaDevuelta} Aprobarlo le corresponde a otra persona: quien lo elaboró no lo aprueba.`),
-      requisitos: req, conMotivo: true,
-      principal: a.has("approve") ? { accion: "approve", etiqueta: "Aprobar", habilitada: true } : devolver,
-      secundaria: a.has("approve") ? devolver : null,
+      turno: "tuyo", eyebrow: "Te toca a ti", titulo: aprueba ? "Aprueba o devuelve el programa" : "Revisa el programa",
+      resumen: "", requisitos: [], principal: null,
+      decision: {
+        guia: aprueba ? "Revisa las nueve secciones, que están abajo, y elige una de las dos opciones." : "Revisa las nueve secciones, que están abajo.",
+        irA: "Ir a las secciones ↓",
+        aprobar: aprueba ? {
+          texto: "El programa pasa a dirección para que lo autorice.",
+          extra: t.docente ? `Aprobar no mueve la tarea: la tarea de ${t.docente} se aprueba cuando dirección autorice el programa.` : null,
+          etiqueta: "Aprobar el programa",
+        } : null,
+        devolver: a.has("return") ? {
+          texto: `El programa vuelve a ${quien} con tu observación, para que lo corrija y lo envíe de nuevo.`,
+          extra: t.return ? `También devuelve la tarea${t.docente ? ` a ${t.docente}` : ""}.` : null,
+          docente: quien, placeholder: "Por ejemplo: falta detallar la evaluación de la unidad 2.",
+        } : null,
+        nota: aprueba ? null : "No puedes aprobarlo porque participaste en su elaboración.",
+      },
     };
   }
   if (a.has("authorize")) {

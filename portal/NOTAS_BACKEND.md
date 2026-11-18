@@ -126,3 +126,18 @@ Pendiente:
 Cada fila de `/course-programs` trae `docente_responsable`, `aprobado_por` y
 `aprobado_en`. «Te toca autorizar» ya no pide el detalle de cada versión: «Elaboró»
 sale de `docente_responsable` y la columna «Aprobó» muestra quién y hace cuánto.
+
+## Revisión (20-nov)
+
+### 11. Aprobar o devolver directo la asignación de un programa (G4)
+
+En una tarea de «Actualizar programa», la entrega es la versión del programa. La
+pantalla de la asignación ya no ofrece «Aprobar» ni «Devolver» sobre la entrega:
+manda a revisar el programa en su página, que aprueba o devuelve la versión y mueve
+la tarea con ella (vinci-9 y vinci-13). «Comenzar revisión» sí sigue en la tarea.
+
+El backend todavía permite `POST /assignments/{id}/approve` y `/return` sobre esa
+asignación (y los devuelve en `viewer_actions`). Así la tarea podría quedar
+aprobada con el programa sin aprobar, o devuelta con el programa en revisión. Si el
+PM lo decide, el G4 puede rechazar con 409 approve y return directos cuando la
+asignación tiene `program_version` (y quitarlos de `viewer_actions`).

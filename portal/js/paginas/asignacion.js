@@ -14,7 +14,8 @@ import {
   lineaDeEstados, capacidades, formaDeEntrega, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial,
 } from "../flujo.js";
 import { requerirSesion, perfiles, puedeRevisar, tieneRol } from "../sesion.js";
-import { sinAcceso, tomarAviso } from "../componentes.js";
+import { sinAcceso, tomarAviso, TEXTO_MARCA } from "../componentes.js";
+import { bloqueDecision } from "../decision.js";
 import { leerVersion, abrirVersionDeAsignacion } from "../programa/api-programa.js";
 import { avanceDe } from "../programa/secciones.js";
 
@@ -207,7 +208,16 @@ function bloquePrincipal() {
 
   const c = capacidades(st.a);
   const cuerpo = [];
-  if (p.requisitos.length) {
+  if (p.decision) {
+    // Quien revisa elige en dos recuadros; la entrega queda debajo. Sin barra fija (pintarBarra la oculta).
+    cuerpo.push(decisionEntrega(p.decision));
+    cuerpo.push(h("div", { id: "la-entrega", class: "d-entrega-revisar", tabindex: "-1" }, entregaLectura("La entrega")));
+  } else if (p.irAlPrograma) {
+    // Tarea de programa: se aprueba o devuelve en la página del programa, que mueve la tarea.
+    cuerpo.push(h("div", { class: "v-acciones" },
+      h("a", { class: "v-btn", href: RUTAS.programa(st.a.program_version.id, st.a.id) }, "Revisar el programa")));
+    cuerpo.push(entregaLectura("La entrega"));
+  } else if (p.requisitos.length) {
     // Primero los obligatorios, después los opcionales (orden estable; la lógica es de flujo.js).
     const peso = (r) => (r.obligatorio || r.estado === "pendiente" ? 0 : 1);
     const enOrden = p.requisitos.map((r, i) => [r, i]).sort((x, y) => peso(x[0]) - peso(y[0]) || x[1] - y[1]).map((x) => x[0]);
@@ -226,9 +236,21 @@ function bloquePrincipal() {
     anterior);
 }
 
-/** Cada requisito con su control en línea. Los textos vienen de flujo.js. */
+/** Aprobar o devolver la entrega: dos recuadros (js/decision.js); los errores se muestran aquí, no en una barra. */
+function decisionEntrega(d) {
+  zonaErrorAccion = h("div", { class: "d-decision__error", "aria-live": "assertive" });
+  const { nodo } = bloqueDecision({
+    guia: d.guia, nota: d.nota, ocupado: st.ocupado,
+    irA: { texto: d.irA, alPulsar: () => { const e = document.getElementById("la-entrega"); e?.scrollIntoView({ block: "start" }); e?.focus({ preventScroll: true }); } },
+    aprobar: d.aprobar ? { ...d.aprobar, alPulsar: () => ejecutar("approve") } : null,
+    devolver: d.devolver ? { ...d.devolver, valor: st.motivo, alEscribir: (v) => { st.motivo = v; }, alPulsar: () => ejecutar("return") } : null,
+  });
+  return [nodo, zonaErrorAccion];
+}
+
+/** Cada requisito con su control en línea. Los textos vienen de flujo.js. La marca es texto, no un círculo. */
 function filaRequisito(r) {
-  const marca = h("span", { class: `v-req__marca v-req__marca--${r.estado}`, "aria-hidden": "true" });
+  const marca = h("span", { class: `v-req__marca-txt v-req__marca-txt--${r.estado}` });
   const estado = h("span", { class: "v-req__estado" });
   const detalle = h("span", { class: "v-req__detalle" });
   filas.set(r.id, { marca, estado, detalle });
@@ -241,10 +263,9 @@ function filaRequisito(r) {
   if (r.id === "archivo") { control = adjuntos(); enLinea = true; }
   if (r.id === "programa") control = controlPrograma(r);
   if (r.id === "tomar" || r.id === "revisar") { control = entregaLectura(null); enLinea = r.id === "revisar"; }
-  if (r.id === "motivo") control = campoMotivo();
   if (enLinea) detalle.hidden = true;
 
-  return h("li", { class: `d-req__fila d-req__fila--${r.id}` },
+  return h("li", { class: `d-req__fila d-req__fila--${r.id} v-req__fila-txt` },
     marca,
     h("div", { class: "v-req__cuerpo" },
       h("span", { class: "v-req__titulo" }, r.titulo, " ", estado),
@@ -253,11 +274,12 @@ function filaRequisito(r) {
 }
 
 function pintarMarca(f, r) {
-  f.marca.className = `v-req__marca v-req__marca--${r.estado}`;
-  poner(f.marca, r.estado === "hecho" ? icono("check", 14, 3.5) : null);
-  f.estado.className = `v-req__estado${r.estado === "pendiente" ? " v-req__estado--pendiente" : r.estado === "hecho" ? " v-req__estado--hecho" : ""}`;
-  const txt = r.estado === "hecho" ? (r.nota ? `${r.nota}, listo` : "listo") : r.estado === "pendiente" ? (r.nota || "pendiente") : (r.nota || "opcional");
-  f.estado.textContent = `· ${txt}`;
+  const estado = TEXTO_MARCA[r.estado] ? r.estado : "opcional";
+  f.marca.className = `v-req__marca-txt v-req__marca-txt--${estado}`;
+  f.marca.textContent = TEXTO_MARCA[estado];
+  // La marca ya dice el estado; aquí solo queda la nota (p. ej. «obligatorio en este tipo de tarea»).
+  f.estado.className = "v-req__estado";
+  f.estado.textContent = r.nota ? `· ${r.nota}` : "";
   if (!f.detalle.hidden) f.detalle.textContent = r.detalle || "";
 }
 
@@ -491,16 +513,6 @@ function controlPrograma(r) {
   return h("div", { class: "d-control" }, h("div", { class: "v-acciones" }, boton), zona);
 }
 
-function campoMotivo() {
-  const ta = h("textarea", {
-    id: "motivo", rows: 3, maxlength: 2000, value: st.motivo, "aria-label": "Observación para el docente",
-    placeholder: "Por ejemplo: falta la bibliografía actualizada de la unidad 3.",
-    oninput: (e) => { st.motivo = e.target.value; e.target.removeAttribute("aria-invalid"); refrescar(); },
-  });
-  return h("div", { class: "d-mensaje" }, ta,
-    h("span", { class: "v-campo__ayuda" }, "Obligatoria para devolver. Al aprobar es opcional y queda en el historial."));
-}
-
 /** La entrega enviada: el texto y los archivos del último intento, y el programa si aplica. */
 function entregaLectura(titulo) {
   const a = st.a;
@@ -630,7 +642,8 @@ async function ejecutar(accion) {
   try {
     if (accion === "submit" || accion === "resubmit") await guardarTexto();
     if ((accion === "submit" || accion === "resubmit") && st.guardado.estado === "error") throw new Error("No se pudo guardar tu mensaje. Revisa tu conexión e intenta de nuevo.");
-    const body = ["return", "approve"].includes(accion) && st.motivo.trim() ? { comment: st.motivo.trim() } : {};
+    // La observación es la de «Si falta algo»: solo viaja al devolver.
+    const body = accion === "return" && st.motivo.trim() ? { comment: st.motivo.trim() } : {};
     await api(`/assignments/${st.a.id}/${accion}`, { method: "POST", body });
     st.aviso = { tipo: "ok", texto: EXITO[accion] || "Listo." };
     st.ocupado = false;

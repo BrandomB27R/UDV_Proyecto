@@ -826,3 +826,50 @@ body.d-pagina { display: flex; flex-direction: column; }
 @media (max-width: 720px) {
   .pn-fila--autorizar { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
 }
+
+/* ══ Revisión más clara (mockup vinci-revision) ══ */
+/* Marca de requisito en texto: no parece una casilla. Verde listo, naranja falta, gris opcional. */
+.v-req__marca-txt { flex: 0 0 auto; min-width: 72px; font-size: 13px; font-weight: 800; line-height: 1.6; white-space: nowrap; }
+.v-req__marca-txt--hecho { color: #0E6B3A; }
+.v-req__marca-txt--pendiente { color: #B45309; }
+.v-req__marca-txt--opcional { color: #6B7280; font-weight: 700; }
+
+/* Decisión de quien revisa: dos recuadros lado a lado; en móvil, uno debajo del otro. */
+.rv-decision { display: flex; flex-direction: column; gap: 14px; }
+.rv-guia { font-size: 15px; color: var(--v-muted-2); }
+.vinci .rv-guia__enlace { font-size: 15px; padding: 0; }
+.rv-nota { margin-top: -4px; }
+.rv-opciones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.rv-opciones--una { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+.rv-opcion { display: flex; flex-direction: column; gap: 10px; padding: 20px 22px; border-radius: 12px; border: 1px solid; }
+.rv-opcion--bien { background: #F1F8F3; border-color: #BFE3CB; }
+.rv-opcion--falta { background: #FFF7F1; border-color: #F3CFB2; }
+.rv-opcion__titulo { font-size: 17px; font-weight: 800; }
+.rv-opcion--bien .rv-opcion__titulo { color: #0E6B3A; }
+.rv-opcion--falta .rv-opcion__titulo { color: #7A2E0B; }
+.rv-opcion__texto { font-size: 14px; line-height: 1.55; color: var(--v-ink); }
+.rv-opcion__etiqueta { font-size: 13px; color: var(--v-muted-2); }
+.rv-opcion__etiqueta strong { color: var(--v-navy); }
+.rv-opcion__etiqueta span { font-weight: 400; }
+.rv-opcion textarea { width: 100%; font: inherit; font-size: 14px; padding: 10px 12px; border: 1px solid var(--v-input); border-radius: 8px; background: var(--v-white); resize: vertical; }
+.rv-opcion__pie { margin-top: auto; padding-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.vinci .rv-btn-devolver { color: #7A2E0B; border-color: #B45309; background: var(--v-white); }
+.vinci .rv-btn-devolver:disabled { color: #9AA3AE; border-color: #D5DAE1; }
+.rv-opcion__ayuda { font-size: 12px; }
+.d-decision__error:empty { display: none; }
+.d-entrega-revisar:focus { outline: none; }
+
+/* Franja de la tarea en la página del programa */
+.p-franja { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; background: var(--v-white); border: 1px solid var(--v-line); border-left: 5px solid var(--v-cyan); border-radius: var(--v-radius); }
+.p-franja__texto { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 320px; }
+.p-franja__rotulo { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--v-muted); }
+.p-franja__titulo { font-size: 16px; font-weight: 800; color: var(--v-navy); overflow-wrap: anywhere; }
+.p-franja__datos { font-size: 13px; color: var(--v-muted-2); }
+.p-franja__datos strong { color: var(--v-ink); }
+
+@media (max-width: 720px) {
+  .rv-opciones { grid-template-columns: minmax(0, 1fr); }
+  .rv-opcion { padding: 16px; }
+  .vinci .rv-opcion__pie .v-btn { width: 100%; }
+  .p-franja__volver { width: 100%; justify-content: center; }
+}

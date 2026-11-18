@@ -6,10 +6,11 @@ import { ApiError } from "../api.js";
 import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, icono, mensaje } from "../dom.js";
-import { fechaCorta, fechaHora } from "../formato.js";
-import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso } from "../componentes.js";
+import { fechaCorta, fechaHora, fechaLarga, etiquetaEstado } from "../formato.js";
+import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso, marcaRequisito } from "../componentes.js";
 import { api } from "../api.js";
-import { requerirSesion } from "../sesion.js";
+import { requerirSesion, tieneRol } from "../sesion.js";
+import { bloqueDecision } from "../decision.js";
 import {
   leerVersion, leerPrograma, leerCambios, guardarSeccion, transicionVersion, descargarPdf,
   accionesDeVersion, perfilesDeEgreso,
@@ -60,14 +61,29 @@ async function cargar() {
   } catch { st.versiones = [st.v]; }
   st.acciones = accionesDeVersion(st.v);
   // La tarea sale de la versión (assignment_id: la asignación desde la que se abrió), no de la URL.
-  // Sin acceso a la tarea (403) o sin tarea, la página funciona igual, solo sin encadenar.
-  st.asignacion = st.v.assignment_id
-    ? await api(`/assignments/${encodeURIComponent(st.v.assignment_id)}`).catch(() => null) : null;
+  // Sin acceso a la tarea o sin tarea, la página funciona igual, solo sin franja ni encadenar.
+  st.asignacion = await leerAsignacionSiSePuede(st.v.assignment_id);
   st.editores.clear();
   if (st.acciones.has("edit")) await cargarCatalogos();
   const g = contenidoDe(st.v, "general");
   tituloPestana(`${g.codigo || st.programa?.codigo || "Programa"} · versión ${st.v.numero_version}`);
   pintar();
+}
+
+/**
+ * Lee la asignación de la versión sin provocar un 403 (que el navegador anota en la consola).
+ * G4 deja leerla a coordinación, administración, auditoría y dirección, a su docente y a su revisor
+ * designado: sin rol global, se confirma antes en la bandeja (docente) o en la cola (revisión).
+ */
+async function leerAsignacionSiSePuede(id) {
+  if (!id) return null;
+  if (!tieneRol(yo, "coordinator", "admin", "auditor", "authority")) {
+    const esta = async (ruta) => ((await todasLasPaginas(api, ruta).catch(() => null))?.data || []).some((x) => Number(x.id) === Number(id));
+    const mia = tieneRol(yo, "teacher") && await esta("/inbox");
+    const laReviso = !mia && tieneRol(yo, "reviewer") && await esta("/review-queue?status=all");
+    if (!mia && !laReviso) return null;
+  }
+  return api(`/assignments/${encodeURIComponent(id)}`).catch(() => null);
 }
 
 async function cargarCatalogos() {
@@ -127,6 +143,7 @@ function pintar() {
   const ref = {};
   poner(raiz,
     rutaDeMigas(),
+    franjaTarea(),
     cabecera(),
     aviso ? avisoConEnlace(aviso) : null,
     st.verHistorial ? bloqueHistorial() : null,
@@ -150,11 +167,27 @@ function pintar() {
 function rutaDeMigas() {
   const g = contenidoDe(st.v, "general");
   return h("nav", { class: "v-ruta", "aria-label": "Ruta" },
-    asignacionId
-      ? h("a", { href: RUTAS.asignacion(asignacionId) }, "Volver a la tarea")
-      : h("a", { href: RUTAS.programas }, "Programas de curso"),
+    h("a", { href: RUTAS.programas }, "Programas de curso"),
     h("span", { "aria-hidden": "true" }, "/"),
     h("span", { "aria-current": "page" }, `${g.codigo || ""} · versión ${st.v.numero_version}`));
+}
+
+/** La tarea de la que viene el programa (mockup vinci-revision): siempre que la versión tenga una y se pueda leer. */
+function franjaTarea() {
+  const a = st.asignacion;
+  if (!a) return null;
+  const vence = a.due_at ? fechaLarga(a.due_at).replace(/ de \d{4}$/, "") : null;
+  const datos = [
+    a.assignee_name ? ["Docente ", h("strong", {}, a.assignee_name)] : null,
+    vence ? ["Vence el ", h("strong", {}, vence)] : null,
+    ["Tarea ", h("strong", {}, etiquetaEstado(a.status))],
+  ].filter(Boolean);
+  return h("section", { class: "p-franja", "aria-label": "Tarea de la que viene el programa" },
+    h("div", { class: "p-franja__texto" },
+      h("p", { class: "p-franja__rotulo" }, "Este programa es la entrega de una tarea"),
+      h("p", { class: "p-franja__titulo" }, a.title || "Tarea"),
+      h("p", { class: "p-franja__datos" }, datos.flatMap((d, i) => (i ? [" · ", ...d] : d)))),
+    h("a", { class: "v-btn v-btn--sec v-btn--chico p-franja__volver", href: RUTAS.asignacion(a.id) }, "← Volver a la tarea"));
 }
 
 function cabecera() {
@@ -211,19 +244,11 @@ function linea() {
 }
 
 // ── Qué toca ahora ───────────────────────────────────────────
-let campoMotivo = null;
 function pintarPaso(zona) {
   const avance = avanceDe(st.v);
   const responsable = contenidoDe(st.v, "responsables")?.docente || null;
   const p = pasoPrograma(st.v, { acciones: st.acciones, avance, sinGuardar: seccionesSinGuardar().map((s) => s.titulo), motivo: st.motivo, responsable, conTarea: conTarea(),
     tarea: { ...tareaEncadenada(), docente: st.asignacion?.assignee_name || null } });
-  // El campo de observación se conserva entre repintados para no perder el foco.
-  if (p.conMotivo && !campoMotivo) {
-    campoMotivo = h("div", { class: "v-campo" },
-      h("label", { for: "motivo" }, "Observación para quien elaboró el programa"),
-      h("textarea", { id: "motivo", rows: 3, maxlength: 2000, value: st.motivo, oninput: (e) => { st.motivo = e.target.value; e.target.removeAttribute("aria-invalid"); pintarPaso(zona); } }),
-      h("span", { class: "v-campo__ayuda" }, "Obligatoria para devolver. Al aprobar es opcional."));
-  }
   const errores = zona.querySelector(".p-paso-error") || h("div", { class: "p-paso-error", "aria-live": "polite" });
   const tarjeta = zona.firstElementChild?.classList.contains("v-card") ? zona.firstElementChild : null;
   const boton = (b, clase) => h("button", { type: "button", class: clase, disabled: !b.habilitada || st.ocupado, onclick: () => ejecutar(b.accion, errores) }, b.etiqueta);
@@ -233,7 +258,7 @@ function pintarPaso(zona) {
       h("h2", { class: "v-h1", style: "font-size: 24px" }, p.titulo),
       p.resumen ? h("p", { class: "v-texto", style: "color: var(--v-muted-2)" }, p.resumen) : null),
     p.requisitos.length ? h("ul", { class: "v-req" }, p.requisitos.map(filaRequisito)) : null,
-    p.conMotivo ? campoMotivo : null,
+    p.decision ? decision(p.decision, errores) : null,
     p.principal ? h("div", { class: "v-acciones" },
       boton(p.principal, "v-btn"),
       p.secundaria ? boton(p.secundaria, "v-btn v-btn--sec v-btn--peligro") : null,
@@ -248,13 +273,22 @@ function pintarPaso(zona) {
   if (enMotivo) { const t = document.getElementById("motivo"); t?.focus(); t?.setSelectionRange(...enMotivo); }
 }
 
+/** Aprobar o devolver: dos recuadros con su explicación y su botón (js/decision.js). */
+function decision(d, errores) {
+  return bloqueDecision({
+    guia: d.guia, ocupado: st.ocupado, nota: d.nota,
+    irA: { texto: d.irA, alPulsar: () => desplazarA(document.querySelector(".p-editor")) },
+    aprobar: d.aprobar ? { ...d.aprobar, alPulsar: () => ejecutar("approve", errores) } : null,
+    devolver: d.devolver ? { ...d.devolver, valor: st.motivo, alEscribir: (v) => { st.motivo = v; }, alPulsar: () => ejecutar("return", errores) } : null,
+  }).nodo;
+}
+
+/** Requisito con su marca en texto («✓ Listo», «Falta», «Opcional»), sin círculos. */
 function filaRequisito(r) {
-  return h("li", {},
-    h("span", { class: `v-req__marca v-req__marca--${r.estado}`, "aria-hidden": "true" }, r.estado === "hecho" ? icono("check", 14, 3.5) : null),
+  return h("li", { class: "v-req__fila-txt" },
+    marcaRequisito(r.estado),
     h("div", { class: "v-req__cuerpo" },
-      h("span", { class: "v-req__titulo" }, r.titulo, " ",
-        h("span", { class: `v-req__estado${r.estado === "pendiente" ? " v-req__estado--pendiente" : ""}` },
-          `· ${r.estado === "hecho" ? "listo" : r.nota || r.estado}`)),
+      h("span", { class: "v-req__titulo" }, r.titulo, r.nota ? h("span", { class: "v-req__estado" }, ` · ${r.nota}`) : null),
       r.detalle ? h("span", { class: "v-req__detalle" }, r.detalle) : null));
 }
 
@@ -272,11 +306,12 @@ async function ejecutar(accion, zonaError) {
   const motivo = st.motivo.trim();
   const enTarea = accionDeTarea(accion);
   try {
-    await transicionVersion(st.v.id, accion, ["return", "approve"].includes(accion) ? motivo || null : null);
+    // La observación es la de «Si falta algo»: solo viaja al devolver.
+    await transicionVersion(st.v.id, accion, accion === "return" ? motivo || null : null);
     if (entregar) return await entregarTarea();
     st.aviso = { tipo: "ok", texto: EXITO[accion] || "Listo." };
     if (enTarea) st.aviso = await moverTarea(enTarea, motivo, st.aviso.texto);
-    st.motivo = ""; campoMotivo = null;
+    st.motivo = "";
     st.ocupado = false;
     await cargar();
     window.scrollTo({ top: 0, behavior: "smooth" });
