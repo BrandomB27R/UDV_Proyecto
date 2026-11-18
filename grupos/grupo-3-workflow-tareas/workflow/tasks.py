@@ -461,12 +461,13 @@ def _add_progress(conn, tasks_page):
 
     `total` no cuenta las asignaciones canceladas; `done` son aprobadas o cerradas;
     `to_review`, entregadas o en revisión; `overdue_pending`, pendientes con la fecha
-    límite pasada. `assignee_name` solo viene cuando la tarea tiene un destinatario.
+    límite pasada. `assignee_name` solo viene cuando la tarea tiene un destinatario;
+    `assignee_names` trae los nombres de todos.
     """
     vacio = {"total": 0, "done": 0, "to_review": 0, "overdue_pending": 0,
              "by_status": {}, "assignee_name": None}
     for task in tasks_page:
-        task["progress"] = dict(vacio, by_status={})
+        task["progress"] = dict(vacio, by_status={}, assignee_names=[])
     if not tasks_page:
         return
     por_id = {task["id"]: task["progress"] for task in tasks_page}
@@ -495,6 +496,14 @@ def _add_progress(conn, tasks_page):
     for p in por_id.values():
         if p["total"] != 1:
             p["assignee_name"] = None
+    # Nombres de todos los destinatarios (sin los cancelados), para buscar una tarea por docente.
+    names = conn.execute(
+        "SELECT td.tarea_id, CONCAT(u.nombres, ' ', u.apellidos) AS nombre"
+        " FROM tarea_destinatario td JOIN usuario u ON u.id = td.usuario_id"
+        f" WHERE td.tarea_id IN ({marks}) AND td.estado_codigo <> 'cancelled'"
+        " ORDER BY td.tarea_id, nombre", list(por_id)).fetchall()
+    for row in names:
+        por_id[row["tarea_id"]]["assignee_names"].append(row["nombre"])
 
 
 def list_tasks(conn, actor, status=None, page=1, page_size=20, include=()):
