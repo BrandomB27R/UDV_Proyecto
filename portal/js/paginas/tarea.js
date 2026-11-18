@@ -69,6 +69,8 @@ function pintar() {
         chipEstado(t.status)),
       h("h1", { class: "v-h1" }, t.title),
       h("dl", { class: "v-datos" },
+        t.course_code ? dato("Curso", [t.course_code, t.course_name].filter(Boolean).join(" · ")) : null,
+        t.period_code ? dato("Período", t.period_code) : null,
         dato("Fecha límite", p.texto),
         dato("Revisa", t.reviewer_id != null ? nombre(t.reviewer_id) || "Revisor designado" : "Coordinación (sin revisor designado)"),
         dato("Destinatarios", destinatarios(t.recipient_rule)),

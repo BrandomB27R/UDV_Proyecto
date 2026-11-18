@@ -26,7 +26,10 @@ const f = {
   type_id: null, title: "", description: "", due_date: "", priority: "medium",
   modo: "users", user_ids: new Set(), filtro: "",          // filtro: "campus:<nombre>" | "unit:<nombre>"
   reviewer_id: yo.id,                                       // por defecto revisa quien crea la tarea
+  course_id: null, period_id: null,                         // obligatorios si el tipo es "Actualizar programa"
 };
+// Docentes que dan el curso en el período (GET /tasks/eligible-teachers), por "curso:período".
+const sugeridos = { clave: null, ids: new Set(), aplicadosA: null, error: null };
 let paso = 0;
 let tareaId = idBorrador && /^\d+$/.test(idBorrador) ? Number(idBorrador) : null;
 let buscarDocente = "";
@@ -34,21 +37,53 @@ let buscarDocente = "";
 // ── Catálogos ──
 const SIN_PERMISO = "Crear tareas es de coordinación.";
 if (!(yo.roles || []).includes("coordinator")) await sinAcceso(raiz, "Nueva tarea", SIN_PERMISO);
-let tipos = [], usuarios = [], sedes = [], unidades = [];
+let tipos = [], usuarios = [], sedes = [], unidades = [], cursos = [], periodos = [];
 try {
-  const [ty, us, ca, au] = await Promise.all([
+  const [ty, us, ca, au, cu, pe] = await Promise.all([
     api("/task-types?per_page=100"),
     todasLasPaginas(api, "/users"),
     api("/campuses?per_page=100").catch(() => ({ data: [] })),
     api("/academic-units?per_page=100").catch(() => ({ data: [] })),
+    todasLasPaginas(api, "/courses"),
+    todasLasPaginas(api, "/periods"),
   ]);
   tipos = ty.data || [];
   usuarios = (us.data || []).filter((u) => u.activo !== false);
   sedes = (ca.data || []).filter((x) => x.is_active !== false);
   unidades = (au.data || []).filter((x) => x.is_active !== false);
+  cursos = (cu.data || []).filter((x) => x.is_active !== false).sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  periodos = (pe.data || []).filter((x) => x.is_active !== false).sort((a, b) => String(b.code).localeCompare(String(a.code)));
   if (tareaId) await cargarBorrador(tareaId);
 } catch (e) {
   await sinAcceso(raiz, "Nueva tarea", textoDeError(e, SIN_PERMISO));
+}
+
+const tipoActual = () => tipos.find((t) => t.id === f.type_id) || null;
+const esPrograma = () => tipoActual()?.code === "ACTUALIZAR_PROGRAMA";
+const nombreCurso = (id) => { const c = cursos.find((x) => x.id === id); return c ? `${c.code} · ${c.name}` : ""; };
+const nombrePeriodo = (id) => { const x = periodos.find((y) => y.id === id); return x ? `${x.code}${x.name ? ` (${x.name})` : ""}` : ""; };
+
+/** Pide los docentes del curso en el período y, la primera vez, los propone como destinatarios. */
+async function cargarSugeridos() {
+  if (!esPrograma() || !f.course_id) return;
+  const clave = `${f.course_id}:${f.period_id ?? ""}`;
+  if (sugeridos.clave !== clave) {
+    try {
+      const q = `course_id=${encodeURIComponent(f.course_id)}${f.period_id ? `&period_id=${encodeURIComponent(f.period_id)}` : ""}`;
+      const r = await api(`/tasks/eligible-teachers?${q}`);
+      sugeridos.ids = new Set((r.data || []).map((x) => x.id));
+      sugeridos.error = null;
+    } catch (e) {
+      sugeridos.ids = new Set();
+      sugeridos.error = e.message;
+    }
+    sugeridos.clave = clave;
+  }
+  if (sugeridos.aplicadosA !== clave && sugeridos.ids.size) {
+    f.modo = "users";
+    f.user_ids = new Set(sugeridos.ids);
+    sugeridos.aplicadosA = clave;
+  }
 }
 
 const docentes = usuarios.filter((u) => (u.roles || []).includes("teacher"))
@@ -63,7 +98,10 @@ async function cargarBorrador(id) {
   Object.assign(f, {
     type_id: t.type_id, title: t.title || "", description: t.description || "",
     due_date: (t.due_date || "").slice(0, 10), priority: t.priority || "medium", reviewer_id: t.reviewer_id ?? null,
+    course_id: t.course_id ?? null, period_id: t.period_id ?? null,
   });
+  // Los destinatarios guardados del borrador mandan: no se reemplazan por los sugeridos.
+  if (t.course_id) sugeridos.aplicadosA = `${t.course_id}:${t.period_id ?? ""}`;
   const r = t.recipient_rule;
   if (r?.mode === "all") f.modo = "all";
   else if (r?.mode === "filter") { f.modo = "filter"; f.filtro = r.unit ? `unit:${r.unit}` : `campus:${r.campus}`; }
@@ -112,9 +150,10 @@ function error(texto, campo) {
   }
 }
 
-function siguiente() {
+async function siguiente() {
   const fallo = validar(paso);
   if (fallo) { error(fallo.texto, fallo.campo); return; }
+  if (paso === 0) await cargarSugeridos();
   paso++;
   pintar(true);
 }
@@ -125,6 +164,8 @@ function validar(i) {
     if (f.title.trim().length < 3) return { texto: "Escribe un título (al menos 3 letras).", campo: "titulo" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.due_date)) return { texto: "Elige la fecha límite.", campo: "fecha" };
     if (f.due_date < hoyGuatemala()) return { texto: "La fecha límite no puede ser anterior a hoy.", campo: "fecha" };
+    if (esPrograma() && !f.course_id) return { texto: "Elige el curso cuyo programa se actualiza.", campo: "curso" };
+    if (esPrograma() && !f.period_id) return { texto: "Elige el período.", campo: "periodo" };
   }
   if (i === 1) {
     if (f.modo === "users" && !f.user_ids.size) return { texto: "Elige al menos un docente.", campo: "buscar-docente" };
@@ -137,6 +178,17 @@ function validar(i) {
 function pasoDatos() {
   const campo = (id, etiqueta, control, ayuda) => h("div", { class: "v-campo" },
     h("label", { for: id }, etiqueta), control, ayuda ? h("span", { class: "v-campo__ayuda" }, ayuda) : null);
+  const zonaCurso = h("div");
+  const pintarCurso = () => poner(zonaCurso, esPrograma() ? h("div", { class: "v-curso" },
+    h("p", { class: "v-campo__ayuda" }, "Obligatorios en este tipo: dicen qué programa se actualiza y a qué docentes se propone la tarea."),
+    h("div", { class: "v-dos" },
+      campo("curso", "Curso", h("select", { id: "curso", onchange: (e) => { f.course_id = e.target.value ? Number(e.target.value) : null; } },
+        h("option", { value: "" }, "Elige el curso"),
+        cursos.map((c) => h("option", { value: String(c.id), selected: f.course_id === c.id }, `${c.code} · ${c.name}`)))),
+      campo("periodo", "Período", h("select", { id: "periodo", onchange: (e) => { f.period_id = e.target.value ? Number(e.target.value) : null; } },
+        h("option", { value: "" }, "Elige el período"),
+        periodos.map((x) => h("option", { value: String(x.id), selected: f.period_id === x.id }, `${x.code}${x.name ? ` · ${x.name}` : ""}`)))))) : null);
+  pintarCurso();
   return [
     h("fieldset", { class: "v-grupo" },
       h("legend", { class: "v-campo__etq" }, "Tipo de tarea"),
@@ -144,10 +196,12 @@ function pasoDatos() {
         "El tipo es un catálogo fijo: define si la entrega exige un archivo. Todo lo demás (título, instrucciones, fecha, prioridad y destinatarios) lo escribes tú."),
       h("div", { class: "v-opciones" }, tipos.map((t) => h("label", { class: "v-opcion" },
         h("input", { type: "radio", name: "tipo", id: `tipo-${t.id}`, value: String(t.id), checked: f.type_id === t.id,
-          onchange: () => { f.type_id = t.id; } }),
+          onchange: () => { f.type_id = t.id; pintarCurso(); } }),
         h("span", { class: "v-opcion__txt" },
           h("strong", {}, t.name),
-          h("span", {}, t.requires_evidence ? "La entrega exige un archivo." : "Adjuntar archivos es opcional.")))))),
+          h("span", {}, t.code === "ACTUALIZAR_PROGRAMA" ? "Se entrega el programa del curso; pide curso y período."
+            : t.requires_evidence ? "La entrega exige un archivo." : "Adjuntar archivos es opcional.")))))),
+    zonaCurso,
     campo("titulo", "Título", h("input", { id: "titulo", type: "text", maxlength: 200, value: f.title, autocomplete: "off",
       placeholder: "Por ejemplo: Actualizar CV para la acreditación 2027",
       oninput: (e) => { f.title = e.target.value; e.target.removeAttribute("aria-invalid"); } })),
@@ -198,7 +252,8 @@ function pasoDestinatarios() {
           if (e.target.checked) f.user_ids.add(u.id); else f.user_ids.delete(u.id);
           actualizar();
         } }),
-        h("span", {}, h("strong", {}, nombreCompleto(u)), h("small", {}, u.correo)))))
+        h("span", {}, h("strong", {}, nombreCompleto(u)), h("small", {}, u.correo),
+          sugeridos.ids.has(u.id) && esPrograma() ? h("em", { class: "v-check__marca" }, "Da el curso") : null))))
         : h("p", { class: "v-nota" }, "Ningún docente coincide con la búsqueda."));
       actualizar();
     };
@@ -215,7 +270,15 @@ function pasoDestinatarios() {
   }
 
   pintarModo();
+  let avisoSugeridos = null;
+  if (esPrograma() && f.course_id) {
+    const donde = `${nombreCurso(f.course_id)}${f.period_id ? ` en ${nombrePeriodo(f.period_id)}` : ""}`;
+    avisoSugeridos = sugeridos.error ? mensaje("aviso", `No se pudieron consultar los docentes del curso: ${sugeridos.error}`)
+      : sugeridos.ids.size ? mensaje("info", `Propuestos: ${sugeridos.ids.size} ${sugeridos.ids.size === 1 ? "docente que da" : "docentes que dan"} ${donde}. Están marcados con «Da el curso»; puedes cambiarlos.`)
+      : mensaje("aviso", `Nadie tiene asignado ${donde}. Elige a los docentes a mano.`);
+  }
   return [
+    avisoSugeridos,
     h("fieldset", { class: "v-grupo" },
       h("legend", { class: "v-campo__etq" }, "¿A quién va dirigida?"),
       h("div", { class: "v-opciones" },
@@ -262,7 +325,9 @@ function pasoConfirmar() {
     h("p", { class: "v-texto", style: "color: var(--v-muted-2)" },
       "Revisa los datos. Al publicar, a cada docente le llega su aviso y la tarea aparece en sus pendientes. Si prefieres terminarla después, guárdala como borrador."),
     h("dl", { class: "v-resumen" },
-      fila("Tipo", tipo ? `${tipo.name} · ${tipo.requires_evidence ? "exige archivo" : "archivo opcional"}` : "—", 0),
+      fila("Tipo", tipo ? `${tipo.name} · ${tipo.code === "ACTUALIZAR_PROGRAMA" ? "se entrega el programa" : tipo.requires_evidence ? "exige archivo" : "archivo opcional"}` : "—", 0),
+      esPrograma() ? fila("Curso", nombreCurso(f.course_id), 0) : null,
+      esPrograma() ? fila("Período", nombrePeriodo(f.period_id), 0) : null,
       fila("Título", f.title.trim(), 0),
       fila("Instrucciones", f.description.trim() || "Sin instrucciones", 0),
       fila("Fecha límite", fechaLarga(f.due_date), 0),
@@ -283,6 +348,9 @@ async function guardar(publicar) {
   const datos = {
     type_id: f.type_id, title: f.title.trim(), description: f.description.trim(),
     due_date: f.due_date, priority: f.priority, reviewer_id: f.reviewer_id,
+    // Solo en "Actualizar programa"; en otro tipo se envían vacíos (por si el borrador los tenía).
+    course_id: esPrograma() ? f.course_id : null,
+    period_id: esPrograma() ? f.period_id : null,
   };
   const regla = f.modo === "all" ? { mode: "all" }
     : f.modo === "filter" ? { mode: "filter", [f.filtro.startsWith("unit:") ? "unit" : "campus"]: f.filtro.split(":").slice(1).join(":") }

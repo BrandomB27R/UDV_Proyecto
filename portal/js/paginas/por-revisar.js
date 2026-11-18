@@ -4,9 +4,9 @@ import { api } from "../api.js";
 import { montarBarra } from "../barra.js";
 import { tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
-import { aInstante, nombreCompleto } from "../formato.js";
+import { aInstante } from "../formato.js";
 import { filaAsignacion, vacio, todasLasPaginas, sinAcceso, textoDeError } from "../componentes.js";
-import { requerirSesion, tienePermiso } from "../sesion.js";
+import { requerirSesion } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -26,26 +26,11 @@ try {
   await sinAcceso(raiz, "Por revisar", textoDeError(e, SIN_PERMISO));
 }
 
-// La cola no dice quién es el revisor designado: se consulta el detalle de cada una
-// (viewer.is_reviewer) para separar lo que le toca a quien mira (ver NOTAS_BACKEND.md).
+// Cada fila dice si le toca a quien mira (mine) y quién la revisa (reviewer_name).
 const items = cola.data || [];
-const detalles = await Promise.all(items.map((x) => api(`/assignments/${x.id}`).catch(() => null)));
-const nombres = new Map();
-if (tienePermiso(yo, "users.read")) {
-  try {
-    const u = await todasLasPaginas(api, "/users");
-    for (const x of u.data || []) nombres.set(x.id, nombreCompleto(x));
-  } catch { /* sin nombres: se dice "otra persona" */ }
-}
-
-const mias = [];
-const otras = [];
-items.forEach((x, i) => {
-  const d = detalles[i];
-  const puedeAprobar = (yo.roles || []).includes("authority") && x.status === "under_review";
-  if (!d || d.viewer?.is_reviewer || puedeAprobar) mias.push(x);
-  else otras.push({ ...x, teacher: `${x.teacher} · revisa ${nombres.get(d.reviewer_id) || "otra persona"}` });
-});
+const mias = items.filter((x) => x.mine);
+const otras = items.filter((x) => !x.mine)
+  .map((x) => ({ ...x, teacher: `${x.teacher} · revisa ${x.reviewer_name || "otra persona"}` }));
 mias.sort(orden);
 otras.sort(orden);
 
@@ -66,5 +51,5 @@ poner(raiz,
     mias.length ? h("ul", { class: "v-tareas" }, mias.map(filaAsignacion)) : vacio("No hay entregas esperando tu revisión.")),
   otras.length ? h("details", { class: "v-card v-plegable" },
     h("summary", { class: "v-h2" }, `Las revisa otra persona (${otras.length})`),
-    h("p", { class: "v-nota" }, "Tienen un revisor designado. Puedes verlas y comentarlas, pero no revisarlas."),
+    h("p", { class: "v-nota" }, "Tienen otro revisor designado. Puedes abrirlas para seguirlas."),
     h("ul", { class: "v-tareas" }, otras.map(filaAsignacion))) : null);

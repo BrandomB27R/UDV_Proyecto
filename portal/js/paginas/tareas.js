@@ -74,6 +74,7 @@ function fila(t) {
   const tipo = tipos.get(t.type_id);
   const s = avances.get(t.id);
   const datos = [];
+  if (t.course_code) datos.push([`${t.course_code} · ${t.course_name || ""}`.trim(), t.period_code].filter(Boolean).join(" · "));
   if (t.status === "published" && s) {
     const total = Number(s.total) || 0;
     const fin = (Number(s.by_status?.approved) || 0) + (Number(s.by_status?.closed) || 0);
