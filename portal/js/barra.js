@@ -34,10 +34,11 @@ export function montarBarra(yo, actual) {
   const raiz = document.getElementById("barra");
   raiz.className = "v-barra";
 
-  const lista = secciones(yo);
+  // No llamarla «lista»: ese nombre es la función importada de api.js que usa la campana más abajo.
+  const enlaces = secciones(yo);
   // Con seis secciones o más (administración) los enlaces se compactan para que la barra quepa en una fila.
-  const nav = h("nav", { class: `v-nav${lista.length >= 6 ? " v-nav--compacta" : ""}`, "aria-label": "Principal" },
-    lista.map((s) => h("a", { href: s.href, "aria-current": s.id === actual ? "page" : null }, s.texto)));
+  const nav = h("nav", { class: `v-nav${enlaces.length >= 6 ? " v-nav--compacta" : ""}`, "aria-label": "Principal" },
+    enlaces.map((s) => h("a", { href: s.href, "aria-current": s.id === actual ? "page" : null }, s.texto)));
   const cuenta = h("div", { class: "v-barra__cuenta" },
     h("div", { class: "v-usuario" },
       h("span", { class: "v-usuario__nombre" }, yo.nombre),
