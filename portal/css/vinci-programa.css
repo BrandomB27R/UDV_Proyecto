@@ -3,6 +3,9 @@
  * después de vinci.css, y usa sus mismos valores.
  */
 
+/* Programa «Aprobada» (falta autorizar): azul, para no confundirla con la autorizada (verde). */
+.v-chip--prog-aprobada { background: #E0F4FC; color: #00577A; }
+
 /* ── Lista de programas ──────────────────────────────────── */
 .v-programas { list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .v-programa-fila { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; border: 1px solid var(--v-line); border-radius: 12px; }
@@ -90,6 +93,18 @@
 .v-unidad__titulo { font-weight: 700; color: var(--v-navy); }
 .v-url { overflow-wrap: anywhere; }
 
+/* Lectura: ficha en rejilla (Información general) y tablas */
+.v-ficha { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--v-line); border-radius: var(--v-radius-sm); overflow: hidden; background: var(--v-white); }
+/* Solo separadores horizontales; margin-top -1px oculta el de la primera fila bajo el borde de la ficha. */
+.v-ficha__campo { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-top: 1px solid var(--v-line); margin-top: -1px; min-width: 0; }
+.v-ficha__campo--ancho { grid-column: 1 / -1; }
+.v-ficha dt { font-size: 12px; font-weight: 600; color: var(--v-muted); }
+.v-ficha dd { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.v-ficha__campo--ancho dd { font-weight: 400; line-height: 1.6; white-space: pre-line; }
+.v-tabla-marco { overflow-x: auto; }
+.v-tabla-lectura--fija { table-layout: fixed; }
+.v-tabla-lectura td { vertical-align: top; overflow-wrap: anywhere; }
+
 /* Historial de versiones */
 .p-historial__cab { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .p-historial__cab h2:focus { outline: none; }
@@ -127,6 +142,19 @@
   .v-unidad__datos, .v-tema__campos { grid-template-columns: minmax(0, 1fr); }
   .v-tema { flex-direction: column; align-items: stretch; }
   .p-cambios__lista li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .v-ficha { grid-template-columns: minmax(0, 1fr); }
+  .v-ficha__relleno { display: none; }
+  /* Tablas de lectura: cada fila como tarjeta, etiqueta arriba y valor abajo */
+  .v-tabla-lectura--apilable thead { display: none; }
+  .v-tabla-lectura--apilable, .v-tabla-lectura--apilable tbody, .v-tabla-lectura--apilable tfoot,
+  .v-tabla-lectura--apilable tr, .v-tabla-lectura--apilable td, .v-tabla-lectura--apilable th { display: block; }
+  .v-tabla-lectura--apilable tbody { display: flex; flex-direction: column; gap: 10px; }
+  .v-tabla-lectura--apilable tbody tr { border: 1px solid var(--v-line); border-radius: 10px; padding: 4px 14px; }
+  .v-tabla-lectura--apilable td { border-bottom: none; padding: 6px 0; }
+  .v-tabla-lectura--apilable td::before { content: attr(data-etq); display: block; font-size: 12px; font-weight: 600; color: var(--v-muted); }
+  .v-tabla-lectura--apilable tfoot tr { display: flex; justify-content: space-between; padding: 12px 14px 0; }
+  .v-tabla-lectura--apilable tfoot th, .v-tabla-lectura--apilable tfoot td { padding: 0; }
+  .v-tabla-lectura--apilable tfoot td::before { content: none; }
   .v-programa-fila__versiones { align-items: flex-start; }
   .v-programa-fila__versiones .v-versiones { justify-content: flex-start; }
   /* Historial: cada versión en su propia tarjeta, con la etiqueta antes del dato */

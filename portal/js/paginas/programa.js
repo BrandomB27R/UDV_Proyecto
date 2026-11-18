@@ -7,7 +7,7 @@ import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, icono, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
-import { sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
+import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso } from "../componentes.js";
 import { api } from "../api.js";
 import { requerirSesion, tieneRol } from "../sesion.js";
 import {
@@ -35,6 +35,7 @@ const EXITO = {
 
 const st = {
   v: null, programa: null, versiones: [], acciones: new Set(),
+  asignacion: null,             // la tarea de ?asignacion=, si quien mira puede verla
   cursos: null, perfiles: undefined,
   seccion: SECCIONES.find((s) => `#${s.id}` === location.hash)?.id || "general",
   editores: new Map(),          // seccion -> {editor, base, guardadoEn}
@@ -58,6 +59,10 @@ async function cargar() {
     st.versiones = [...(p.versiones || [])].sort((a, b) => b.numero_version - a.numero_version);
   } catch { st.versiones = [st.v]; }
   st.acciones = accionesDeVersion(st.v);
+  // La tarea sale de la versión (assignment_id: la asignación desde la que se abrió), no de la URL.
+  // Sin acceso a la tarea (403) o sin tarea, la página funciona igual, solo sin encadenar.
+  st.asignacion = st.v.assignment_id
+    ? await api(`/assignments/${encodeURIComponent(st.v.assignment_id)}`).catch(() => null) : null;
   st.editores.clear();
   if (st.acciones.has("edit")) await cargarCatalogos();
   const g = contenidoDe(st.v, "general");
@@ -71,6 +76,29 @@ async function cargarCatalogos() {
 }
 
 const editable = () => st.acciones.has("edit");
+// Autorizada o reemplazada: ya no se edita, así que el avance por secciones (Lista/Falta) no aplica.
+const soloLectura = () => ["authorized", "superseded"].includes(st.v.estado);
+
+// Abierta desde su tarea por el docente de esa asignación, con la tarea por entregar:
+// enviar el programa también entrega la tarea (submit, o resubmit si se la devolvieron).
+const ESTADOS_POR_ENTREGAR = ["in_progress", "returned"];
+const conTarea = () => !!st.asignacion && st.asignacion.assignee_id === yo.id
+  && ESTADOS_POR_ENTREGAR.includes(st.asignacion.status) && st.acciones.has("submit");
+
+// Revisión: la acción sobre el programa mueve también la tarea, si la tarea se lo permite a quien mira
+// (viewer_actions). «Aprobar» no la mueve: la tarea se aprueba al autorizar el programa.
+const ENCADENA = { review: "review", return: "return", authorize: "approve" };
+const accionDeTarea = (accion) => {
+  const t = ENCADENA[accion];
+  return t && (st.asignacion?.viewer_actions || []).includes(t) ? t : null;
+};
+const tareaEncadenada = () => Object.fromEntries(Object.keys(ENCADENA).map((a) => [a, !!accionDeTarea(a)]));
+const EXITO_TAREA = {
+  review: "La tarea también quedó «En revisión».",
+  return: (n) => `También se devolvió la tarea${n ? ` a ${n}` : ""}.`,
+  approve: "La tarea quedó «Aprobada»; solo falta cerrarla.",
+};
+const VERBO_TAREA = { review: "pasar la tarea a revisión", return: "devolver la tarea", approve: "aprobar la tarea" };
 
 function editorDe(id) {
   if (!st.editores.has(id)) {
@@ -100,7 +128,7 @@ function pintar() {
   poner(raiz,
     rutaDeMigas(),
     cabecera(),
-    aviso ? mensaje(aviso.tipo, aviso.texto) : null,
+    aviso ? avisoConEnlace(aviso) : null,
     st.verHistorial ? bloqueHistorial() : null,
     st.verCambios ? bloqueCambios() : null,
     linea(),
@@ -187,7 +215,8 @@ let campoMotivo = null;
 function pintarPaso(zona) {
   const avance = avanceDe(st.v);
   const responsable = contenidoDe(st.v, "responsables")?.docente || null;
-  const p = pasoPrograma(st.v, { acciones: st.acciones, avance, sinGuardar: seccionesSinGuardar().map((s) => s.titulo), motivo: st.motivo, responsable });
+  const p = pasoPrograma(st.v, { acciones: st.acciones, avance, sinGuardar: seccionesSinGuardar().map((s) => s.titulo), motivo: st.motivo, responsable, conTarea: conTarea(),
+    tarea: { ...tareaEncadenada(), docente: st.asignacion?.assignee_name || null } });
   // El campo de observación se conserva entre repintados para no perder el foco.
   if (p.conMotivo && !campoMotivo) {
     campoMotivo = h("div", { class: "v-campo" },
@@ -238,9 +267,15 @@ async function ejecutar(accion, zonaError) {
   }
   st.ocupado = true;
   poner(zonaError);
+  const entregar = accion === "submit" && conTarea();
+  if (entregar) refrescarEstado();     // botón deshabilitado mientras se envía
+  const motivo = st.motivo.trim();
+  const enTarea = accionDeTarea(accion);
   try {
-    await transicionVersion(st.v.id, accion, ["return", "approve"].includes(accion) ? st.motivo.trim() || null : null);
+    await transicionVersion(st.v.id, accion, ["return", "approve"].includes(accion) ? motivo || null : null);
+    if (entregar) return await entregarTarea();
     st.aviso = { tipo: "ok", texto: EXITO[accion] || "Listo." };
+    if (enTarea) st.aviso = await moverTarea(enTarea, motivo, st.aviso.texto);
     st.motivo = ""; campoMotivo = null;
     st.ocupado = false;
     await cargar();
@@ -252,8 +287,51 @@ async function ejecutar(accion, zonaError) {
   }
 }
 
+/**
+ * Segundo paso de «Comenzar revisión», «Devolver» y «Autorizar»: el programa ya cambió.
+ * Si la tarea falla, el programa queda como quedó y el aviso enlaza a la tarea.
+ */
+async function moverTarea(accion, motivo, textoPrograma) {
+  const a = st.asignacion;
+  try {
+    await api(`/assignments/${encodeURIComponent(a.id)}/${accion}`, { method: "POST", body: accion === "return" ? { comment: motivo } : {} });
+    const extra = EXITO_TAREA[accion];
+    return { tipo: "ok", texto: `${textoPrograma} ${typeof extra === "function" ? extra(a.assignee_name) : extra}` };
+  } catch (e) {
+    return { tipo: "aviso", texto: `${textoPrograma} Pero no se pudo ${VERBO_TAREA[accion]}${e.message ? `: ${e.message.replace(/\.?$/, ".")}` : "."} Hazlo desde la tarea.`,
+      enlace: { href: RUTAS.asignacion(a.id), texto: "Ir a la tarea" } };
+  }
+}
+
+function avisoConEnlace(aviso) {
+  const m = mensaje(aviso.tipo, aviso.texto);
+  if (aviso.enlace) m.append(" ", h("a", { href: aviso.enlace.href }, aviso.enlace.texto));
+  return m;
+}
+
+/** Segundo paso de «Enviar a revisión y entregar la tarea»: el programa ya se envió. Siempre vuelve a la tarea. */
+async function entregarTarea() {
+  const a = st.asignacion;
+  const accion = a.status === "returned" ? "resubmit" : "submit";
+  try {
+    await api(`/assignments/${encodeURIComponent(a.id)}/${accion}`, { method: "POST", body: {} });
+    guardarAviso({ asignacion: a.id, tipo: "ok", texto: accion === "resubmit" ? "Programa enviado a revisión y tarea reentregada." : "Programa enviado a revisión y tarea entregada." });
+  } catch (e) {
+    guardarAviso({ asignacion: a.id, tipo: "aviso", enfocarEntrega: true,
+      texto: `El programa se envió, pero falta entregar la tarea. ${e.message ? `${e.message.replace(/\.?$/, ".")} ` : ""}Usa el botón «${accion === "resubmit" ? "Reentregar" : "Entregar"}».` });
+  }
+  location.assign(RUTAS.asignacion(a.id));
+}
+
 // ── Secciones ────────────────────────────────────────────────
 function pintarNav(nav) {
+  if (soloLectura()) {
+    poner(nav, h("ol", {}, SECCIONES.map((s) => h("li", {}, h("button", {
+      type: "button", class: `p-secciones__item${s.id === st.seccion ? " p-secciones__item--actual" : ""}`,
+      "aria-current": s.id === st.seccion ? "true" : null, onclick: () => irA(s.id),
+    }, h("span", {}, s.titulo))))));
+    return;
+  }
   const avance = avanceDe(st.v);
   poner(nav,
     h("p", { class: "p-secciones__avance" }, `${avance.listas} de ${avance.total} secciones listas`),
@@ -329,8 +407,8 @@ function pintarSeccion(zona) {
       h("div", {},
         h("p", { class: "v-eyebrow" }, `Sección ${i + 1} de ${SECCIONES.length}`),
         h("h2", { id: "t-seccion", class: "v-h1", style: "font-size: 24px", tabindex: "-1" }, s.titulo)),
-      h("span", { class: `p-marca ${est.ok ? "p-marca--ok" : "p-marca--falta"}` }, est.ok ? "Lista" : "Falta")),
-    !est.ok && est.detalle ? h("p", { class: "v-nota" }, est.detalle) : null,
+      soloLectura() ? null : h("span", { class: `p-marca ${est.ok ? "p-marca--ok" : "p-marca--falta"}` }, est.ok ? "Lista" : "Falta")),
+    !soloLectura() && !est.ok && est.detalle ? h("p", { class: "v-nota" }, est.detalle) : null,
     cuerpo,
     errorZona,
     h("div", { class: "p-seccion__pie" },

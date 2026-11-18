@@ -345,40 +345,72 @@ function editorEvaluacion(c, avisar) {
 }
 
 // ── Lectura (versiones que no se editan) ─────────────────────
+// ── Lectura ──────────────────────────────────────────────────
+const conMayuscula = (t) => { const x = texto(t).trim(); return x ? x.charAt(0).toUpperCase() + x.slice(1) : x; };
+const valor = (v) => (v == null || v === "" ? "—" : String(v));
+
+/**
+ * Ficha en rejilla de tres columnas: etiqueta arriba, valor abajo. campos: [[etiqueta, valor, {ancho}]].
+ * Los campos a todo el ancho van al final; la última fila corta se completa con celdas vacías
+ * para que la línea que la separa cruce toda la ficha.
+ */
+function ficha(campos) {
+  const celda = ([dt, dd, o = {}]) => h("div", { class: `v-ficha__campo${o.ancho ? " v-ficha__campo--ancho" : ""}` }, h("dt", {}, dt), h("dd", {}, valor(dd)));
+  const normales = campos.filter((x) => !x[2]?.ancho);
+  const relleno = (3 - (normales.length % 3)) % 3;
+  return h("dl", { class: "v-ficha" }, normales.map(celda),
+    Array.from({ length: relleno }, () => h("div", { class: "v-ficha__campo v-ficha__relleno", "aria-hidden": "true" })),
+    campos.filter((x) => x[2]?.ancho).map(celda));
+}
+
+/**
+ * Tabla de lectura; en pantallas angostas cada fila se apila como tarjeta con sus etiquetas.
+ * columnas: ["Etiqueta", ...]; filas: [[celda, ...]]; pie: nodo <tfoot> opcional;
+ * anchos: ["64px", "40%", null] fija las columnas (igual en todas las tablas de una sección).
+ */
+function tablaLectura(columnas, filas, pie = null, anchos = null) {
+  return h("div", { class: "v-tabla-marco" },
+    h("table", { class: `v-tabla-lectura v-tabla-lectura--apilable${anchos ? " v-tabla-lectura--fija" : ""}` },
+      anchos ? h("colgroup", {}, anchos.map((w) => h("col", { style: w ? `width: ${w}` : null }))) : null,
+      h("thead", {}, h("tr", {}, columnas.map((t) => h("th", { scope: "col" }, t)))),
+      h("tbody", {}, filas.map((f) => h("tr", {}, f.map((celda, i) => h("td", { "data-etq": columnas[i] }, celda == null || celda === "" ? "—" : celda))))),
+      pie));
+}
+
 export function lecturaSeccion(id, c, ctx = {}) {
   const vacio = (t = "Sin datos.") => h("p", { class: "v-nota" }, t);
   switch (id) {
     case "general": {
       const v = c || {};
-      const d = (dt, dd) => h("div", {}, h("dt", {}, dt), h("dd", {}, dd == null || dd === "" ? "—" : String(dd)));
-      return h("dl", { class: "v-datos v-datos--fijos" },
-        d("Código", v.codigo), d("Asignatura", v.asignatura), d("Período", v.ciclo), d("Sede", v.sede), d("Modalidad", v.modalidad),
-        d("Programa académico", v.programa), d("Departamento", v.departamento), d("Nivel", v.nivel), d("Pénsum", v.pensum),
-        d("Horas por semana", v.horas), d("Resumen de cambios", v.resumen_cambios));
+      return ficha([
+        ["Código", v.codigo], ["Asignatura", v.asignatura], ["Período", v.ciclo],
+        ["Sede", v.sede], ["Modalidad", v.modalidad], ["Nivel", conMayuscula(v.nivel)],
+        ["Programa académico", v.programa], ["Departamento", v.departamento], ["Pénsum", v.pensum],
+        ["Horas por semana", v.horas],
+        ["Resumen de cambios", v.resumen_cambios, { ancho: true }],
+      ]);
     }
     case "descripcion":
     case "metodologia":
       return texto(c?.texto).trim() ? h("p", { class: "v-texto" }, c.texto) : vacio();
     case "prerrequisitos":
-      return (c || []).length ? h("ul", { class: "v-lista" }, c.map((x) => h("li", {}, h("strong", {}, `${x.codigo || ""} ${x.nombre || ""}`.trim()), ` · ${TIPOS_PRERREQ[x.tipo] || x.tipo}`)))
+      return (c || []).length ? tablaLectura(["Código", "Curso", "Tipo"], c.map((x) => [x.codigo, x.nombre, TIPOS_PRERREQ[x.tipo] || x.tipo]))
         : vacio(sinPrerrequisitos(ctx.versionId) ? "Sin prerrequisitos." : "No se registraron prerrequisitos.");
     case "competencias":
-      return (c || []).length ? h("ul", { class: "v-lista" }, c.map((x) => h("li", {}, h("strong", {}, `${TIPOS_COMPETENCIA[x.tipo] || x.tipo}: `), x.descripcion))) : vacio();
+      return (c || []).length ? tablaLectura(["Tipo", "Descripción"], c.map((x) => [TIPOS_COMPETENCIA[x.tipo] || x.tipo, x.descripcion])) : vacio();
     case "perfil":
-      return (c || []).length ? h("ul", { class: "v-lista" }, c.map((x) => h("li", {}, h("strong", {}, `${x.codigo || ""} ${x.descripcion || ""}`.trim()), h("br"), x.contribucion))) : vacio();
+      return (c || []).length ? tablaLectura(["Código", "Rasgo del perfil", "Contribución del curso"], c.map((x) => [x.codigo, x.descripcion, x.contribucion])) : vacio();
     case "bibliografia":
-      return (c || []).length ? h("ul", { class: "v-lista" }, c.map((x) => h("li", {}, h("strong", {}, `${TIPOS_BIBLIO[x.tipo] || x.tipo}: `), x.referencia,
-        x.isbn ? ` · ISBN ${x.isbn}` : null, x.url ? [" · ", h("span", { class: "v-url" }, x.url)] : null))) : vacio();
+      return (c || []).length ? tablaLectura(["Tipo", "Referencia", "ISBN", "Enlace"],
+        c.map((x) => [TIPOS_BIBLIO[x.tipo] || x.tipo, x.referencia, x.isbn, x.url ? h("span", { class: "v-url" }, x.url) : null])) : vacio();
     case "contenidos":
       return (c || []).length ? h("ol", { class: "v-unidades v-unidades--lectura" }, c.map((u, i) => h("li", { class: "v-unidad" },
         h("p", { class: "v-unidad__titulo" }, `Unidad ${i + 1}. ${u.titulo}`, u.horas != null ? h("span", { class: "v-nota" }, ` · ${u.horas} horas`) : null),
-        (u.items || []).length ? h("ol", { class: "v-lista" }, u.items.map((t) => h("li", {}, t.item, t.descripcion ? h("span", { class: "v-nota" }, ` · ${t.descripcion}`) : null))) : vacio("Sin temas.")))) : vacio();
+        (u.items || []).length ? tablaLectura(["N.º", "Tema", "Descripción"], u.items.map((t, j) => [`${i + 1}.${j + 1}`, t.item, t.descripcion]), null, ["64px", "40%", null]) : vacio("Sin temas.")))) : vacio();
     case "evaluacion":
-      return (c || []).length ? h("div", {},
-        h("table", { class: "v-tabla-lectura" },
-          h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Actividad"), h("th", { scope: "col" }, "Semana"), h("th", { scope: "col" }, "Ponderación"))),
-          h("tbody", {}, c.map((x) => h("tr", {}, h("td", {}, x.nombre), h("td", {}, x.semana ?? "—"), h("td", {}, `${Number(x.ponderacion)} %`)))),
-          h("tfoot", {}, h("tr", {}, h("th", { scope: "row", colspan: 2 }, "Total"), h("td", {}, `${totalEvaluacion(c)} %`))))) : vacio();
+      return (c || []).length ? tablaLectura(["Actividad", "Semana", "Ponderación"],
+        c.map((x) => [x.nombre, x.semana, `${Number(x.ponderacion)} %`]),
+        h("tfoot", {}, h("tr", {}, h("th", { scope: "row", colspan: 2 }, "Total"), h("td", { "data-etq": "Total" }, `${totalEvaluacion(c)} %`)))) : vacio();
     default: return vacio();
   }
 }
