@@ -10,12 +10,12 @@
  *  Uso:  <link rel="stylesheet" href="../../udv-styles/udv.css">
  *        o desde Python: carpeta estática compartida.
  *
- *  Fuente de Google Fonts ya incluida vía @import.
+ *  Fuente Montserrat local (fonts.css), sin llamadas a Google Fonts.
  * ============================================================
  */
 
 /* ── 1. Fuente institucional ─────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap');
+@import url('fonts.css');
 
 /* ── 2. Tokens de color ──────────────────────────────────── */
 :root {
