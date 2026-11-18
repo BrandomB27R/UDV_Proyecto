@@ -73,6 +73,8 @@ async function cargarCatalogos() {
 }
 
 const editable = () => st.acciones.has("edit");
+// Autorizada o reemplazada: ya no se edita, así que el avance por secciones (Lista/Falta) no aplica.
+const soloLectura = () => ["authorized", "superseded"].includes(st.v.estado);
 
 // Abierta desde su tarea por el docente de esa asignación, con la tarea por entregar:
 // enviar el programa también entrega la tarea (submit, o resubmit si se la devolvieron).
@@ -279,6 +281,13 @@ async function entregarTarea() {
 
 // ── Secciones ────────────────────────────────────────────────
 function pintarNav(nav) {
+  if (soloLectura()) {
+    poner(nav, h("ol", {}, SECCIONES.map((s) => h("li", {}, h("button", {
+      type: "button", class: `p-secciones__item${s.id === st.seccion ? " p-secciones__item--actual" : ""}`,
+      "aria-current": s.id === st.seccion ? "true" : null, onclick: () => irA(s.id),
+    }, h("span", {}, s.titulo))))));
+    return;
+  }
   const avance = avanceDe(st.v);
   poner(nav,
     h("p", { class: "p-secciones__avance" }, `${avance.listas} de ${avance.total} secciones listas`),
@@ -354,8 +363,8 @@ function pintarSeccion(zona) {
       h("div", {},
         h("p", { class: "v-eyebrow" }, `Sección ${i + 1} de ${SECCIONES.length}`),
         h("h2", { id: "t-seccion", class: "v-h1", style: "font-size: 24px", tabindex: "-1" }, s.titulo)),
-      h("span", { class: `p-marca ${est.ok ? "p-marca--ok" : "p-marca--falta"}` }, est.ok ? "Lista" : "Falta")),
-    !est.ok && est.detalle ? h("p", { class: "v-nota" }, est.detalle) : null,
+      soloLectura() ? null : h("span", { class: `p-marca ${est.ok ? "p-marca--ok" : "p-marca--falta"}` }, est.ok ? "Lista" : "Falta")),
+    !soloLectura() && !est.ok && est.detalle ? h("p", { class: "v-nota" }, est.detalle) : null,
     cuerpo,
     errorZona,
     h("div", { class: "p-seccion__pie" },
