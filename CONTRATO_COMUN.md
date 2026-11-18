@@ -90,11 +90,18 @@ ese usuario la revisa y la ve en su bandeja de revisión. Si no existe, la
 revisa la coordinación dueña de la tarea o un administrador. Coordinación y
 administración ven la bandeja completa.
 
-**D. Descarga de archivos (G2).** Descargan siempre el dueño del archivo, un
-administrador y auditoría. Revisor y coordinación solo descargan archivos de
-entregas de tareas donde son revisor designado o creador. Pendiente de
-implementar: hoy descarga cualquier rol con `files.download` que no sea
-docente.
+**D. Descarga de archivos (G2).** Descargan siempre el dueño del archivo y un
+administrador. Auditoría descarga cualquier archivo ya vinculado a una
+entrega, un comentario o una versión de programa. Revisor y coordinación solo
+descargan archivos de entregas de tareas donde son el revisor designado o
+quien creó la tarea. Un archivo todavía sin vincular solo lo descargan su
+dueño y un administrador.
+
+**E. Perfil de coordinación.** Coordinación, revisión y autoridad los ejerce
+la misma persona: su usuario tiene los roles `coordinator`, `reviewer` y
+`authority` (migración 1.2.2). Los seis roles del catálogo se conservan y
+cada módulo decide por la unión de los roles del usuario, nunca por el
+primero.
 
 La decisión C (quién elabora y aprueba un programa de curso) es solo del G5 y
 está en su CONTRATO.md.
@@ -133,3 +140,4 @@ Cada CONTRATO.md traduce esta definición a su checklist de PR.
 | 2026-09-28 | Versión inicial, extraída del "Contrato común" de los .docx | La regla estaba solo dentro de binarios y no en ningún .md |
 | 2026-10-13 | §1: identificadores enteros (ya decidido en README §5), base de datos MySQL, actor de auditoría e integración por `APIRouter`; §2: prioridad pendiente; nuevo §2b de dueños de ruta; §5: el trabajo debe correr con `docker compose up` | Se adoptó MySQL; G3 define `/me` (de G2) y `/assignments/inbox` (de G4); G3 y G4 implementan las mismas transiciones; G3 y G4 usan prioridades distintas |
 | 2026-11-17 | §1: autenticación por `Bearer`, códigos de rol, fechas en UTC con `Z`, máximo de `per_page`; nuevo §1b con las reglas de las pantallas; §2: prioridad con `urgent`; §2b: las acciones de asignación son del G3 y `/review-queue` del G4; nuevo §2c con las reglas A, B y D; §3: los eventos viajan por la tabla `evento` | Decisiones tomadas entre el 11 y el 16 de noviembre que solo estaban en el chat y en los CONTRATO.md de grupo |
+| 2026-11-17 (noche) | §2c: regla D como quedó implementada; nueva regla E (perfil de coordinación) | Cierre de entregas; decisión del PM |

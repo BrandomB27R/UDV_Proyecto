@@ -108,7 +108,8 @@ def completar_openapi(app: FastAPI):
                     r["429"]["description"] = (
                         f"Cuenta bloqueada: {config.LOGIN_MAX_INTENTOS} intentos fallidos seguidos bloquean "
                         f"el acceso {config.LOGIN_BLOQUEO_MINUTOS} minutos. El mensaje indica cuántos minutos faltan "
-                        "y el bloqueo aplica aunque la contraseña sea correcta."
+                        "y el bloqueo aplica aunque la contraseña sea correcta. También responde 429 si la misma IP "
+                        f"acumula {config.LOGIN_MAX_INTENTOS_IP} intentos fallidos en esos minutos."
                     )
                     r["200"] = _resp_ok("Sesión iniciada: token y datos del usuario.", {
                         "access_token": "eyJhbGciOiJIUzI1NiIs...", "token_type": "bearer", "expires_in": 7200,
@@ -117,13 +118,14 @@ def completar_openapi(app: FastAPI):
                 if ruta.endswith("/files") and metodo == "post":
                     r["400"] = _resp_error(400)
                 if ruta.endswith("/files/{id}") and metodo == "get":
-                    # Lo descarga su dueño, un admin o un rol que no sea docente con files.download.
+                    # Regla del PM (17-nov): dueño y admin; auditoria si el archivo esta vinculado; revisor y coordinacion segun la tarea.
                     r["403"] = _resp_error(403, "No tienes permiso para acceder a este archivo")
                     if "200" in r:
                         r["200"]["description"] = (
-                            "Archivo descargado. Lo descarga su dueño, un admin o un rol con el permiso "
-                            "files.download que no sea docente (revisor, coordinación, autoridad o auditoría). "
-                            "Cualquier otro usuario recibe 403."
+                            "Archivo descargado. Lo descargan su dueño y un admin; auditoría, si el archivo ya está "
+                            "vinculado; revisor y coordinación, solo si el archivo es de una entrega de una tarea donde "
+                            "son el revisor designado o que ellos crearon. "
+                            "Un archivo sin vincular solo lo descargan su dueño y un admin. Cualquier otro usuario recibe 403."
                         )
                 if "422" in r:
                     r["422"] = _resp_error(422)

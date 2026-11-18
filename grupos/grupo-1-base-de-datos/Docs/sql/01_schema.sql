@@ -832,7 +832,8 @@ INSERT INTO schema_migracion (version, descripcion) VALUES
 ('1.0.0', 'Esquema inicial (01_schema.sql)'),
 ('1.1.0', 'Aportes del esquema de Pablo: modalidad, area, docente_curso, flujo_programa, perfil de egreso, seleccion, borrador, evento, programa_pdf'),
 ('1.2.0', 'Catalogo prioridad_tarea (low, medium, high, urgent) y FK en tarea.prioridad'),
-('1.2.1', 'Fechas en UTC; @actor_id = 0 se trata como NULL en auditoria y eventos; actor de task.published desde sp_publicar_tarea');
+('1.2.1', 'Fechas en UTC; @actor_id = 0 se trata como NULL en auditoria y eventos; actor de task.published desde sp_publicar_tarea'),
+('1.2.2', 'Permisos de programas para docente y coordinacion (decision C); el usuario de coordinacion ejerce tambien revision y autoridad');
 -- ==================== TRIGGERS Y PROCEDIMIENTOS ====================
 
 DELIMITER $$

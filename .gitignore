@@ -26,3 +26,6 @@ htmlcov/
 
 # Archivos de bloqueo de Word/Office
 ~$*
+
+# Archivos que generan las pruebas de integracion (UPLOAD_DIR=up)
+up/

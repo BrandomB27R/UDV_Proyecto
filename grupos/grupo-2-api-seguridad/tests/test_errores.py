@@ -20,9 +20,9 @@ from g2_api.utils.paginacion import (
 
 
 class _FakeQuery:
-    """Sustituto mínimo de sqlalchemy.orm.Query para probar `paginar`."""
+    # Sustituto mínimo de sqlalchemy.orm.Query para probar `paginar`.
 
-    def __init__(self, total: int = 250) -> None:
+    def __init__(self, total: int = 250):
         self._total = total
         self._offset = 0
         self._limit = total
@@ -30,11 +30,11 @@ class _FakeQuery:
     def count(self) -> int:
         return self._total
 
-    def offset(self, n: int) -> "_FakeQuery":
+    def offset(self, n: int):
         self._offset = n
         return self
 
-    def limit(self, n: int) -> "_FakeQuery":
+    def limit(self, n: int):
         self._limit = n
         return self
 
@@ -44,7 +44,7 @@ class _FakeQuery:
         )
 
 
-def _crear_app() -> FastAPI:
+def _crear_app():
     app = FastAPI()
     registrar_manejadores(app)
 
@@ -86,7 +86,7 @@ def _crear_app() -> FastAPI:
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client():
     return TestClient(_crear_app(), raise_server_exceptions=False)
 
 
@@ -94,7 +94,7 @@ def client() -> TestClient:
 # Formato común de error
 
 
-def _assert_formato(body: dict) -> None:
+def _assert_formato(body: dict):
     assert set(body.keys()) == {"error"}
     assert set(body["error"].keys()) == {"code", "message", "details"}
     assert isinstance(body["error"]["details"], dict)
@@ -148,7 +148,7 @@ def test_error_500_no_filtra_informacion_interna(client):
 
 
 def test_422_trae_detalle_por_campo(client):
-    r = client.get("/validar")  # faltan correo y edad
+    r = client.get("/validar")  # Faltan correo y edad
     assert r.status_code == 422
     body = r.json()
     _assert_formato(body)
@@ -178,9 +178,7 @@ def test_422_real_devuelve_details_como_objeto_con_un_campo_por_llave(client):
     assert "correo" in detalles and isinstance(detalles["correo"], str)
 
 
-# --------------------------------------------------------------------------
-# Paginación
-# --------------------------------------------------------------------------
+# ---- Paginación ----
 
 def test_paginacion_estructura_y_tamano(client):
     r = client.get("/lista")
@@ -214,13 +212,12 @@ def test_paginacion_per_page_excede_maximo_da_422(client):
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-# --------------------------------------------------------------------------
-# Registro / auditoría
-# --------------------------------------------------------------------------
 
-from datetime import datetime  # noqa: E402
+# ---- Registro / auditoría ----
 
-from sqlalchemy import (  # noqa: E402
+from datetime import datetime # noqa: E402
+
+from sqlalchemy import ( # noqa: E402
     Column,
     DateTime,
     Integer,
@@ -236,14 +233,14 @@ _AuditBase = declarative_base()
 
 
 class _AuditoriaFake(_AuditBase):
-    """Columnas reales de `auditoria` ."""
+    # Columnas reales de `auditoria` .
 
     __tablename__ = "auditoria"
     id          = Column(Integer, primary_key=True, autoincrement=True)
     tabla       = Column(String(50),  nullable=False)
-    registro_id = Column(Integer,     nullable=False, index=True)   # NOT NULL
+    registro_id = Column(Integer,     nullable=False, index=True) # NOT NULL
     accion      = Column(String(50),  nullable=False, index=True)
-    actor_id    = Column(Integer,     nullable=True)                # NULL ok
+    actor_id    = Column(Integer,     nullable=True) # NULL ok
     ip_origen   = Column(String(45),  nullable=True)
     detalle     = Column(JSON,        nullable=True)
     creado_en   = Column(DateTime,    nullable=False, index=True)
@@ -276,14 +273,15 @@ def test_registrar_accion_guarda_fila(db_mem):
 
 
 def test_registrar_login_fallido_guarda_registro_id_cero(db_mem):
-    """Correo inexistente → registro_id = 0 (NOT NULL), actor_id = NULL."""
+    # Correo inexistente → registro_id = 0 (NOT NULL), actor_id = NULL.
     ok = registro.registrar_login_fallido(db_mem, "  X@Y.COM ", ip_origen="10.0.0.1")
     assert ok is True
     fila = db_mem.query(_AuditoriaFake).one()
     assert fila.accion      == "LOGIN_FALLIDO"
     assert fila.actor_id    is None
     assert fila.registro_id == 0
-    assert fila.detalle     == {"correo": "x@y.com"}
+    # detalle ahora incluye la ip que recibe la funcion
+    assert fila.detalle     == {"correo": "x@y.com", "ip": "10.0.0.1"}
     assert fila.ip_origen   == "10.0.0.1"
 
 
@@ -322,14 +320,14 @@ def test_limpiar_intentos_borra_fallos_del_correo(db_mem):
 
 
 def test_set_actor_id_no_rompe_en_sqlite(db_mem):
-    """En SQLite es no-op; solo verifica que no lance ni cambie nada."""
+    # En SQLite es no-op; solo verifica que no lance ni cambie nada.
     registro.set_actor_id(db_mem, 42)
     registro.set_actor_id(db_mem, None)
     assert db_mem.query(_AuditoriaFake).count() == 0
 
 
 def test_registro_no_rompe_si_models_no_existe():
-    """registrar_accion debe devolver False si no hay modelo."""
+    # registrar_accion debe devolver False si no hay modelo.
 
     class _S:
         def add(self, _):
@@ -375,3 +373,4 @@ def test_fijar_actor_envia_null_cuando_no_hay_actor():
 
     registro.set_actor_id(_FakeDB(), 7)
     assert capturados[-1] == {"id": 7}
+
