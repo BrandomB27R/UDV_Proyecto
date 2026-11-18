@@ -129,6 +129,7 @@ class TaskTypePatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     active: Optional[bool] = None
+    delivery: Optional[str] = None         # texto | ambos | archivo; solo si ninguna tarea lo usa
 
 
 class TaskIn(BaseModel):
