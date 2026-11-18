@@ -847,8 +847,10 @@ def test_la_lista_de_tareas_trae_el_avance_si_se_pide(c, s):
     dos = next(t for t in lista if asign[DOC1] in por_asignacion[t["id"]])["progress"]
     assert (dos["total"], dos["to_review"], dos["done"], dos["assignee_name"]) == (2, 1, 0, None)
     assert dos["by_status"] == {"submitted": 1, "assigned": 1}
+    assert dos["assignee_names"] == ["Daniel López", "Diana Pérez"]
     solo = next(t for t in lista if uno[DOC2] in por_asignacion[t["id"]])["progress"]
     assert solo["total"] == 1 and solo["assignee_name"] == "Daniel López"
+    assert solo["assignee_names"] == ["Daniel López"]
     sin = c.get("/api/v1/tasks?status=published&per_page=5", headers=s["coordinacion"]).json()["data"]
     assert all("progress" not in t for t in sin)
 
