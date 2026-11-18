@@ -147,6 +147,10 @@ class RegistroAuditoriaSalida(BaseModel):
     action: str
     entity: str
     entity_id: int | str
+    entity_label: str | None = Field(
+        default=None, description="Nombre legible de lo que se tocó: título de la tarea, "
+                                  "tarea y docente de la asignación, nombre del usuario o "
+                                  "curso y versión del programa. Null si no aplica.")
     created_at: str
     from_state: str | None
     to_state: str | None
@@ -164,6 +168,7 @@ class PaginaAuditoria(BaseModel):
 class ActorAuditoria(BaseModel):
     id: int
     email: str | None
+    name: str | None = None
 
 
 class OpcionesAuditoria(BaseModel):

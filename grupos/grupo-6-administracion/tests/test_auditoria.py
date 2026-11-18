@@ -291,7 +291,8 @@ def test_opciones_de_los_filtros_salen_de_la_auditoria(con_registros, fabrica):
     assert opciones == {
         "entities": ["area", "sede", "tarea_destinatario"],
         "actions": ["insert", "transition"],
-        "users": [{"id": ID_ADMIN, "email": None}, {"id": ID_DOCENTE, "email": "docente@demo.test"}]}
+        "users": [{"id": ID_ADMIN, "email": None, "name": None},
+                  {"id": ID_DOCENTE, "email": "docente@demo.test", "name": None}]}
 
 
 @pytest.mark.parametrize("consulta", ["?from=2026-02-30", "?from=2026-10-10&to=2026-10-01",

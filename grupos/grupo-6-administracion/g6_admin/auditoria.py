@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from g2_api.middleware.error_handler import ErrorCode, api_error
-from sqlalchemy import func, insert, literal, null, select, union_all
+from sqlalchemy import bindparam, func, insert, literal, null, select, text, union_all
 from sqlalchemy.orm import Session
 
 from .tablas import auditoria as tabla_auditoria
@@ -148,7 +148,45 @@ class RepositorioAuditoria:
             .outerjoin(u, u.c.id == consulta.c.actor_id)
             .order_by(consulta.c.creado_en.desc(), consulta.c.origen, consulta.c.id.desc())
             .limit(por_pagina).offset((pagina - 1) * por_pagina))
-        return total, [como_dict(f) for f in filas]
+        registros = [como_dict(f) for f in filas]
+        self._poner_nombres(registros)
+        return total, registros
+
+    # Cómo se llama lo que se tocó, por entidad. Una consulta por entidad y
+    # por página, no una por registro.
+    _NOMBRES = {
+        "tarea": "SELECT id, titulo AS nombre FROM tarea WHERE id IN :ids",
+        "tarea_destinatario": (
+            "SELECT td.id, CONCAT(t.titulo, ' · ', CONCAT_WS(' ', u.nombres, u.apellidos)) AS nombre "
+            "FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id "
+            "JOIN usuario u ON u.id = td.usuario_id WHERE td.id IN :ids"),
+        "usuario": ("SELECT id, CONCAT_WS(' ', nombres, apellidos) AS nombre "
+                    "FROM usuario WHERE id IN :ids"),
+        "programa_version": (
+            "SELECT pv.id, CONCAT(c.codigo, ' · ', c.nombre, ' · versión ', pv.numero_version) AS nombre "
+            "FROM programa_version pv JOIN programa_curso pc ON pc.id = pv.programa_curso_id "
+            "JOIN curso c ON c.id = pc.curso_id WHERE pv.id IN :ids"),
+    }
+
+    def _poner_nombres(self, registros: list[dict[str, Any]]) -> None:
+        """Agrega entity_label: el nombre legible de lo que tocó cada registro.
+
+        Queda en None si la entidad no tiene nombre conocido o el registro ya
+        no existe; la pantalla muestra entonces el número.
+        """
+        for registro in registros:
+            registro["entity_label"] = None
+        for entidad, consulta in self._NOMBRES.items():
+            propios = [r for r in registros
+                       if r["entity"] == entidad and isinstance(r["entity_id"], int)]
+            if not propios:
+                continue
+            filas = self.sesion.execute(
+                text(consulta).bindparams(bindparam("ids", expanding=True)),
+                {"ids": sorted({r["entity_id"] for r in propios})})
+            nombres = {f.id: f.nombre for f in filas}
+            for registro in propios:
+                registro["entity_label"] = nombres.get(registro["entity_id"])
 
     def _registros(self, *, actor_id: int | None = None, desde: date | None = None,
                    hasta: date | None = None, entidad: str | None = None,
@@ -205,11 +243,13 @@ class RepositorioAuditoria:
             acciones.add(ACCION_TRANSICION)
         r = self._registros().subquery()
         actores = self.sesion.execute(
-            select(r.c.actor_id, u.c.correo).distinct()
+            select(r.c.actor_id, u.c.correo, u.c.nombres, u.c.apellidos).distinct()
             .outerjoin(u, u.c.id == r.c.actor_id)
             .where(r.c.actor_id.is_not(None)).order_by(r.c.actor_id))
         return {"entities": sorted(entidades), "actions": sorted(acciones),
-                "users": [{"id": i, "email": c} for i, c in actores]}
+                "users": [{"id": i, "email": c,
+                           "name": " ".join(p for p in (n, a) if p) or None}
+                          for i, c, n, a in actores]}
 
 
 def _error_de_campo(campo: str, codigo: str, mensaje: str) -> dict[str, str]:
