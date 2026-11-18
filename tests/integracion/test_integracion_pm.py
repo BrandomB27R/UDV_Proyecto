@@ -666,6 +666,10 @@ def test_la_tarea_abre_el_borrador_del_programa_a_nombre_del_docente(c, s):
     v = r.json()
     assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"]
     assert v["secciones"] and v["viewer_actions"] == ["edit", "submit"]
+    assert v["nombre"].endswith("2026-2") or "2026-1" not in v["nombre"]
+    # Al ser la primera versión de su período, los cambios se comparan con la versión de origen.
+    cambios = c.get(f"/api/v1/program-versions/{v['id']}/changes", headers=s["docente2"]).json()
+    assert cambios["version_anterior"] == v["version_origen_id"]
     # Llamarla otra vez no abre otro borrador.
     assert c.post(ruta, headers=s["docente2"]).json()["id"] == v["id"]
     # Es suyo: lo lee, lo edita, y la entrega (G4) lo encuentra.

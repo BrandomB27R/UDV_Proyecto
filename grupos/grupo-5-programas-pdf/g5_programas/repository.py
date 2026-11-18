@@ -831,6 +831,16 @@ def get_changes(
                           ORDER BY pv.numero_version DESC LIMIT 1""",
         params,
     )
+    if previous is None and current.get("version_origen_id"):
+        # Primera versión del período: se compara con la versión de la que se copió.
+        origin_params = {"origin_id": current["version_origen_id"]}
+        if docente_responsable_id is not None:
+            origin_params["docente_responsable_id"] = docente_responsable_id
+        previous = _one(
+            session,
+            MAIN_SELECT + " WHERE pv.id = :origin_id" + owner_filter,
+            origin_params,
+        )
     if previous is None:
         return {"version": current["id"], "version_anterior": None, "cambios": []}
     before = _flatten(_load_sections(session, previous))
@@ -1604,6 +1614,13 @@ def start_version_for_assignment(session: Session, actor: Actor, assignment_id: 
                         WHERE programa_curso_id = :program_id"""),
                 {"program_id": source["programa_curso_id"]},
             ).scalar_one()
+            # Si el nombre del origen termina con su período ("… - 2026-1"), se pone el nuevo.
+            suffix = f" - {source['periodo_codigo']}"
+            if (source.get("nombre") or "").endswith(suffix) and period_id != source["periodo_id"]:
+                new_code = session.execute(
+                    text("SELECT codigo FROM periodo WHERE id = :id"), {"id": period_id}
+                ).scalar_one()
+                source = {**source, "nombre": source["nombre"][: -len(suffix)] + f" - {new_code}"}
             version_id = _insert_version_from(
                 session,
                 actor,
