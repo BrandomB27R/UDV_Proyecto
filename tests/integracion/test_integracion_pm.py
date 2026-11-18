@@ -917,3 +917,14 @@ def test_la_bandeja_del_docente_dice_quien_revisa_cuando_entrego_y_por_que_se_de
     assert fila()["last_return_comment"] == "Falta el horario."
     assert _accion(c, s["docente1"], a, "resubmit").status_code == 200
     assert fila()["last_return_comment"] is None          # ya no está devuelta
+
+
+def test_pantallas_piden_revalidar_para_no_mezclar_versiones(c):
+    """Tras un despliegue el navegador no debe usar módulos viejos sin preguntar."""
+    r = c.get("/app/js/formato.js")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    etag = r.headers["etag"]
+    r2 = c.get("/app/js/formato.js", headers={"If-None-Match": etag})
+    assert r2.status_code == 304
+    assert r2.headers["cache-control"] == "no-cache"
