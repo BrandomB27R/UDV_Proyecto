@@ -17,6 +17,7 @@ import importlib
 import re
 import os
 import sys
+import json
 import uuid
 from datetime import date, timedelta
 from pathlib import Path
@@ -1026,3 +1027,42 @@ def test_la_forma_de_entrega_de_un_tipo_solo_cambia_si_no_se_ha_usado(c, s):
     es_error_comun(c.patch(url, headers=s["coordinacion"], json={"delivery": "texto"}), 409)
     # El nombre, la descripción y el estado sí se cambian aunque esté en uso; repetir la misma forma no falla.
     assert c.patch(url, headers=s["coordinacion"], json={"description": "Con constancia", "delivery": "archivo"}).status_code == 200
+
+
+def test_administracion_crea_un_usuario_con_varios_roles_y_lo_gestiona(c, s):
+    correo = f"nuevo.{uuid.uuid4().hex[:6]}@demo.udv.edu.gt"
+    clave = "Inicial-" + uuid.uuid4().hex[:8]
+    datos = {"nombres": "Nora", "apellidos": "Nueva", "correo": correo, "password": clave}
+    es_error_comun(c.post("/api/v1/users", headers=s["coordinacion"], json={**datos, "roles": ["teacher"]}), 403)
+    es_error_comun(c.post("/api/v1/users", headers=s["admin"], json=datos), 422)                       # sin rol
+    es_error_comun(c.post("/api/v1/users", headers=s["admin"], json={**datos, "roles": ["paloma"]}), 400)
+    r = c.post("/api/v1/users", headers=s["admin"], json={**datos, "roles": ["teacher", "reviewer", "teacher"]})
+    assert r.status_code == 201, r.text
+    u = r.json()
+    assert sorted(u["roles"]) == ["reviewer", "teacher"] and u["activo"] is True
+    es_error_comun(c.post("/api/v1/users", headers=s["admin"], json={**datos, "rol": "teacher"}), 409)  # correo repetido
+
+    def entrar(password):
+        return c.post("/api/v1/auth/login", json={"correo": correo, "password": password})
+
+    token = entrar(clave).json()["access_token"]
+    url = f"/api/v1/users/{u['id']}"
+    r = c.patch(url, headers=s["admin"], json={"roles": ["coordinator", "reviewer", "authority"], "nombres": "Nora Elena"})
+    assert r.status_code == 200 and sorted(r.json()["roles"]) == ["authority", "coordinator", "reviewer"]
+    assert c.patch(url, headers=s["admin"], json={"rol": "teacher"}).json()["roles"] == ["teacher"]      # forma anterior
+    # Al desactivar la cuenta se cierran sus sesiones y ya no puede entrar.
+    assert c.patch(url, headers=s["admin"], json={"activo": False}).json()["activo"] is False
+    assert c.get("/api/v1/tasks", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert entrar(clave).status_code in (401, 403)
+    assert c.patch(url, headers=s["admin"], json={"activo": True}).json()["activo"] is True
+    assert entrar(clave).status_code == 200
+    # La administración no se quita su propio rol ni desactiva su propia cuenta.
+    yo = next(x for x in c.get("/api/v1/users?per_page=100", headers=s["admin"]).json()["data"]
+              if x["correo"] == "admin@demo.udv.edu.gt")
+    es_error_comun(c.patch(f"/api/v1/users/{yo['id']}", headers=s["admin"], json={"roles": ["teacher"]}), 409)
+    es_error_comun(c.patch(f"/api/v1/users/{yo['id']}", headers=s["admin"], json={"activo": False}), 409)
+    # El cambio de roles queda en la auditoría, sin la contraseña.
+    registros = [d for d in c.get("/api/v1/audit?entity=usuario&per_page=100", headers=s["auditoria"]).json()["data"]
+                 if d["entity_id"] == u["id"]]
+    con_roles = [d for d in registros if "roles" in (d["changes"].get("despues") or {})]
+    assert len(con_roles) == 3 and clave not in json.dumps(registros)
