@@ -4,6 +4,7 @@
 //   /dashboard     coordinación, dirección, administración y auditoría (G6)
 //   /tasks         coordinación, revisión y dirección (G3)
 //   /course-programs?estado=approved  dirección (autoriza los programas; G5 lo deja leer a todos)
+//   /review-queue?status=approved + /assignments/{id}  coordinación (lo que puede cerrar; ver porCerrar)
 import { api } from "../api.js";
 import { RUTAS } from "../config.js";
 import { h } from "../dom.js";
@@ -20,7 +21,8 @@ const DIAS_ENTREGA_VIEJA = 7;
 
 /** Qué puede leer quien mira (por roles, antes de pedir nada). */
 export function lecturasDe(yo) {
-  return { cola: puedeRevisar(yo), panel: puedeVerPanel(yo), tareas: tieneRol(yo, "coordinator", "reviewer", "authority"), autoriza: tieneRol(yo, "authority") };
+  return { cola: puedeRevisar(yo), panel: puedeVerPanel(yo), tareas: tieneRol(yo, "coordinator", "reviewer", "authority"), autoriza: tieneRol(yo, "authority"),
+    cierra: tieneRol(yo, "coordinator") };
 }
 
 /** {titulo, contadores, bloques, accion} de coordinación, revisión o dirección. */
@@ -28,12 +30,13 @@ export async function inicioCoordinacion(yo) {
   const lee = lecturasDe(yo);
   // Dirección sin coordinación: su inicio es autorizar y el cumplimiento (no la lista de tareas).
   const soloDireccion = lee.autoriza && !lee.cola;
-  const [cola, panel, tareas, tipos, porAutorizar] = await Promise.all([
+  const [cola, panel, tareas, tipos, porAutorizar, listas] = await Promise.all([
     lee.cola ? todasLasPaginas(api, "/review-queue") : null,
     lee.panel ? api(`/dashboard?limit=${MAX_SEGUIMIENTO}`) : null,
     lee.tareas ? todasLasPaginas(api, "/tasks?include=progress") : null,
     lee.panel ? api("/task-types?per_page=100").catch(() => ({ data: [] })) : null,
     lee.autoriza ? programasPorAutorizar() : null,
+    lee.cierra ? porCerrar(yo) : null,
   ]);
 
   // Solo lo que le toca a quien mira (mine): primero las que ya tomó, luego la entrega más antigua.
@@ -45,8 +48,11 @@ export async function inicioCoordinacion(yo) {
   const porVencer = Number(panel?.due_soon?.total) || 0;
 
   const nAutorizar = porAutorizar?.length || 0;
+  const nCerrar = listas?.length || 0;
   let titulo;
   if (soloDireccion && nAutorizar) titulo = `Tienes ${plural(nAutorizar, "programa por autorizar", "programas por autorizar")}.`;
+  // Lo de revisar manda; si no hay nada por revisar pero sí por cerrar, el título habla de eso.
+  else if (lee.cola && !mias.length && nCerrar) titulo = `Tienes ${plural(nCerrar, "tarea lista para cerrar", "tareas listas para cerrar")}.`;
   else if (lee.cola) titulo = mias.length ? `Tienes ${plural(mias.length, "entrega por revisar", "entregas por revisar")}.` : "No tienes entregas por revisar.";
   else if (lee.panel) titulo = vencidas || porVencer
     ? `Hay ${plural(vencidas, "tarea vencida", "tareas vencidas")} y ${porVencer} por vencer.` : "No hay tareas vencidas ni por vencer.";
@@ -56,6 +62,7 @@ export async function inicioCoordinacion(yo) {
   if (soloDireccion) contadores.push(indicador("Por autorizar", nAutorizar, "Programas ya aprobados", "autorizar"));
   if (lee.cola) contadores.push(indicador("Por revisar", mias.length,
     tomadas ? `${tomadas} ${tomadas === 1 ? "ya la tomaste" : "ya las tomaste"}` : "Ninguna tomada todavía", "revisar"));
+  if (listas) contadores.push(indicador("Por cerrar", nCerrar, nCerrar === 1 ? "Aprobada, falta cerrarla" : nCerrar ? "Aprobadas, falta cerrarlas" : "Nada por cerrar", "cerrar"));
   if (lee.panel) {
     contadores.push(indicador("Vencidas", vencidas, "Docentes con la fecha pasada", "alerta"));
     contadores.push(indicador("Por vencer", porVencer, `En los próximos ${panel.due_soon_days ?? 3} días`, "aviso"));
@@ -70,10 +77,11 @@ export async function inicioCoordinacion(yo) {
   if (tareas && !soloDireccion) {
     const lista = tareas.data || [];
     const publicadas = lista.filter((t) => t.status === "published");
-    const terminadas = publicadas.filter((t) => Number(t.progress?.total) > 0 && Number(t.progress?.done) === Number(t.progress?.total)).length;
+    // Cerrada: todas sus entregas (sin las canceladas) están cerradas. Aprobada sin cerrar no cuenta.
+    const cerradas = publicadas.filter((t) => Number(t.progress?.total) > 0 && Number(t.progress?.by_status?.closed) === Number(t.progress?.total)).length;
     const borradores = lista.filter((t) => t.status === "draft").length;
     contadores.push(indicador("Tareas publicadas", publicadas.length,
-      [plural(terminadas, "terminada", "terminadas"), tieneRol(yo, "coordinator") ? plural(borradores, "borrador", "borradores") : null].filter(Boolean).join(" · ")));
+      [plural(cerradas, "cerrada", "cerradas"),tieneRol(yo, "coordinator") ? plural(borradores, "borrador", "borradores") : null].filter(Boolean).join(" · ")));
   }
 
   const nombresTipo = new Map((tipos?.data || []).map((t) => [t.id, t.name]));
@@ -81,6 +89,7 @@ export async function inicioCoordinacion(yo) {
   // «Te toca autorizar» va antes del seguimiento; con coordinación, debajo de «Te toca revisar» y solo si hay.
   const bloques = [
     lee.cola ? tablaPorRevisar(mias, (cola?.data || []).length) : null,
+    nCerrar ? tablaPorCerrar(listas) : null,
     porAutorizar && (soloDireccion || nAutorizar) ? tablaPorAutorizar(porAutorizar) : null,
     lee.panel ? tablaSeguimiento(panel, tareasPorId, nombresTipo) : null,
   ];
@@ -120,6 +129,45 @@ function tablaPorRevisar(filas, totalCola) {
       : vacio("No tienes entregas por revisar. Las nuevas aparecerán aquí."),
     otras > 0 ? h("p", { class: "ini-pie" }, h("a", { href: RUTAS.porRevisar }, "Ver todo lo pendiente de revisar"),
       ` · incluye ${plural(otras, "entrega de otros revisores", "entregas de otros revisores")}`) : null);
+}
+
+/**
+ * Entregas aprobadas que quien mira puede cerrar de verdad: «close» en viewer_actions del detalle
+ * (G4: coordinación que creó la tarea). La cola no trae quién aprobó ni cuándo: sale de last_approval
+ * del detalle, una consulta por entrega aprobada de sus tareas (NOTAS_BACKEND §12).
+ */
+async function porCerrar(yo) {
+  const r = await todasLasPaginas(api, "/review-queue?status=approved").catch(() => null);
+  const candidatas = (r?.data || []).filter((x) => x.status === "approved" && (x.created_by == null || Number(x.created_by) === Number(yo.id)));
+  const filas = await Promise.all(candidatas.map(async (x) => {
+    const d = await api(`/assignments/${encodeURIComponent(x.id)}`).catch(() => null);
+    if (!d || d.status !== "approved" || !(d.viewer_actions || []).includes("close")) return null;
+    return { ...x, aprobo: d.last_approval?.actor || null, aprobadoEn: d.last_approval?.at || null };
+  }));
+  // La aprobada más reciente arriba.
+  return filas.filter(Boolean).sort((a, b) => String(b.aprobadoEn || "").localeCompare(String(a.aprobadoEn || "")) || b.id - a.id);
+}
+
+function tablaPorCerrar(filas) {
+  return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-cerrar" },
+    h("div", { class: "ini-cab" },
+      h("h2", { id: "t-cerrar", class: "v-h2" }, "Listas para cerrar"),
+      h("p", { class: "v-nota" }, "Ya están aprobadas. Al cerrarlas quedan terminadas con su historial completo.")),
+    h("table", { class: "pn-tabla ini-tabla" },
+      h("caption", { class: "v-sr" }, "Entregas aprobadas que falta cerrar"),
+      h("thead", {}, h("tr", {}, ["Tarea", "Docente", "Estado", "Aprobó"].map((t) => h("th", { scope: "col" }, t)),
+        h("th", { scope: "col" }, h("span", { class: "v-sr" }, "Acción")))),
+      h("tbody", {}, filas.map((x) => {
+        const sub = [etiquetaTipo(x.task_type), x.course_code, x.period_code].filter(Boolean).join(" · ");
+        // El botón lleva al detalle, donde está «Cerrar la tarea»: se ve qué se cierra antes de cerrarlo.
+        return h("tr", { class: "pn-fila pn-fila--cerrar" },
+          h("td", { "data-etiqueta": "Tarea" }, h("div", { class: "pn-tarea" }, h("a", { href: RUTAS.asignacion(x.id) }, x.title || "Tarea"), sub ? h("span", {}, sub) : null)),
+          h("td", { "data-etiqueta": "Docente" }, h("strong", {}, x.teacher || "—")),
+          h("td", { "data-etiqueta": "Estado" }, chipEstado(x.status)),
+          h("td", { "data-etiqueta": "Aprobó" }, h("div", { class: "pn-tarea" },
+            h("strong", {}, x.aprobo || "—"), x.aprobadoEn ? h("span", {}, haceCuando(x.aprobadoEn)) : null)),
+          h("td", { class: "pn-accion ini-accion" }, h("a", { class: "v-btn v-btn--chico", href: RUTAS.asignacion(x.id), "aria-label": `Cerrar la tarea: ${x.title} de ${x.teacher}` }, "Cerrar la tarea")));
+      }))));
 }
 
 /**

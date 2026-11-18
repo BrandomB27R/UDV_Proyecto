@@ -39,12 +39,17 @@ function avance(t) {
   const por = p.by_status || {};
   const n = (e) => Number(por[e]) || 0;
   const total = Number(p.total) || 0;                      // sin las canceladas
+  // terminadas (done de G3) son aprobadas + cerradas: llenan la barra. «Terminada» es solo cerrada.
   const terminadas = Number(p.done) || 0;
+  const cerradas = n("closed");
+  const porCerrar = n("approved");
   const pendientes = PENDIENTES.reduce((s, e) => s + n(e), 0);
   const entregas = Object.keys(por).some((e) => !["assigned", "in_progress", "cancelled"].includes(e) && n(e) > 0);
   return {
-    total, terminadas, porRevisar: Number(p.to_review) || 0, pendientes, vencidas: Number(p.overdue_pending) || 0,
-    dias: diasHasta(t.due_date), entregas, nombres: Array.isArray(p.assignee_names) ? p.assignee_names : (p.assignee_name ? [p.assignee_name] : []), todas: total > 0 && terminadas === total,
+    total, terminadas, cerradas, porCerrar, porRevisar: Number(p.to_review) || 0, pendientes, vencidas: Number(p.overdue_pending) || 0,
+    dias: diasHasta(t.due_date), entregas, nombres: Array.isArray(p.assignee_names) ? p.assignee_names : (p.assignee_name ? [p.assignee_name] : []),
+    todas: total > 0 && cerradas === total,                 // todas cerradas
+    sinCerrar: total > 0 && terminadas === total && porCerrar > 0,   // nada pendiente, pero falta cerrar
     leido: !!t.progress,
   };
 }
@@ -63,7 +68,7 @@ function asignadaA(t) {
 /** Color de la fila: rojo si venció con pendientes, ámbar si vence en 3 días o menos con pendientes. */
 function urgencia(t) {
   const av = t._av;
-  if (t.status !== "published" || av.todas || !av.pendientes || av.dias == null) return "";
+  if (t.status !== "published" || av.todas || av.sinCerrar || !av.pendientes || av.dias == null) return "";
   if (av.dias < 0) return "vencida";
   if (av.dias <= DIAS_AVISO) return "por-vencer";
   return "";
@@ -79,6 +84,7 @@ const MOSTRAR = {
   todas: { texto: "Todas", ok: () => true },
   revisar: { texto: "Con entregas por revisar", ok: (t) => t._av.porRevisar > 0 },
   vencidas: { texto: "Con vencidas", ok: (t) => t._av.vencidas > 0 },
+  porCerrar: { texto: "Por cerrar", ok: (t) => t._av.porCerrar > 0 },
   terminadas: { texto: "Terminadas", ok: (t) => t._av.todas },
 };
 const frac = (t) => (t._av.total ? t._av.terminadas / t._av.total : 0);
@@ -129,7 +135,8 @@ function pintarResumen() {
   const cuenta = (f) => pub.filter(f).length;
   poner(zonaResumen, st.grupo !== "published" ? null : h("p", { class: "tr-resumen" },
     h("span", {}, h("strong", {}, String(pub.length)), ` ${pub.length === 1 ? "tarea publicada" : "tareas publicadas"}`),
-    h("span", {}, h("strong", { class: "tr-n--terminada" }, String(cuenta((t) => t._av.todas))), " terminadas"),
+    h("span", {}, h("strong", { class: "tr-n--terminada" }, String(cuenta((t) => t._av.todas))), cuenta((t) => t._av.todas) === 1 ? " terminada" : " terminadas"),
+    cuenta((t) => t._av.porCerrar > 0) ? h("span", {}, h("strong", { class: "tr-n--cerrar" }, String(cuenta((t) => t._av.porCerrar > 0))), " por cerrar") : null,
     h("span", {}, h("strong", { class: "tr-n--revisar" }, String(cuenta((t) => t._av.porRevisar > 0))), " con entregas por revisar"),
     h("span", {}, h("strong", { class: "tr-n--vencida" }, String(cuenta((t) => t._av.vencidas > 0))), " con docentes vencidos")));
 }
@@ -179,11 +186,14 @@ function celdaAvance(t) {
   const notas = [];
   if (av.porRevisar) notas.push(h("span", { class: "tr-n--revisar" }, `${av.porRevisar} por revisar`));
   if (av.vencidas) notas.push(h("span", { class: "tr-n--vencida" }, plural(av.vencidas, "vencida", "vencidas")));
+  if (av.porCerrar) notas.push(h("span", { class: "tr-n--cerrar" }, `${plural(av.porCerrar, "aprobada", "aprobadas")} · falta ${av.porCerrar === 1 ? "cerrarla" : "cerrarlas"}`));
   const texto = notas.length ? notas.flatMap((x, i) => (i ? [" · ", x] : [x]))
-    : av.todas ? "Todas terminadas" : !av.entregas ? "Sin entregas todavía" : "Sin entregas por revisar";
+    : av.todas ? h("span", { class: "tr-n--terminada" }, "Todas cerradas") : !av.entregas ? "Sin entregas todavía" : "Sin entregas por revisar";
+  // Barra azul mientras haya aprobadas sin cerrar; verde cuando todo lo aprobado está cerrado.
+  const etiqueta = av.porCerrar ? `${av.terminadas} de ${av.total} aprobadas, ${av.porCerrar} sin cerrar` : `${av.terminadas} de ${av.total} terminadas`;
   return h("div", { class: "tr-avance" },
     h("div", { class: "tr-avance__fila" },
-      h("div", { class: "tr-avance__barra", role: "img", "aria-label": `${av.terminadas} de ${av.total} terminadas` },
+      h("div", { class: `tr-avance__barra${av.porCerrar ? " tr-avance__barra--cerrar" : ""}`, role: "img", "aria-label": etiqueta },
         h("span", { style: `width: ${av.total ? Math.round((av.terminadas / av.total) * 100) : 0}%` })),
       h("span", { class: "tr-avance__n" }, `${av.terminadas} de ${av.total}`)),
     h("span", { class: "tr-avance__nota" }, texto));
@@ -193,7 +203,8 @@ function celdaFecha(t) {
   const av = t._av;
   const u = urgencia(t);
   const d = av.dias;
-  const rel = d == null ? "" : t.status === "published" && av.todas ? "terminada"
+  const rel = t.status === "published" && av.sinCerrar ? "aprobada, sin cerrar"
+    : d == null ? "" : t.status === "published" && av.todas ? "terminada"
     : d < 0 ? `venció hace ${plural(-d, "día", "días")}` : d === 0 ? "vence hoy" : d === 1 ? "vence mañana" : `faltan ${d} días`;
   return h("div", { class: "tr-fecha" },
     h("strong", {}, fechaDia(t.due_date)),

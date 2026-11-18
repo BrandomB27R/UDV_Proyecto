@@ -873,3 +873,24 @@ body.d-pagina { display: flex; flex-direction: column; }
   .vinci .rv-opcion__pie .v-btn { width: 100%; }
   .p-franja__volver { width: 100%; justify-content: center; }
 }
+
+/* ══ Aprobadas y por cerrar (mockup vinci-cierre) ══ */
+/* Por cerrar: azul (aprobada, falta cerrarla). Aprobadas del docente: verde (ya no tiene que hacer nada). */
+.v-indicador--cerrar { border-left: 5px solid #0B3D91; }
+.v-indicador--cerrar .v-indicador__titulo { color: #0B3D91; }
+.v-indicador--aprobadas { border-left: 5px solid #0E6B3A; }
+.v-indicador--aprobadas .v-indicador__titulo { color: #0E6B3A; }
+.pn-fila--cerrar td:first-child { border-left-color: #0B3D91; }
+.pn-fila--terminada td:first-child { border-left-color: #0E6B3A; }
+.tr-n--cerrar { color: #0B3D91 !important; font-weight: 700; }
+.tr-avance__nota .tr-n--terminada { font-weight: 700; }
+.tr-avance__barra--cerrar span { background: #0B3D91; }
+/* Inicio: hasta cinco contadores en una fila en escritorio (coordinación con «Por cerrar», docente con «Aprobadas»). */
+@media (min-width: 601px) {
+  .ini-indicadores { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .ini-indicadores .v-indicador { padding: 18px 20px; }
+}
+@media (max-width: 720px) {
+  .pn-fila--cerrar { border-left-width: 4px !important; border-left-color: #0B3D91 !important; }
+  .pn-fila--terminada { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
+}
