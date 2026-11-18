@@ -19,7 +19,8 @@ export const RUTAS = {
     `/app/programa.html?version=${encodeURIComponent(versionId)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}`,
   panelAdmin: "/app/g6/panel.html",
   catalogos: "/app/g6/catalogos.html",
-  auditoria: "/app/g6/auditoria.html",
+  // Auditoría de Vinci (la del G6 sigue en /app/g6/auditoria.html, sin enlazar).
+  auditoria: "/app/auditoria.html",
 };
 
 // Cada cuánto se consulta /notifications (el GET procesa los eventos pendientes).

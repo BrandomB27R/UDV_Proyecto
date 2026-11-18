@@ -47,7 +47,8 @@ export async function descargarPdf(versionId, nombre) {
 export const abrirVersionDeAsignacion = (assignmentId) =>
   api(`/program-versions/for-assignment/${encodeURIComponent(assignmentId)}`, { method: "POST" });
 
-const ACCIONES = ["edit", "submit", "review", "return", "approve", "authorize"];
+// edit_responsibles (vinci-13, regla K): coordinación edita solo «Responsables»; el contenido es del docente.
+const ACCIONES = ["edit", "edit_responsibles", "submit", "review", "return", "approve", "authorize"];
 
 /** Lo que puede hacer quien mira con la versión: solo viewer_actions del backend. */
 export function accionesDeVersion(version) {

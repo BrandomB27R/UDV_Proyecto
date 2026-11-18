@@ -113,24 +113,34 @@ body.vinci--blanco { background: var(--v-white); }
 .v-btn--chico { font-size: 13px; padding: 8px 16px; min-height: 40px; }
 .v-acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 
-/* ── Etiquetas de estado y prioridad (las mismas en toda la app) ── */
-.v-chip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: var(--v-pill); white-space: nowrap; }
-.v-chip--draft        { background: #EEF1F4; color: #4A5361; }
-.v-chip--published    { background: #E0F4FC; color: #00577A; }
-.v-chip--assigned     { background: #E0F4FC; color: #00577A; }
-.v-chip--in_progress  { background: #E6ECF5; color: #001D4A; }
-.v-chip--submitted    { background: #EDE9FE; color: #4C1D95; }
-.v-chip--under_review { background: #FBF3DF; color: #7A5A12; }
-.v-chip--returned     { background: #FDE7D3; color: #7A2E0B; }
-.v-chip--approved     { background: #DCF2E3; color: #0E6B3A; }
-.v-chip--closed       { background: #E3E7EC; color: #374151; }
-.v-chip--cancelled    { background: #F3F4F6; color: #6B7280; }
-.v-chip--p-low        { background: #EEF1F4; color: #4A5361; }
-.v-chip--p-medium     { background: #E6ECF5; color: #001D4A; }
-.v-chip--p-high       { background: #FDE7D3; color: #7A2E0B; }
-.v-chip--p-urgent     { background: #FBE0E0; color: #8B1A1A; }
-.v-chip--vencida      { background: #FBE0E0; color: #8B1A1A; }
-.v-chip--por-vencer   { background: #FDE7D3; color: #7A2E0B; }
+/* ── Colores de los estados: un solo lugar para toda la app (mockup vinci-colores) ──
+   Un color por significado, de gris a verde en el orden del flujo. El texto del estado siempre está:
+   el color nunca es la única señal. Tareas y programas usan las mismas clases para los mismos momentos. */
+.v-chip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: var(--v-pill); border: 1px solid transparent; white-space: nowrap; }
+.v-chip--draft        { background: #EEF1F4; color: #4A5361; }   /* Borrador */
+.v-chip--published    { background: #E0F4FC; color: #00577A; }   /* Publicada (tarea) */
+.v-chip--assigned     { background: #E0F4FC; color: #00577A; }   /* Asignada */
+.v-chip--in_progress  { background: #D6E2F5; color: #0B2A5B; }   /* En curso: más marcado que Asignada */
+.v-chip--submitted    { background: #FBF3DF; color: #7A5A12; }   /* Entregada · programa Enviada */
+.v-chip--under_review { background: #F1DDA6; color: #5C4208; }   /* En revisión: el mismo dorado, más intenso */
+.v-chip--returned     { background: #FDE7D3; color: #7A2E0B; }   /* Devuelta: el único uso del naranja */
+.v-chip--approved     { background: #DCF2E3; color: #0E6B3A; }   /* Aprobada (tarea y programa) */
+.v-chip--closed,
+.v-chip--autorizada   { background: #0E6B3A; color: #FFFFFF; }   /* Cerrada · programa Autorizada: verde lleno */
+.v-chip--closed::before,
+.v-chip--autorizada::before { content: "✓ " / ""; white-space: pre; }
+.v-chip--cancelled,
+.v-chip--reemplazada  { background: #FFFFFF; border-color: #C9D1DB; color: #6B7280; }   /* fuera del flujo: solo contorno */
+.v-chip--cancelled    { text-decoration: line-through; }
+/* Prioridad: no es un estado. Baja y media no se muestran; alta y urgente, rectángulo con contorno. */
+.v-prio { display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 6px; border: 1px solid currentColor; background: #FFFFFF; white-space: nowrap; }
+.v-prio--high   { color: #7A2E0B; }
+.v-prio--urgent { color: #8B1A1A; }
+/* Plazo: texto de color junto a la fecha (y borde izquierdo de la fila), nunca etiqueta. */
+.v-plazo--vencida    { color: #B42318; font-weight: 700; }
+.v-plazo--por-vencer { color: #B45309; font-weight: 700; }
+.v-tarea--vencida .v-tarea__enlace    { border-left: 4px solid #B42318; }
+.v-tarea--por-vencer .v-tarea__enlace { border-left: 4px solid #B45309; }
 
 /* ── Línea de estados ────────────────────────────────────── */
 .v-linea ol { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
@@ -657,10 +667,11 @@ body.d-pagina { display: flex; flex-direction: column; }
 .pn-fila--revisar td:first-child { border-left-color: var(--v-navy); }
 .pn-fila--vencida td:first-child { border-left-color: #B42318; }
 .pn-fila--por-vencer td:first-child { border-left-color: #B45309; }
-.pn-plazo { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: var(--v-pill); white-space: nowrap; }
-.pn-plazo--revisar { color: var(--v-navy); background: #E3EAF5; }
-.pn-plazo--vencida { color: #B42318; background: #FDECEA; }
-.pn-plazo--por-vencer { color: #B45309; background: #FDF1E0; }
+/* Plazo en el Panel: texto de color, sin forma de etiqueta (los colores de .v-plazo) */
+.pn-plazo { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.pn-plazo--revisar { color: var(--v-navy); }
+.pn-plazo--vencida { color: #B42318; }
+.pn-plazo--por-vencer { color: #B45309; }
 .pn-tarea { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .vinci .pn-tarea a { font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
 .vinci .pn-tarea a:hover { text-decoration: underline; }
@@ -759,4 +770,59 @@ body.d-pagina { display: flex; flex-direction: column; }
   .ini-cab--enlace { flex-direction: column; align-items: flex-start; }
   .pn-tabla td.ini-accion { padding-top: 12px; }
   .vinci .ini-accion a.v-btn { width: 100%; }
+}
+
+/* ══ Auditoría (mockup vinci-auditoria) ══
+   Tabla de Panel (pn-tabla: a 720 px o menos se apila con etiquetas); aquí filtros, acciones y cambios. */
+.au-card { padding: 22px 24px; gap: 16px; }
+.au-filtros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.au-control { flex: 1 1 150px; gap: 4px; min-width: 0; }
+.au-control:first-child { flex-basis: 190px; }
+.au-control label { font-size: 12px; color: var(--v-muted); }
+.au-control input, .au-control select { padding: 10px 12px; font-size: 14px; width: 100%; }
+.au-botones { display: flex; align-items: center; gap: 14px; }
+.au-resumen { font-size: 13px; color: var(--v-muted-2); padding: 10px 14px; background: var(--v-bg); border-radius: 10px; }
+.au-resumen strong { color: var(--v-ink); }
+.au-tabla td { vertical-align: top; }
+.au-quien strong { color: var(--v-ink); }
+.au-entidad { font-weight: 700; color: var(--v-ink); }
+.au-accion { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: var(--v-pill); background: #EEF1F4; color: #374151; white-space: nowrap; }
+.au-accion--estado { background: #E3EAF5; color: var(--v-navy); }
+.au-accion--baja { background: #FFFFFF; border: 1px solid #C9D1DB; color: #4A5361; }   /* fuera del flujo, como Cancelada */
+.au-accion--fallo { background: #FBE0E0; color: #8B1A1A; }
+.au-cambios { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.au-cambios li { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr); column-gap: 12px; align-items: baseline; font-size: 13px; }
+.au-cambios li > :nth-child(n + 2) { grid-column: 2; }
+.au-cambios li:has(.au-flecha) { grid-template-columns: minmax(90px, auto) auto auto minmax(0, 1fr); }
+.au-cambios li:has(.au-flecha) > :nth-child(n + 2) { grid-column: auto; }
+.au-campo { color: var(--v-muted-2); }
+.au-antes { color: var(--v-muted); text-decoration: line-through; overflow-wrap: anywhere; }
+.au-flecha { color: var(--v-muted); }
+.au-ahora { font-weight: 700; color: var(--v-ink); overflow-wrap: anywhere; }
+.au-cambio { display: flex; flex-direction: column; gap: 6px; }
+.vinci .au-ver { align-self: flex-start; padding: 4px 0; }
+.au-nota { font-size: 12px; color: var(--v-muted); }
+.au-nada { font-size: 13px; color: var(--v-muted); }
+.au-texto { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.au-texto--fallo { color: #B42318; font-weight: 700; }
+.au-texto--nada { color: var(--v-muted); }
+.au-paginas { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: 13px; color: var(--v-muted-2); }
+.au-paginas__botones { display: flex; gap: 16px; }
+.au-paginas .v-enlace:disabled { color: var(--v-track); text-decoration: none; cursor: default; }
+
+@media (max-width: 720px) {
+  .au-card { padding: 18px 16px; }
+  .au-control, .au-control:first-child { flex: 1 1 100%; }
+  .au-cambios li, .au-cambios li:has(.au-flecha) { grid-template-columns: minmax(0, 1fr); }
+  .au-cambios li > *, .au-cambios li:has(.au-flecha) > * { grid-column: 1; }
+  .au-flecha { display: none; }
+  .au-antes::after { content: " →"; text-decoration: none; display: inline-block; margin-left: 4px; }
+}
+
+/* Inicio de dirección: «Por autorizar» y sus filas en verde (el de «Aprobada»/«Autorizada») */
+.v-indicador--autorizar { border-left: 5px solid #0E6B3A; }
+.v-indicador--autorizar .v-indicador__titulo { color: #0E6B3A; }
+.pn-fila--autorizar td:first-child { border-left-color: #0E6B3A; }
+@media (max-width: 720px) {
+  .pn-fila--autorizar { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
 }

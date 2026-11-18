@@ -3,9 +3,6 @@
  * después de vinci.css, y usa sus mismos valores.
  */
 
-/* Programa «Aprobada» (falta autorizar): azul, para no confundirla con la autorizada (verde). */
-.v-chip--prog-aprobada { background: #E0F4FC; color: #00577A; }
-
 /* ── Lista de programas ──────────────────────────────────── */
 .v-programas { list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .v-programa-fila { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; border: 1px solid var(--v-line); border-radius: 12px; }

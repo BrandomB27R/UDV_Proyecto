@@ -17,16 +17,16 @@ export function filaAsignacion(item) {
   if (item.teacher) extra.push(item.teacher);
   if (item.submitted_at) extra.push(`Entregada ${fechaCorta(item.submitted_at)}`);
   if (item.attempt > 1) extra.push(`Intento ${item.attempt}`);
-  return h("li", { class: "v-tarea" },
+  // El plazo va como texto de color junto a la fecha y en el borde izquierdo, sin etiqueta «Vencida».
+  return h("li", { class: `v-tarea${estadoPlazo ? ` v-tarea--${estadoPlazo}` : ""}` },
     h("a", { class: "v-tarea__enlace", href: RUTAS.asignacion(item.id) },
       h("span", { class: "v-tarea__cab" },
         h("span", { class: "v-eyebrow" }, etiquetaTipo(item.task_type)),
         chipEstado(item.status),
-        item.priority === "high" || item.priority === "urgent" ? chipPrioridad(item.priority) : null,
-        estadoPlazo === "vencida" ? h("span", { class: "v-chip v-chip--vencida" }, "Vencida")
-          : estadoPlazo === "por-vencer" ? h("span", { class: "v-chip v-chip--por-vencer" }, "Por vencer") : null),
+        chipPrioridad(item.priority)),
       h("span", { class: "v-tarea__titulo" }, item.title),
-      h("span", { class: "v-tarea__dato" }, [...extra, `Fecha límite: ${p.texto}`].join(" · "))));
+      h("span", { class: "v-tarea__dato" }, [...extra, `Fecha límite: ${p.larga || p.texto}`].join(" · "),
+        p.rel ? [" · ", h("span", { class: estadoPlazo ? `v-plazo--${estadoPlazo}` : "" }, p.rel)] : null)));
 }
 
 /** Contador de los paneles (Panel e Inicio). tono: "alerta" (rojo), "aviso" (ámbar), "revisar" (azul). */
