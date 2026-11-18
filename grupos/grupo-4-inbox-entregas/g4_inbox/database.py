@@ -521,6 +521,46 @@ def vincular_archivo(assignment_id: int, file_id: str, actor_id: int) -> dict:
     return {"entrega_id": intento["id"], "numero_intento": intento["numero_intento"]}
 
 
+def desvincular_archivo(assignment_id: int, file_id: str, actor_id: int) -> None:
+    """Quita un archivo del intento que todavía no se envió.
+
+    Solo su autor, solo mientras la asignación está pendiente y solo si el
+    archivo pertenece al intento abierto: lo ya enviado no se toca. El archivo
+    queda con eliminación lógica (G1 no permite borrar filas de archivo).
+    """
+    try:
+        archivo_id = int(file_id)
+    except (TypeError, ValueError):
+        raise ArchivoNoEncontrado("Archivo no encontrado")
+    sesion = _sesion(actor_id)
+    try:
+        asignacion = sesion.execute(text("""
+            SELECT estado_codigo FROM tarea_destinatario WHERE id = :id FOR UPDATE
+        """), {"id": assignment_id}).mappings().first()
+        if asignacion is None:
+            raise ArchivoNoEncontrado("Asignación no encontrada")
+        archivo = sesion.execute(text("""
+            SELECT id, autor_id, entrega_id FROM archivo
+            WHERE id = :f AND eliminado_en IS NULL
+        """), {"f": archivo_id}).mappings().first()
+        if archivo is None or archivo["autor_id"] != actor_id:
+            raise ArchivoNoEncontrado("Archivo no encontrado")
+        intento = _intento_actual(sesion, assignment_id)
+        if (asignacion["estado_codigo"] not in ESTADOS_PENDIENTES or intento is None
+                or archivo["entrega_id"] != intento["id"]):
+            raise ErrorConflicto("Solo se quita un archivo de una entrega que todavía no se envió")
+        sesion.execute(text("""
+            UPDATE archivo SET entrega_id = NULL, eliminado_en = UTC_TIMESTAMP(3), eliminado_por = :actor
+            WHERE id = :f
+        """), {"actor": actor_id, "f": archivo_id})
+        sesion.commit()
+    except Exception:
+        sesion.rollback()
+        raise
+    finally:
+        sesion.close()
+
+
 # ============================================================================
 # BANDEJA DE REVISIÓN
 # ============================================================================

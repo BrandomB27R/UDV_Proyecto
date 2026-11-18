@@ -361,3 +361,27 @@ def vincular_archivo(assignment_id: int, archivo: ArchivoIn,
         raise HTTPException(status_code=409, detail=str(e))
     a = buscar_asignacion(assignment_id)  # releer: los archivos salen de la base
     return {"status": "archivo vinculado", "files": a["files"], **intento}
+
+
+@router.delete("/assignments/{assignment_id}/files/{file_id}")
+def quitar_archivo(assignment_id: int, file_id: str,
+                   usuario: Usuario = Depends(obtener_usuario_actual)):
+    """Quita un archivo del intento que todavía no se envió (el docente subió el que no era)."""
+    a = buscar_asignacion(assignment_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Asignación no encontrada")
+    _exigir_acceso(a, usuario, "modificar")
+    if not USAR_MYSQL:
+        antes = len(a["files"])
+        a["files"] = [f for f in a["files"] if str(f.get("file_id")) != str(file_id)]
+        if len(a["files"]) == antes:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        return {"status": "archivo quitado", "files": a["files"]}
+    try:
+        database.desvincular_archivo(assignment_id, file_id, usuario.id)
+    except database.ArchivoNoEncontrado as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except database.ErrorConflicto as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    a = buscar_asignacion(assignment_id)
+    return {"status": "archivo quitado", "files": a["files"]}
