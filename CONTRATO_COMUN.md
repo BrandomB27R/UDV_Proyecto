@@ -36,12 +36,13 @@ Reglas que cumple toda pantalla, sea del grupo que sea:
 
 | Elemento | Convención |
 |---|---|
-| Entrada | El portal (`/app/`) es la entrada y cada pantalla enlaza de vuelta a él. Una pantalla que ofrezca su propio login usa `POST /api/v1/auth/login` y guarda el token con la misma clave, para que la sesión sirva en todos los módulos. |
+| Entrada | Vinci (`/app/`, carpeta `portal/`) es la entrada y la aplicación completa; las pantallas de los grupos siguen en su ruta como evidencia y enlazan de vuelta a él. Una pantalla que ofrezca su propio login usa `POST /api/v1/auth/login` y guarda el token con la misma clave, para que la sesión sirva en todos los módulos. |
 | Sesión | El token se guarda en `sessionStorage` con la clave `udv_token` y viaja en `Authorization: Bearer`. Cerrar sesión llama a `POST /api/v1/auth/logout`. |
 | Rol | Sale de `GET /api/v1/me` (`roles`). La pantalla no deja elegir ni cambiar el rol. |
 | Rutas | Relativas al mismo origen (`/api/v1/...`), nunca un host o puerto escrito en el código. |
 | Estilos | `/udv-styles/udv.css`. Los estilos propios de una pantalla van en la carpeta de su grupo. |
 | Datos | La pantalla muestra lo que responde la API; no trae valores de relleno ni identificadores inventados. |
+| Botones | Las acciones que se ofrecen salen de `viewer_actions` (regla G de §2c); la pantalla no decide permisos por su cuenta. |
 | Fechas | Se convierten al mostrarlas: `new Date(valor).toLocaleString("es-GT", { timeZone: "America/Guatemala" })`. |
 
 ## 2. Estados
@@ -72,7 +73,7 @@ implementa y el otro la consume.
 | `/task-types`, `/tasks/*`, `/workflow`, `/events` | G3 |
 | Acciones de asignación: `/assignments/{id}/start`, `submit`, `resubmit`, `review`, `return`, `approve`, `close`, y además `actions` e `history` | G3 |
 | `/inbox`, `/review-queue`, `/assignments/{id}` (detalle, `submission-draft`, `comments`, `files`) | G4 |
-| `/course-programs/*`, `/program-versions/*` | G5 |
+| `/course-programs/*`, `/program-versions/*` (incluye `for-assignment/{id}`), `/graduate-profiles` | G5 |
 | Catálogos (`/campuses`, `/faculties`, `/academic-units`, `/courses`, `/periods`, `/modalities`, `/areas`), `/notifications`, `/dashboard`, `/audit`, `/api/v1/health` | G6 |
 
 ## 2c. Reglas compartidas entre módulos
@@ -105,6 +106,34 @@ la misma persona: su usuario tiene los roles `coordinator`, `reviewer` y
 `authority` (migración 1.2.2). Los seis roles del catálogo se conservan y
 cada módulo decide por la unión de los roles del usuario, nunca por el
 primero.
+
+**G. Acciones de quien mira (G4 y G5).** El detalle de una asignación
+(`GET /assignments/{id}`) y el de una versión de programa
+(`GET /program-versions/{id}`) traen `viewer_actions`: de las acciones que el
+estado permite, las que puede ejecutar el usuario que consulta, ya cruzadas
+con sus roles, con el revisor designado o el creador de la tarea y con la
+regla de que quien elaboró o envió un programa no lo aprueba. La interfaz
+pinta solo esos botones.
+
+**H. El programa nace de la tarea (G3, G4 y G5).** Una tarea de tipo
+«Actualizar programa» guarda `course_id` y `period_id` (G3). El docente de la
+asignación llama a `POST /program-versions/for-assignment/{assignment_id}`
+(G5): si ya hay una versión ligada a esa asignación la devuelve; si no, abre un
+borrador con el período de la tarea y él como responsable, copiando la última
+versión autorizada del curso o, si el curso aún no tiene programa, en blanco.
+Responde 422 si la tarea no indica curso y período. El detalle de la
+asignación (G4) expone esa versión en `program_version`, y la tarea se puede
+entregar cuando el programa está completo.
+
+**I. Tipos de tarea (G3).** `POST /task-types` `{name, delivery, description}`
+crea un tipo con el flujo estándar; lo usan coordinación, autoridad o
+administración. `delivery` es `texto` (sin archivos), `ambos` (texto y archivo
+opcional) o `archivo` (exige al menos un archivo). El revisor de una tarea
+(`reviewer_id`) debe tener el rol `reviewer`.
+
+**J. Quitar un archivo (G4).** `DELETE /assignments/{id}/files/{file_id}`
+quita un archivo del intento que todavía no se envió; lo hace su autor, con la
+asignación pendiente. Un intento enviado no se modifica (409).
 
 La decisión C (quién elabora y aprueba un programa de curso) es solo del G5 y
 está en su CONTRATO.md.
@@ -145,3 +174,4 @@ Cada CONTRATO.md traduce esta definición a su checklist de PR.
 | 2026-11-17 | §1: autenticación por `Bearer`, códigos de rol, fechas en UTC con `Z`, máximo de `per_page`; nuevo §1b con las reglas de las pantallas; §2: prioridad con `urgent`; §2b: las acciones de asignación son del G3 y `/review-queue` del G4; nuevo §2c con las reglas A, B y D; §3: los eventos viajan por la tabla `evento` | Decisiones tomadas entre el 11 y el 16 de noviembre que solo estaban en el chat y en los CONTRATO.md de grupo |
 | 2026-11-17 (noche) | §2c: regla D como quedó implementada; nueva regla E (perfil de coordinación) | Cierre de entregas; decisión del PM |
 | 2026-11-17 (noche, 2) | §2c A: el texto del intento abierto se actualiza al entregar; un intento enviado sigue inmutable | Decisión del PM; migración 1.2.3 |
+| 2026-11-18 | §1b: Vinci es la entrada y la aplicación; los botones salen de `viewer_actions`. §2b: `for-assignment` y `/graduate-profiles` son del G5. §2c: reglas G (acciones de quien mira), H (el programa nace de la tarea), I (tipos de tarea) y J (quitar un archivo) | Interfaz unificada y los cambios de backend que la acompañan, hechos por el PM tras el cierre de entregas (PR #49 a #57) |
