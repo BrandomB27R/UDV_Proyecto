@@ -1544,11 +1544,76 @@ def _insert_version_from(
     return version_id
 
 
+def _insert_first_version(
+    session: Session, actor: Actor, course_id: int, period_id: int, assignment_id: int
+) -> int:
+    """Abre en blanco el primer borrador de un curso que todavía no tiene programa autorizado.
+
+    Usa el programa del curso si ya existe (primero el de la sede donde da clases
+    el docente); si no, lo crea en esa sede, o en la primera sede y modalidad
+    del catálogo cuando el docente no tiene el curso asignado.
+    """
+    program = _one(
+        session,
+        """SELECT pc.id FROM programa_curso pc
+           WHERE pc.curso_id = :course_id AND pc.activo = 1
+           ORDER BY EXISTS (SELECT 1 FROM docente_curso dc
+                            WHERE dc.usuario_id = :teacher_id AND dc.curso_id = pc.curso_id
+                              AND dc.sede_id = pc.sede_id AND dc.activo = 1) DESC, pc.id
+           LIMIT 1 FOR UPDATE""",
+        {"course_id": course_id, "teacher_id": actor.id},
+    )
+    if program:
+        program_id = program["id"]
+    else:
+        campus = _one(
+            session,
+            """SELECT dc.sede_id FROM docente_curso dc
+               WHERE dc.usuario_id = :teacher_id AND dc.curso_id = :course_id AND dc.activo = 1
+               ORDER BY (dc.periodo_id = :period_id) DESC, dc.periodo_id DESC LIMIT 1""",
+            {"teacher_id": actor.id, "course_id": course_id, "period_id": period_id},
+        ) or _one(session, "SELECT id AS sede_id FROM sede ORDER BY id LIMIT 1")
+        mode = _one(session, "SELECT id FROM modalidad ORDER BY id LIMIT 1")
+        if campus is None or mode is None:
+            raise ApiError(409, "CONFLICT", "Faltan sedes o modalidades en el catálogo para abrir el programa.")
+        program_id = session.execute(
+            text("""INSERT INTO programa_curso (curso_id, sede_id, modalidad_id, creado_por)
+                    VALUES (:course_id, :campus_id, :mode_id, :actor_id)"""),
+            {"course_id": course_id, "campus_id": campus["sede_id"], "mode_id": mode["id"], "actor_id": actor.id},
+        ).lastrowid
+    names = _one(
+        session,
+        """SELECT c.nombre AS curso, p.codigo AS periodo FROM curso c, periodo p
+           WHERE c.id = :course_id AND p.id = :period_id""",
+        {"course_id": course_id, "period_id": period_id},
+    )
+    number = session.execute(
+        text("SELECT COALESCE(MAX(numero_version), 0) + 1 FROM programa_version WHERE programa_curso_id = :id"),
+        {"id": program_id},
+    ).scalar_one()
+    return session.execute(
+        text("""INSERT INTO programa_version
+                (programa_curso_id, numero_version, periodo_id, estado_codigo, nombre,
+                 docente_responsable_id, tarea_destinatario_origen_id, creado_por)
+                VALUES (:program_id, :number, :period_id, 'draft', :name,
+                        :actor_id, :assignment_id, :actor_id)"""),
+        {
+            "program_id": program_id,
+            "number": number,
+            "period_id": period_id,
+            "name": f"{names['curso']} - {names['periodo']}"[:200],
+            "actor_id": actor.id,
+            "assignment_id": assignment_id,
+        },
+    ).lastrowid
+
+
 def start_version_for_assignment(session: Session, actor: Actor, assignment_id: int) -> dict:
     """Devuelve la versión que el docente trabaja para una tarea; si no existe, la abre.
 
     La tarea dice de qué curso y período es el programa. El borrador parte de
-    la última versión autorizada de ese curso (de cualquier período), queda a
+    la última versión autorizada de ese curso (de cualquier período); si el
+    curso todavía no tiene ninguna, se abre en blanco. Queda a
     nombre del docente y ligado a la asignación, para que la entrega y la
     revisión lo encuentren. Llamarla otra vez devuelve el mismo borrador.
     """
@@ -1600,39 +1665,37 @@ def start_version_for_assignment(session: Session, actor: Actor, assignment_id: 
                 {"course_id": course_id, "period_id": period_id, "teacher_id": actor.id},
             )
             if source is None:
-                raise ApiError(
-                    409,
-                    "CONFLICT",
-                    "El curso todavía no tiene un programa autorizado del cual partir.",
+                # Primer programa del curso: no hay de dónde copiar, se abre en blanco.
+                version_id = _insert_first_version(session, actor, course_id, period_id, assignment_id)
+            else:
+                session.execute(
+                    text("SELECT id FROM programa_curso WHERE id = :id FOR UPDATE"),
+                    {"id": source["programa_curso_id"]},
                 )
-            session.execute(
-                text("SELECT id FROM programa_curso WHERE id = :id FOR UPDATE"),
-                {"id": source["programa_curso_id"]},
-            )
-            latest = session.execute(
-                text("""SELECT MAX(numero_version) FROM programa_version
-                        WHERE programa_curso_id = :program_id"""),
-                {"program_id": source["programa_curso_id"]},
-            ).scalar_one()
-            # Si el nombre del origen termina con su período ("… - 2026-1"), se pone el nuevo.
-            suffix = f" - {source['periodo_codigo']}"
-            if (source.get("nombre") or "").endswith(suffix) and period_id != source["periodo_id"]:
-                new_code = session.execute(
-                    text("SELECT codigo FROM periodo WHERE id = :id"), {"id": period_id}
+                latest = session.execute(
+                    text("""SELECT MAX(numero_version) FROM programa_version
+                            WHERE programa_curso_id = :program_id"""),
+                    {"program_id": source["programa_curso_id"]},
                 ).scalar_one()
-                source = {**source, "nombre": source["nombre"][: -len(suffix)] + f" - {new_code}"}
-            version_id = _insert_version_from(
-                session,
-                actor,
-                source,
-                number=(latest or 0) + 1,
-                period_id=period_id,
-                clone=True,
-                summary=None,
-                responsible_id=actor.id,
-                assignment_id=assignment_id,
-                keep_summary=False,
-            )
+                # Si el nombre del origen termina con su período ("… - 2026-1"), se pone el nuevo.
+                suffix = f" - {source['periodo_codigo']}"
+                if (source.get("nombre") or "").endswith(suffix) and period_id != source["periodo_id"]:
+                    new_code = session.execute(
+                        text("SELECT codigo FROM periodo WHERE id = :id"), {"id": period_id}
+                    ).scalar_one()
+                    source = {**source, "nombre": source["nombre"][: -len(suffix)] + f" - {new_code}"}
+                version_id = _insert_version_from(
+                    session,
+                    actor,
+                    source,
+                    number=(latest or 0) + 1,
+                    period_id=period_id,
+                    clone=True,
+                    summary=None,
+                    responsible_id=actor.id,
+                    assignment_id=assignment_id,
+                    keep_summary=False,
+                )
             existing = _require_version(session, version_id)
         version = _serialize_version(session, existing)
         version["viewer_actions"] = _viewer_actions(session, actor, existing)
