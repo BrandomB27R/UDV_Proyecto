@@ -938,3 +938,41 @@ def test_pantallas_piden_revalidar_para_no_mezclar_versiones(c):
     r2 = c.get("/app/js/formato.js", headers={"If-None-Match": etag})
     assert r2.status_code == 304
     assert r2.headers["cache-control"] == "no-cache"
+
+
+def test_auditoria_dice_el_nombre_de_lo_que_se_toco(c, s):
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    assert c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"]).status_code == 200
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    def registros(entidad):
+        r = c.get(f"/api/v1/audit?entity={entidad}&per_page=50", headers=s["auditoria"])
+        assert r.status_code == 200, r.text
+        return r.json()["data"]
+
+    def nombre(entidad, eid):
+        return next(d["entity_label"] for d in registros(entidad) if d["entity_id"] == eid)
+
+    asignacion = nombre("tarea_destinatario", a)
+    assert asignacion and asignacion.endswith("· Diana Pérez"), asignacion
+    version = nombre("programa_version", vid)
+    assert version and version.startswith("ISW-301 · ") and "· versión " in version, version
+    de_usuarios = registros("usuario")
+    assert de_usuarios and all(d["entity_label"] for d in de_usuarios)
+    assert all(d["entity_label"] is None for d in registros("sede"))
+    usuarios = c.get("/api/v1/audit/filters", headers=s["auditoria"]).json()["users"]
+    assert all(u["name"] for u in usuarios)
+
+
+def test_programas_por_autorizar_dicen_quien_elaboro_y_quien_aprobo(c, s):
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    # El borrador nuevo no hereda al revisor de la versión de origen.
+    assert not c.get(f"/api/v1/program-versions/{vid}", headers=s["docente1"]).json()["secciones"]["responsables"]["contenido"].get("revisor")
+    for accion, quien in (("submit", "docente1"), ("review", "coordinacion"), ("approve", "coordinacion")):
+        assert c.post(f"/api/v1/program-versions/{vid}/{accion}", json={}, headers=s[quien]).status_code == 200, accion
+    fila = next(f for f in c.get("/api/v1/course-programs?estado=approved&per_page=100", headers=s["direccion"]).json()["data"]
+                if f["programa_version_id"] == vid)
+    assert fila["docente_responsable"] == "Diana Pérez"
+    assert fila["aprobado_por"] == "Carlos Coordinador" and fila["aprobado_en"]
+    v = c.get(f"/api/v1/program-versions/{vid}", headers=s["direccion"]).json()
+    assert v["secciones"]["responsables"]["contenido"]["revisor"] == "Carlos Coordinador"

@@ -286,6 +286,8 @@ def _load_sections(session: Session, version: dict) -> dict:
         **people,
         **responsible_metadata,
         "docente": people.get("docente") or responsible_metadata.get("docente"),
+        # Quien tomó la revisión de esta versión manda sobre el nombre escrito a mano.
+        "revisor": people.get("revisor") or responsible_metadata.get("revisor"),
     })
     return json_value(sections)
 
@@ -639,7 +641,16 @@ def list_programs(
                     WHERE v_vigente.programa_curso_id = pc.id
                       AND v_vigente.estado_codigo = 'authorized'
                     ORDER BY v_vigente.numero_version DESC, v_vigente.periodo_id DESC
-                    LIMIT 1) AS periodo_vigente
+                    LIMIT 1) AS periodo_vigente,
+                   (SELECT CONCAT_WS(' ', d.nombres, d.apellidos) FROM usuario d
+                    WHERE d.id = pv.docente_responsable_id) AS docente_responsable,
+                   (SELECT CONCAT_WS(' ', ap.nombres, ap.apellidos)
+                    FROM programa_aprobacion pa JOIN usuario ap ON ap.id = pa.actor_id
+                    WHERE pa.programa_version_id = pv.id AND pa.estado_nuevo = 'approved'
+                    ORDER BY pa.creado_en DESC, pa.id DESC LIMIT 1) AS aprobado_por,
+                   (SELECT pa.creado_en FROM programa_aprobacion pa
+                    WHERE pa.programa_version_id = pv.id AND pa.estado_nuevo = 'approved'
+                    ORDER BY pa.creado_en DESC, pa.id DESC LIMIT 1) AS aprobado_en
             {from_clause}{where_clause}
             ORDER BY pc.id DESC, pv.periodo_id DESC, pv.numero_version DESC
             LIMIT :limit OFFSET :offset""",
@@ -1572,7 +1583,8 @@ def _insert_version_from(
                 content = {
                     key: item
                     for key, item in content.items()
-                    if key != "docente_responsable_id"
+                    # El revisor es de cada versión: el borrador nuevo aún no lo tiene.
+                    if key not in {"docente_responsable_id", "revisor"}
                 }
             _save_section(
                 session,
