@@ -241,7 +241,9 @@ _TYPE_COLS_MYSQL = ("SELECT id, codigo AS code, nombre AS name,"
                     " requiere_archivo AS requires_evidence, extensiones AS evidence_type,"
                     " 'standard' AS flow, creado_en AS created_at,"
                     " modalidad_entrega AS delivery_mode, descripcion AS description,"
-                    " activo AS active")
+                    " activo AS active,"
+                    " (SELECT COUNT(*) FROM tarea t JOIN workflow w ON w.id = t.workflow_id"
+                    "   WHERE w.tipo_tarea_id = tipo_tarea.id) AS task_count")
 # Formas de entrega que se pueden elegir al crear un tipo: (modalidad de G1, exige archivo, extensiones).
 _DELIVERIES = {"texto": ("texto", 0, None), "ambos": ("ambos", 0, "pdf"), "archivo": ("ambos", 1, "pdf")}
 
@@ -322,6 +324,9 @@ def update_task_type(conn, actor, type_id, data):
     No hay borrado: un tipo desactivado deja de ofrecerse al crear tareas y las
     tareas que ya lo usan siguen su curso. El tipo «Actualizar programa» no se
     desactiva porque el flujo de programas de curso depende de él.
+
+    La forma de entrega (`delivery`) solo se cambia mientras ninguna tarea use
+    el tipo: cambiarla después alteraría lo que se pidió en tareas ya asignadas.
     """
     if not _roles(actor) & {COORDINATOR, AUTHORITY, "admin"}:
         raise Forbidden("Solo coordinación, autoridad o administración pueden cambiar tipos de tarea")
@@ -329,12 +334,32 @@ def update_task_type(conn, actor, type_id, data):
         raise ValidationFailed("Los tipos de tarea solo se modifican sobre la base del G1")
     with transaction(conn):
         set_actor(conn, actor["id"])
-        row = conn.execute("SELECT id, nombre, descripcion, activo, modalidad_entrega"
+        row = conn.execute("SELECT id, nombre, descripcion, activo, modalidad_entrega,"
+                           " requiere_archivo, extensiones"
                            " FROM tipo_tarea WHERE id = ? FOR UPDATE", (type_id,)).fetchone()
         if row is None:
             raise NotFound("Tipo de tarea no encontrado")
-        before = {"nombre": row["nombre"], "descripcion": row["descripcion"], "activo": int(row["activo"])}
+        before = {"nombre": row["nombre"], "descripcion": row["descripcion"], "activo": int(row["activo"]),
+                  "modalidad_entrega": row["modalidad_entrega"],
+                  "requiere_archivo": int(row["requiere_archivo"]), "extensiones": row["extensiones"]}
         after = dict(before)
+        if data.get("delivery") is not None:
+            delivery = data["delivery"]
+            if delivery not in _DELIVERIES:
+                raise ValidationFailed("delivery inválido",
+                                       details={"field": "delivery", "valid": sorted(_DELIVERIES)})
+            mode, requires_file, extensions = _DELIVERIES[delivery]
+            if (mode, requires_file) != (before["modalidad_entrega"], before["requiere_archivo"]):
+                if row["modalidad_entrega"] == "programa":
+                    raise Conflict("La forma de entrega de este tipo no se cambia: es el programa de curso")
+                used = conn.execute(
+                    "SELECT COUNT(*) AS n FROM tarea t JOIN workflow w ON w.id = t.workflow_id"
+                    " WHERE w.tipo_tarea_id = ?", (type_id,)).fetchone()["n"]
+                if used:
+                    raise Conflict("La forma de entrega solo se cambia si ninguna tarea usa este tipo"
+                                   f" (lo usan {used})", code="TYPE_IN_USE")
+                after.update(modalidad_entrega=mode, requiere_archivo=requires_file,
+                             extensiones=extensions)
         if data.get("name") is not None:
             name = " ".join(str(data["name"]).split())
             if not name:
@@ -358,8 +383,11 @@ def update_task_type(conn, actor, type_id, data):
             after["activo"] = active
         changed = {k: v for k, v in after.items() if v != before[k]}
         if changed:
-            conn.execute("UPDATE tipo_tarea SET nombre = ?, descripcion = ?, activo = ? WHERE id = ?",
-                         (after["nombre"], after["descripcion"], after["activo"], type_id))
+            conn.execute("UPDATE tipo_tarea SET nombre = ?, descripcion = ?, activo = ?,"
+                         " modalidad_entrega = ?, requiere_archivo = ?, extensiones = ? WHERE id = ?",
+                         (after["nombre"], after["descripcion"], after["activo"],
+                          after["modalidad_entrega"], after["requiere_archivo"],
+                          after["extensiones"], type_id))
             _audit_task_type(conn, actor, type_id, "update",
                              {"antes": {k: before[k] for k in changed}, "despues": changed})
         return dict(conn.execute(_TYPE_COLS_MYSQL + " FROM tipo_tarea WHERE id = ?",
