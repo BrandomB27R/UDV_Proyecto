@@ -60,28 +60,49 @@ cambiarla, el docente quita el archivo y lo vuelve a subir. Se resuelve junto co
 `not_accepted` dice el resto; la pantalla lo muestra así. Si el G2 amplía los tipos
 (por ejemplo DOCX o XLSX para "Cargar evidencia"), basta con que `delivery` lo refleje.
 
+### 4. Panel y Tareas: una llamada por cada tarea (G3 y G6)
+
+"Tareas" pide `GET /tasks/{id}/assignments` por cada tarea publicada o cancelada para
+saber "Asignada a" (nombre si es una persona) y los conteos de avance. El "Panel" hace
+lo mismo para "Por docente" (asignadas y terminadas por docente). Con muchas tareas son
+muchas llamadas. Rutas que lo ahorrarían:
+
+- `GET /tasks?include=progress` (o campos nuevos en `GET /tasks`): por tarea
+  `{assignees_total, first_assignee_name, by_status: {...}, overdue_pending, to_review}`,
+  donde `overdue_pending` son las asignaciones pendientes con la fecha vencida y
+  `to_review` las entregadas o en revisión.
+- `GET /dashboard/teachers`: `{data: [{user_id, name, assigned, overdue, due_soon,
+  to_review, finished}]}`, con los mismos criterios que `/dashboard` (asignaciones
+  publicadas, sin canceladas), para que "Por docente" cuadre con las tarjetas.
+
+Además: administración y auditoría ven el panel, pero `GET /tasks` les responde 403 y
+`GET /review-queue` es solo para revisión, coordinación y administración. Para ellas el
+panel muestra las tarjetas y las vencidas/por vencer, y avisa que no puede listar las
+entregas por revisar ni las asignadas/terminadas por docente. Con `/dashboard/teachers`
+(y la lista de por revisar dentro de `/dashboard`) el panel sería completo para todos.
+
 ## Programas de curso (etapa 2)
 
-### 4. Contenidos por unidad y módulo (G5)
+### 5. Contenidos por unidad y módulo (G5)
 
 El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e ignora
 `unidad_padre_id`. La pantalla edita unidades (título y horas) con temas,
 reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
 `unidad_padre_id`.
 
-### 5. "Sin prerrequisitos" no se guarda (G5)
+### 6. "Sin prerrequisitos" no se guarda (G5)
 
 La sección se da por completa con al menos un curso o con la casilla "Sin
 prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
 navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
 
-### 6. `/changes` devuelve identificadores internos (G5)
+### 7. `/changes` devuelve identificadores internos (G5)
 
 Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
 contenido sea el mismo. La pantalla los filtra y muestra etiquetas legibles; lo
 correcto es que `/changes` compare solo el contenido.
 
-### 7. Versión enlazada a la tarea y lectura del docente (G4 y G5)
+### 8. Versión enlazada a la tarea y lectura del docente (G4 y G5)
 
 Si la tarea tiene `programa_version_id` (la de la semilla), el detalle de cada
 asignación trae esa misma versión aunque el docente no sea su responsable; ese
