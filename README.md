@@ -122,12 +122,15 @@ estáticos y estilos compartidos los sirve `main.py`, no los grupos.
 
 ### Interfaz
 
-Las pantallas son HTML, CSS y JavaScript sin paso de compilación. Cada una
-vive en la carpeta de su grupo y `main.py` la publica (lista `PANTALLAS`):
+La aplicación que usa la gente es **Vinci** ("Gestión docente · Universidad
+Da Vinci de Guatemala"): una sola interfaz organizada por perfil y por estado,
+construida por el PM en `portal/` sobre la API de los seis grupos. Es HTML, CSS
+y JavaScript sin paso de compilación, y `main.py` la publica junto con las
+pantallas de cada grupo (lista `PANTALLAS`):
 
 | Ruta | Qué es | Carpeta |
 |---|---|---|
-| `/app/` | Portal: login y accesos según el rol (PM) | `portal/` |
+| `/app/` | **Vinci**: presentación, acceso y toda la aplicación (PM) | `portal/` |
 | `/app/g2/` | Pantalla de login del G2 | `grupos/grupo-2-api-seguridad/frontend-login/` |
 | `/app/g3/` | Tareas: crear, publicar y dar seguimiento | `grupos/grupo-3-workflow-tareas/frontend/` |
 | `/app/g4/inbox.html`, `detalle.html`, `revision.html` | Bandeja del docente, entrega y bandeja de revisión | `grupos/grupo-4-inbox-entregas/g4_inbox/static/` |
@@ -137,6 +140,23 @@ vive en la carpeta de su grupo y `main.py` la publica (lista `PANTALLAS`):
 
 `GET /` redirige a `/app/`. Las reglas que cumple toda pantalla (sesión,
 estilos, fechas) están en `CONTRATO_COMUN.md` §1b.
+
+Vinci muestra tres perfiles (decisión E): **Docente**, **Coordinación** y
+**Administración**. Sus páginas:
+
+| Página | Para quién | Qué hace |
+|---|---|---|
+| `index.html`, `inicio.html` | Todos | Presentación con el acceso; después de entrar, el inicio del perfil con lo que toca hoy |
+| `mis-tareas.html` | Docente | Sus asignaciones por estado, con vencidas y por vencer |
+| `asignacion.html` | Todos | Detalle de una asignación: línea de estados, qué falta para avanzar, la entrega (mensaje, archivos, programa), revisión, historial y comentarios |
+| `por-revisar.html` | Coordinación | Entregas que esperan revisión |
+| `tareas.html`, `tarea.html`, `nueva-tarea.html` | Coordinación | Lista de tareas, avance por docente, y creación en cuatro pasos (incluye crear un tipo de tarea nuevo) |
+| `programas.html`, `programa.html` | Todos (lectura); docente y coordinación (edición) | Programas de curso: versiones, editor por secciones, flujo de revisión y autorización, cambios y PDF |
+| `panel.html`, `notificaciones.html` | Coordinación y administración; todos | Indicadores de cumplimiento; avisos con enlace a su tarea o programa |
+
+Las pantallas de los grupos siguen publicadas en su ruta como evidencia de su
+trabajo, pero Vinci no las enlaza. Lo que la interfaz todavía resuelve con un
+rodeo por falta de una ruta está en `portal/NOTAS_BACKEND.md`.
 
 ### Dependencias
 
@@ -175,7 +195,7 @@ Hasta entonces, nadie escribe código que dependa de ella.
 ### Decisiones de integración entre módulos
 
 Reglas que tocan a más de un grupo. El texto completo está en
-`CONTRATO_COMUN.md` §2c (A, B y D) y en el CONTRATO.md del G5 (C).
+`CONTRATO_COMUN.md` §2c (A, B, D, E, G, H, I y J), §1b (F) y en el CONTRATO.md del G5 (C).
 
 | # | Tema | Decisión | Estado |
 |---|---|---|---|
@@ -184,6 +204,11 @@ Reglas que tocan a más de un grupo. El texto completo está en
 | C | Quién elabora el programa de curso | El docente elabora y envía el suyo; coordinación y revisor revisan y aprueban; dirección autoriza | 2026-11-13 · en `main`, con los permisos de la migración 1.2.2 |
 | D | Quién descarga un archivo | Dueño y administrador siempre; auditoría, cualquier archivo ya vinculado; revisor y coordinación solo en tareas donde son revisor designado o creador | 2026-11-16 · en `main` |
 | E | Perfil de coordinación | Coordinación, revisión y autoridad los ejerce la misma persona: su usuario tiene los roles `coordinator`, `reviewer` y `authority`. Los seis roles se conservan | 2026-11-17 · migración 1.2.2 |
+| F | Una sola interfaz | La aplicación es Vinci (`portal/`), organizada por perfil y estado. Las pantallas de los grupos quedan como evidencia y no se enlazan | 2026-11-17 · en `main` |
+| G | Qué puede hacer quien mira | El backend lo calcula y lo entrega en `viewer_actions` (asignaciones, G4; versiones de programa, G5). La pantalla pinta solo esos botones; no repite las reglas de permisos | 2026-11-17 · en `main` |
+| H | El programa nace de la tarea | La tarea «Actualizar programa» lleva curso y período (G3). El docente abre su borrador desde la tarea (G5): copia la última versión autorizada del curso o, si no hay, empieza en blanco. La entrega lo encuentra por la asignación (G4) | 2026-11-18 · en `main` |
+| I | Tipos de tarea | No son un catálogo cerrado: coordinación crea un tipo con su nombre y su forma de entrega (texto, texto y archivo opcional, archivo obligatorio). Todos usan el flujo estándar | 2026-11-18 · en `main` |
+| J | Quitar un archivo | El docente puede quitar un archivo del intento que todavía no envió; lo ya enviado no se modifica | 2026-11-18 · en `main` |
 
 ### Versiones oficiales de librerías compartidas
 
@@ -293,3 +318,4 @@ tras revisión · **merge** = la integración aprobada.
 | 2026-11-17 | §2: el paquete del G3 es `workflow`; carpetas del PM. §4: `portal/`, `tests/integracion/` y `grupos/udv-styles/` en la raíz del PM; nueva sección "Interfaz" con las rutas de las pantallas. §5: quedan ✅ migraciones, prioridad (`urgent`), dueño de las acciones (G3), zona horaria (UTC), frontend y transporte de eventos; nueva tabla de decisiones de integración A–D; `python-dotenv` en versiones oficiales; base, entorno local y despliegue al día (MySQL 8.4, UTC, portal, cuentas de demostración, volumen, `/api/v1/health`, pruebas de integración). §6: mezclar `main` y correr las pruebas de integración antes del PR | El documento seguía como el 13-oct: marcaba pendientes seis decisiones ya tomadas y aplicadas, y no mencionaba el portal, las pantallas ni las pruebas de integración |
 | 2026-11-17 (noche) | §5: decisiones C y D en `main`; nueva decisión E (perfil de coordinación con tres roles); esquema 1.2.2 | Cierre de entregas de los grupos: el PM integra G2 y G5 y escribe la migración 1.2.2 que el G1 no entregó |
 | 2026-11-17 (noche, 2) | Esquema 1.2.3: el texto de una entrega se puede corregir mientras el intento no se haya enviado (cambia un trigger del G1; sin tablas nuevas) | El texto quedaba fijo al adjuntar el primer archivo y el docente no podía corregirlo antes de entregar |
+| 2026-11-18 | §4 "Interfaz": la aplicación es Vinci, con sus páginas por perfil; las pantallas de los grupos quedan como evidencia. §5: decisiones F (una sola interfaz), G (`viewer_actions`), H (el programa nace de la tarea), I (tipos de tarea que crea coordinación) y J (quitar un archivo antes de entregar) | Tras el cierre de entregas el PM unificó la interfaz y completó en el backend lo que hacía falta para que el flujo se pudiera recorrer de punta a punta (PR #48 a #58) |
