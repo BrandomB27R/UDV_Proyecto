@@ -44,7 +44,8 @@ export function resumenPasoPrograma(estado) {
 
 /**
  * Qué toca ahora. ctx: {acciones: Set, avance: {listas, total, faltan}, sinGuardar: [titulos], motivo, responsable, conTarea}
- * conTarea: se abrió desde la tarea del docente y al enviar también se entrega la tarea.
+ * conTarea: la versión es de una tarea del docente y al enviar también se entrega la tarea.
+ * tarea: {review, return, authorize, docente}: qué acciones mueven también la tarea (revisión).
  * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria, conMotivo}.
  */
 export function pasoPrograma(v, ctx) {
@@ -73,10 +74,12 @@ export function pasoPrograma(v, ctx) {
         motivo: faltanReq.length ? (sinGuardar.length && !faltan.length ? "Se habilita cuando guardes tus cambios." : "Se habilita cuando las nueve secciones estén listas.") : "" } : null,
     };
   }
+  const t = ctx.tarea || {};
+  const deDocente = t.docente ? ` de ${t.docente}` : "";
   if (a.has("review")) {
     return {
       turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Revisa el programa",
-      resumen: "Tómalo para empezar a revisarlo; quien lo elaboró verá que está en revisión.",
+      resumen: `Tómalo para empezar a revisarlo; quien lo elaboró verá que está en revisión.${t.review ? ` También pasa a «En revisión» la tarea${deDocente}.` : ""}`,
       requisitos: [{ id: "tomar", titulo: "Toma el programa para revisarlo", estado: "pendiente", detalle: "Pasa a «En revisión»." }],
       principal: { accion: "review", etiqueta: "Comenzar revisión", habilitada: true },
     };
@@ -86,10 +89,12 @@ export function pasoPrograma(v, ctx) {
     const req = [{ id: "leer", titulo: "Revisa las nueve secciones", estado: "opcional", detalle: "Están abajo, cada una con su contenido." }];
     if (a.has("return")) req.push({ id: "motivo", titulo: "Para devolver, escribe la observación", estado: motivoListo ? "hecho" : "pendiente", nota: "obligatoria para devolver" });
     const devolver = a.has("return") ? { accion: "return", etiqueta: "Devolver", habilitada: motivoListo, motivo: motivoListo ? "" : "«Devolver» se habilita cuando escribas la observación." } : null;
+    const tareaDevuelta = a.has("return") && t.return ? ` También devuelve la tarea${t.docente ? ` a ${t.docente}` : ""}.` : "";
     return {
       turno: "tuyo", eyebrow: "Te toca a ti", titulo: a.has("approve") ? "Aprueba o devuelve el programa" : "Revisa el programa",
-      resumen: a.has("approve") ? "Si está bien, apruébalo; luego dirección lo autoriza. Si falta algo, devuélvelo con una observación."
-        : "Puedes devolverlo con una observación. Aprobarlo le corresponde a otra persona: quien lo elaboró no lo aprueba.",
+      resumen: (a.has("approve") ? `Si está bien, apruébalo; luego dirección lo autoriza. Si falta algo, devuélvelo con una observación.${tareaDevuelta}`
+        + (t.return ? " Aprobar no mueve la tarea: se aprueba cuando dirección autorice el programa." : "")
+        : `Puedes devolverlo con una observación.${tareaDevuelta} Aprobarlo le corresponde a otra persona: quien lo elaboró no lo aprueba.`),
       requisitos: req, conMotivo: true,
       principal: a.has("approve") ? { accion: "approve", etiqueta: "Aprobar", habilitada: true } : devolver,
       secundaria: a.has("approve") ? devolver : null,
@@ -98,7 +103,7 @@ export function pasoPrograma(v, ctx) {
   if (a.has("authorize")) {
     return {
       turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Autoriza el programa",
-      resumen: "Al autorizarlo queda como la versión vigente del curso y se genera su PDF oficial. Si había otra vigente, pasa a «Reemplazada».",
+      resumen: `Al autorizarlo queda como la versión vigente del curso y se genera su PDF oficial. Si había otra vigente, pasa a «Reemplazada».${t.authorize ? ` También aprueba la tarea${deDocente}; solo faltará cerrarla.` : ""}`,
       requisitos: [{ id: "aprobada", titulo: "Programa aprobado", estado: "hecho", detalle: "Revisado y aprobado por coordinación." }],
       principal: { accion: "authorize", etiqueta: "Autorizar", habilitada: true },
     };
