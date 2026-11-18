@@ -1,223 +1,136 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Workflow docente | UDV</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión docente</title>
+  <meta name="description" content="Las tareas académicas de la Universidad Da Vinci de Guatemala, de la asignación a la aprobación, en un solo lugar.">
+  <link rel="icon" href="/udv-styles/udv-escudo.png">
   <link rel="stylesheet" href="/udv-styles/udv.css">
-  <style>
-    /* Página de inicio mantenida por el PM (README §4). Usa solo udv.css más estos ajustes. */
-    .portal { max-width: 1080px; margin: 0 auto; padding: 2rem 1rem 3rem; }
-    .portal__intro { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
-    .portal__intro h1 { font-size: 1.9rem; font-weight: 800; color: var(--udv-navy); line-height: 1.2; margin-bottom: .5rem; }
-    .portal__intro p { color: var(--udv-text-muted, #4B5563); max-width: 48ch; }
-    .sesion { background: var(--udv-bg-white); border: 1px solid #E5E7EB; border-top: 4px solid var(--udv-cyan);
-              border-radius: var(--udv-radius); padding: 1.25rem 1.5rem; box-shadow: var(--udv-shadow-sm); }
-    .sesion h2 { font-size: 1rem; font-weight: 700; color: var(--udv-navy); margin-bottom: .75rem; text-transform: uppercase; letter-spacing: .04em; }
-    .sesion label { display: block; font-size: .8rem; font-weight: 600; margin: .6rem 0 .25rem; }
-    .sesion .udv-input { width: 100%; }
-    .sesion__acciones { display: flex; gap: .75rem; align-items: center; margin-top: 1rem; }
-    .sesion__usuario { display: flex; flex-direction: column; gap: .35rem; }
-    .sesion__usuario strong { color: var(--udv-navy); }
-    .roles { display: flex; flex-wrap: wrap; gap: .35rem; }
-    .modulos { margin-top: 2.5rem; }
-    .modulos h2 { font-size: 1.15rem; font-weight: 700; color: var(--udv-navy); margin-bottom: 1rem; }
-    .modulo { display: flex; flex-direction: column; gap: .5rem; min-height: 11rem; position: relative; }
-    .modulo__grupo { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--udv-gold); }
-    .modulo__titulo { font-size: 1.05rem; font-weight: 700; color: var(--udv-navy); }
-    .modulo__desc { font-size: .88rem; color: var(--udv-text-muted, #4B5563); flex: 1; }
-    .modulo__enlaces { display: flex; flex-wrap: wrap; gap: .5rem; }
-    .modulo--bloqueado { opacity: .55; }
-    .modulo--bloqueado .modulo__enlaces { display: none; }
-    .nota { margin-top: 2rem; font-size: .85rem; color: var(--udv-text-muted, #4B5563); }
-    /* El outline de udv.css es para fondo azul; sobre tarjeta blanca va en azul marino. */
-    .portal .btn-udv-outline { color: var(--udv-navy); border-color: var(--udv-navy); }
-    .portal .btn-udv-outline:hover { background-color: var(--udv-navy); color: var(--udv-text-light); }
-    .oculto { display: none !important; }
-    @media (max-width: 820px) { .portal__intro, .udv-grid-3 { grid-template-columns: minmax(0, 1fr); } }
-  </style>
+  <link rel="stylesheet" href="/app/css/vinci.css">
 </head>
-<body>
-  <header class="udv-header">
-    <a class="udv-header__logo" href="/app/">
-      <span class="udv-header__logo-text">Universidad Da Vinci<span>Workflow docente</span></span>
+<body class="vinci vinci--blanco">
+
+<header class="l-barra">
+  <div class="l-in l-barra__in">
+    <a class="l-marca" href="/app/">
+      <img src="/udv-styles/udv-escudo.png" alt="Escudo de la Universidad Da Vinci de Guatemala">
+      <span class="l-marca__txt">
+        <span class="l-marca__nombre" data-app="nombre"></span>
+        <span class="l-marca__sub">Gestión docente</span>
+      </span>
     </a>
-    <nav class="udv-nav" id="nav-sesion"></nav>
-  </header>
+    <nav class="l-nav" aria-label="Secciones">
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#perfiles">Perfiles</a>
+      <a href="#incluye">Qué incluye</a>
+      <a class="l-nav__entrar" href="#acceso">Iniciar sesión</a>
+    </nav>
+  </div>
+</header>
 
-  <main class="portal">
-    <section class="portal__intro">
-      <div>
-        <h1>Sistema de workflow docente</h1>
-        <p>Gestión de tareas, entregas, programas de curso y auditoría para la coordinación académica. Inicia sesión con tu cuenta institucional para entrar a los módulos.</p>
-        <p id="estado-app" class="nota"></p>
-      </div>
-
-      <section class="sesion" aria-labelledby="titulo-sesion">
-        <h2 id="titulo-sesion">Iniciar sesión</h2>
-
-        <form id="form-login" autocomplete="on">
-          <label for="correo">Correo</label>
-          <input class="udv-input" id="correo" name="correo" type="email" required placeholder="usuario@udv.edu.gt">
-          <label for="password">Contraseña</label>
-          <input class="udv-input" id="password" name="password" type="password" required>
-          <div class="sesion__acciones">
-            <button class="btn-udv btn-udv-primary" type="submit" id="btn-entrar">Entrar</button>
-            <span id="login-error" class="udv-input-error-msg" role="alert"></span>
-          </div>
-        </form>
-
-        <div id="sesion-activa" class="sesion__usuario oculto">
-          <span>Sesión iniciada como</span>
-          <strong id="usuario-nombre"></strong>
-          <span id="usuario-correo" style="font-size:.85rem"></span>
-          <div class="roles" id="usuario-roles"></div>
-          <div class="sesion__acciones">
-            <button class="btn-udv btn-udv-outline" type="button" id="btn-salir">Cerrar sesión</button>
-          </div>
+<main>
+  <section class="l-hero">
+    <div class="l-in l-hero__in">
+      <div class="l-hero__texto">
+        <p class="l-hero__pre">Universidad Da Vinci de Guatemala · Facultad de Ingeniería</p>
+        <h1>Las tareas académicas, de la asignación a la aprobación.</h1>
+        <p class="l-hero__lead"><span data-app="nombre"></span> reúne en un solo lugar lo que la coordinación pide, lo que cada docente entrega y lo que se revisa y aprueba. Cada tarea muestra en qué paso va y qué falta para avanzar.</p>
+        <div class="l-flujo" aria-hidden="true">
+          <span class="l-flujo__paso l-flujo__paso--hecho">Asignada</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso l-flujo__paso--actual">En curso</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">Entregada</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">En revisión</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">Aprobada</span>
         </div>
-      </section>
-    </section>
+      </div>
 
-    <section class="modulos">
-      <h2>Módulos</h2>
-      <div class="udv-grid-3" id="lista-modulos">
-        <article class="udv-card-light modulo" data-roles="admin,coordinator,reviewer,teacher,authority,auditor">
-          <span class="modulo__grupo">Grupo 3</span>
-          <span class="modulo__titulo">Tareas y workflow</span>
-          <span class="modulo__desc">Crear, asignar y publicar tareas; seguir cada transición de estado.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g3/">Abrir</a></div>
+      <form id="acceso" class="l-login" aria-labelledby="t-acceso" novalidate>
+        <div class="l-login__cab">
+          <h2 id="t-acceso">Iniciar sesión</h2>
+          <p>Entra con tu cuenta institucional.</p>
+        </div>
+        <div id="login-aviso" aria-live="polite"></div>
+        <div class="v-campo">
+          <label for="correo">Correo</label>
+          <input id="correo" name="correo" type="email" placeholder="nombre@udv.edu.gt" autocomplete="username" required>
+        </div>
+        <div class="v-campo">
+          <label for="clave">Contraseña</label>
+          <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+        </div>
+        <button id="entrar" class="v-btn" type="submit">Entrar</button>
+        <p class="l-login__ayuda">¿No puedes entrar? Escribe a la administración del sistema para restablecer tu acceso.</p>
+      </form>
+    </div>
+  </section>
+
+  <section id="como-funciona" class="l-seccion">
+    <div class="l-in l-seccion__in">
+      <div class="l-seccion__cab">
+        <p class="l-pre">Cómo funciona</p>
+        <h2>Cuatro pasos, siempre a la vista</h2>
+        <p>Toda tarea recorre el mismo camino. En cada paso el sistema dice a quién le toca y qué necesita para pasar al siguiente.</p>
+      </div>
+      <ol class="l-pasos">
+        <li><span class="l-pre">Paso 1 · Coordinación</span><h3>Asignar</h3><p>Crea la tarea, elige a los docentes y fija la fecha límite. Al publicarla, a cada docente le llega su aviso.</p></li>
+        <li><span class="l-pre">Paso 2 · Docente</span><h3>Entregar</h3><p>Abre la tarea, ve lo que se le pide y lo completa: un archivo, una confirmación o el programa del curso, según el tipo.</p></li>
+        <li><span class="l-pre">Paso 3 · Coordinación</span><h3>Revisar</h3><p>Lee la entrega y sus archivos. Si falta algo, la devuelve con una observación y el docente la corrige sobre la misma tarea.</p></li>
+        <li class="l-pasos__ultimo"><span class="l-pre">Paso 4 · Coordinación</span><h3>Aprobar</h3><p>Aprueba y cierra. Queda el historial completo: quién hizo qué y cuándo, con cada versión de lo entregado.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="perfiles" class="l-seccion l-seccion--gris">
+    <div class="l-in l-seccion__in">
+      <div class="l-seccion__cab">
+        <p class="l-pre">Perfiles</p>
+        <h2>Cada quien entra a lo suyo</h2>
+      </div>
+      <div class="l-perfiles">
+        <article>
+          <h3>Docente</h3>
+          <p>Ve sus tareas ordenadas por lo que urge, entrega y atiende las devoluciones.</p>
+          <ul><li>Mis tareas, con vencidas y por vencer</li><li>Programa de curso y sus versiones anteriores</li><li>Avisos cuando algo cambia</li></ul>
         </article>
-        <article class="udv-card-light modulo" data-roles="admin,coordinator,reviewer,teacher,auditor">
-          <span class="modulo__grupo">Grupo 4</span>
-          <span class="modulo__titulo">Bandeja de entregas</span>
-          <span class="modulo__desc">Lo que cada docente tiene pendiente, con prioridad y fecha límite, y la entrega de evidencias.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g4/inbox.html">Abrir</a></div>
+        <article>
+          <h3>Coordinación</h3>
+          <p>Crea y publica tareas, revisa las entregas, aprueba y autoriza los programas.</p>
+          <ul><li>Nueva tarea en cuatro pasos</li><li>Por revisar, con lo más antiguo primero</li><li>Avance por docente y cumplimiento</li></ul>
         </article>
-        <article class="udv-card-light modulo" data-roles="admin,coordinator,reviewer">
-          <span class="modulo__grupo">Grupo 4</span>
-          <span class="modulo__titulo">Bandeja de revisión</span>
-          <span class="modulo__desc">Entregas que te toca revisar: primero las que ya tomaste, luego las que llevan más tiempo esperando.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g4/revision.html">Abrir</a></div>
-        </article>
-        <article class="udv-card-light modulo" data-roles="admin,coordinator,reviewer,teacher,authority,auditor">
-          <span class="modulo__grupo">Grupo 5</span>
-          <span class="modulo__titulo">Programas de curso</span>
-          <span class="modulo__desc">Versiones del programa, revisión, autorización y PDF oficial.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g5/Programa.html">Abrir</a></div>
-        </article>
-        <article class="udv-card-light modulo" data-roles="admin,coordinator,authority,auditor">
-          <span class="modulo__grupo">Grupo 6</span>
-          <span class="modulo__titulo">Panel de seguimiento</span>
-          <span class="modulo__desc">Indicadores de avance por sede, docente y tipo de tarea; vencimientos próximos.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g6/panel.html">Abrir</a></div>
-        </article>
-        <article class="udv-card-light modulo" data-roles="admin,coordinator">
-          <span class="modulo__grupo">Grupo 6</span>
-          <span class="modulo__titulo">Catálogos</span>
-          <span class="modulo__desc">Sedes, unidades, cursos, periodos y tipos de tarea.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g6/catalogos.html">Abrir</a></div>
-        </article>
-        <article class="udv-card-light modulo" data-roles="admin,auditor">
-          <span class="modulo__grupo">Grupo 6</span>
-          <span class="modulo__titulo">Auditoría</span>
-          <span class="modulo__desc">Quién hizo qué y cuándo: acciones del sistema y transiciones de tareas.</span>
-          <div class="modulo__enlaces"><a class="btn-udv btn-udv-outline" href="/app/g6/auditoria.html">Abrir</a></div>
+        <article>
+          <h3>Administración</h3>
+          <p>Mantiene usuarios y catálogos, y consulta la auditoría sin modificar nada.</p>
+          <ul><li>Usuarios y roles</li><li>Sedes, cursos y períodos</li><li>Registro de cada acción</li></ul>
         </article>
       </div>
-      <p class="nota">Los módulos atenuados no están disponibles para tu rol. Documentación de la API: <a href="/api/v1/docs">/api/v1/docs</a>.</p>
-    </section>
-  </main>
+    </div>
+  </section>
 
-  <script>
-    // Misma convención que G4 y G6: el token vive en esta pestaña bajo "udv_token"
-    // y se manda como "Authorization: Bearer <token>" (login de G2).
-    (function () {
-      "use strict";
-      const API = "/api/v1";
-      const CLAVE_TOKEN = "udv_token";
-      const $ = (s) => document.querySelector(s);
+  <section id="incluye" class="l-seccion">
+    <div class="l-in l-incluye">
+      <div class="l-incluye__cab">
+        <p class="l-pre">Qué incluye</p>
+        <h2>Todo el recorrido en una sola aplicación</h2>
+      </div>
+      <div class="l-incluye__grid">
+        <div><h3>Tareas y entregas</h3><p>Estados claros, archivos por intento y devoluciones con observación.</p></div>
+        <div><h3>Programas de curso</h3><p>Por unidad y módulo, con versiones, cambios entre una y otra y PDF oficial.</p></div>
+        <div><h3>Notificaciones</h3><p>Aviso al asignar, entregar, devolver y aprobar, y antes de cada vencimiento.</p></div>
+        <div><h3>Panel de cumplimiento</h3><p>Tareas por estado, vencidas, próximas a vencer y avance por docente.</p></div>
+        <div><h3>Auditoría</h3><p>Cada acción queda registrada con su autor, fecha y cambio.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
 
-      function leerToken() { try { return sessionStorage.getItem(CLAVE_TOKEN); } catch { return null; } }
-      function guardarToken(t) { try { sessionStorage.setItem(CLAVE_TOKEN, t); } catch {} }
-      function borrarToken() { try { sessionStorage.removeItem(CLAVE_TOKEN); } catch {} }
+<footer class="l-pie">
+  <div class="l-in l-pie__in">
+    <img src="/udv-styles/udv-facultad.png" alt="Facultad de Ingeniería, Universidad Da Vinci de Guatemala">
+    <p><span data-app="nombre"></span> · Gestión docente<br>Universidad Da Vinci de Guatemala · <span data-app="anio"></span></p>
+  </div>
+</footer>
 
-      async function llamar(ruta, opciones = {}) {
-        const cab = Object.assign({ "Content-Type": "application/json" }, opciones.headers || {});
-        const token = leerToken();
-        if (token) cab["Authorization"] = "Bearer " + token;
-        const r = await fetch(API + ruta, Object.assign({}, opciones, { headers: cab }));
-        let cuerpo = null;
-        try { cuerpo = await r.json(); } catch {}
-        return { ok: r.ok, status: r.status, cuerpo };
-      }
-
-      function mostrarSesion(usuario) {
-        const roles = (usuario.roles || []).map((r) => (typeof r === "string" ? r : r.codigo || r.code || "")).filter(Boolean);
-        $("#form-login").classList.add("oculto");
-        $("#sesion-activa").classList.remove("oculto");
-        $("#titulo-sesion").textContent = "Sesión";
-        $("#usuario-nombre").textContent = [usuario.nombres, usuario.apellidos].filter(Boolean).join(" ") || usuario.correo || "";
-        $("#usuario-correo").textContent = usuario.correo || "";
-        // Texto siempre con textContent: el nombre y los roles vienen de la base y nunca se interpretan como HTML.
-        const caja = $("#usuario-roles"); caja.replaceChildren();
-        roles.forEach((r) => { const s = document.createElement("span"); s.className = "udv-badge badge-assigned"; s.textContent = r; caja.appendChild(s); });
-        const nav = document.createElement("span"); nav.style.cssText = "color:rgba(255,255,255,.85);font-size:.85rem"; nav.textContent = $("#usuario-nombre").textContent;
-        $("#nav-sesion").replaceChildren(nav);
-        document.querySelectorAll(".modulo").forEach((m) => {
-          const permitidos = (m.dataset.roles || "").split(",");
-          const puede = roles.some((r) => permitidos.includes(r));
-          m.classList.toggle("modulo--bloqueado", !puede);
-        });
-      }
-
-      function mostrarSinSesion() {
-        $("#form-login").classList.remove("oculto");
-        $("#sesion-activa").classList.add("oculto");
-        $("#titulo-sesion").textContent = "Iniciar sesión";
-        $("#nav-sesion").replaceChildren();
-        document.querySelectorAll(".modulo").forEach((m) => m.classList.add("modulo--bloqueado"));
-      }
-
-      async function cargarUsuario() {
-        if (!leerToken()) { mostrarSinSesion(); return; }
-        const r = await llamar("/me");
-        if (r.ok && r.cuerpo) { mostrarSesion(r.cuerpo.usuario || r.cuerpo); }
-        else { borrarToken(); mostrarSinSesion(); }
-      }
-
-      $("#form-login").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const err = $("#login-error"); err.textContent = "";
-        $("#btn-entrar").disabled = true;
-        try {
-          const r = await llamar("/auth/login", { method: "POST", body: JSON.stringify({ correo: $("#correo").value.trim(), password: $("#password").value }) });
-          if (r.ok && r.cuerpo && r.cuerpo.access_token) {
-            guardarToken(r.cuerpo.access_token);
-            $("#password").value = "";
-            mostrarSesion(r.cuerpo.usuario || {});
-            cargarUsuario();
-          } else {
-            const m = r.cuerpo && r.cuerpo.error ? r.cuerpo.error.message : "No se pudo iniciar sesión.";
-            err.textContent = r.status === 429 ? "Cuenta bloqueada temporalmente por intentos fallidos." : m;
-          }
-        } catch { err.textContent = "No hay conexión con el servidor."; }
-        finally { $("#btn-entrar").disabled = false; }
-      });
-
-      $("#btn-salir").addEventListener("click", async () => {
-        // Revoca el token en el servidor (G2) antes de olvidarlo en el navegador.
-        try { await llamar("/auth/logout", { method: "POST" }); } catch {}
-        borrarToken(); mostrarSinSesion();
-      });
-
-      fetch("/health").then((r) => r.json()).then((h) => {
-        const n = (h.routers || []).length, p = Object.keys(h.pendientes || {}).length;
-        $("#estado-app").textContent = p ? `${n} módulos activos, ${p} pendientes.` : `${n} módulos activos.`;
-      }).catch(() => {});
-
-      cargarUsuario();
-    })();
-  </script>
+<script type="module" src="/app/js/paginas/landing.js"></script>
 </body>
 </html>
