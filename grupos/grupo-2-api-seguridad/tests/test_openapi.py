@@ -31,7 +31,7 @@ def test_me_ejemplo_coincide_con_la_respuesta_real_y_no_trae_fechas(client, head
 
 def test_descarga_de_archivos_documenta_la_regla_de_permisos():
     descripcion = _resp("/api/v1/files/{id}", "get")["200"]["description"]
-    for texto in ("dueño", "admin", "files.download", "docente"):
+    for texto in ("dueño", "admin", "revisor", "coordinación", "tarea", "auditoría"):
         assert texto in descripcion
 
 def test_422_usa_el_formato_comun_de_errores():

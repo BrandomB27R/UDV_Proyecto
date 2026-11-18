@@ -41,14 +41,15 @@ def _archivo(db, tmp_path, autor_id, eliminado=False):
     db.commit()
     return fila.id
 
-
 # ---------- 1 y 2: archivos ----------
 
-def test_revisor_descarga_la_evidencia_del_docente(client, db, sembrado, tmp_path):
+def test_revisor_no_descarga_un_archivo_sin_entrega(client, db, sembrado, tmp_path):
+    # regla del PM (17-nov): un archivo sin entrega vinculada solo lo descargan su dueño y el admin.
+    # El caso del revisor que si descarga (archivo de una entrega de su tarea) esta en test_seguridad_pm.py
     _usuario_con_rol(db, 5, "revisor@demo.udv.edu.gt", "reviewer", ["files.download"])
     archivo_id = _archivo(db, tmp_path, autor_id=2)
     headers = _login(client, "revisor@demo.udv.edu.gt", CLAVE)
-    assert client.get(f"/api/v1/files/{archivo_id}", headers=headers).status_code == 200
+    assert client.get(f"/api/v1/files/{archivo_id}", headers=headers).status_code == 403
 
 
 def test_docente_no_dueno_no_descarga(client, db, sembrado, tmp_path):
@@ -72,7 +73,6 @@ def test_tipo_no_permitido_dice_el_motivo(client, headers_admin):
                     headers=headers_admin)
     assert r.status_code == 400
     assert "PDF" in r.json()["error"]["message"]
-
 
 # ---------- 3 y 4: validacion con 422, nunca 500 ----------
 
@@ -100,3 +100,4 @@ def test_coordinacion_lee_usuarios(client, db, sembrado):
     assert client.get(URL, headers=headers).status_code == 200
     assert client.get(f"{URL}/1", headers=headers).status_code == 200
     assert client.post(URL, json=_cuerpo(), headers=headers).status_code == 403
+
