@@ -9,7 +9,7 @@ import { h, poner, icono, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
 import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso } from "../componentes.js";
 import { api } from "../api.js";
-import { requerirSesion, tieneRol } from "../sesion.js";
+import { requerirSesion } from "../sesion.js";
 import {
   leerVersion, leerPrograma, leerCambios, guardarSeccion, transicionVersion, descargarPdf,
   accionesDeVersion, perfilesDeEgreso,
@@ -422,7 +422,7 @@ function pintarSeccion(zona) {
 // ── Responsables (aparte; editable solo por coordinación) ────
 function bloqueResponsables() {
   const r = contenidoDe(st.v, "responsables") || {};
-  const puede = editable() && tieneRol(yo, "coordinator");
+  const puede = st.acciones.has("edit_responsibles");
   const d = (dt, dd) => h("div", {}, h("dt", {}, dt), h("dd", {}, dd || "—"));
   if (!puede) {
     return h("section", { class: "v-card", "aria-labelledby": "t-resp" },
