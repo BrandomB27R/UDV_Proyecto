@@ -5,7 +5,7 @@ import { montarBarra } from "../barra.js";
 import { tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
-import { sinAcceso, textoDeError } from "../componentes.js";
+import { sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
 import { requerirSesion, tieneRol } from "../sesion.js";
 import { opcionesEntidad, opcionesAccion, cambiosDe, accionMostrada, sobreQue, queCambio } from "../auditoria/legible.js";
 
@@ -119,7 +119,24 @@ async function buscar() {
       h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: buscar }, "Reintentar"));
     return;
   }
+  await nombrarTiposDeTarea(r.data || []);
   pintar(r);
+}
+
+/**
+ * La auditoría no trae entity_label de los tipos de tarea (solo lo pone el G6 para sus entidades):
+ * si una fila de tipo_tarea viene sin nombre, se busca en /task-types (una sola vez por página).
+ * Quien no administra tipos solo recibe los activos; los demás se quedan con «n.º».
+ */
+let nombresTipo = null;
+async function nombrarTiposDeTarea(filas) {
+  const sinNombre = filas.filter((x) => x.entity === "tipo_tarea" && !x.entity_label && x.entity_id != null);
+  if (!sinNombre.length) return;
+  if (!nombresTipo) {
+    const t = await todasLasPaginas(api, "/task-types?include_inactive=true").catch(() => ({ data: [] }));
+    nombresTipo = new Map((t.data || []).map((x) => [String(x.id), x.name]));
+  }
+  for (const x of sinNombre) x.entity_label = nombresTipo.get(String(x.entity_id)) || null;
 }
 
 function pintar(r) {

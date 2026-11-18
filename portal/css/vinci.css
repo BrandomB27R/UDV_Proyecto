@@ -902,7 +902,9 @@ body.d-pagina { display: flex; flex-direction: column; }
 .ct-buscar input { padding: 10px 12px; font-size: 14px; }
 .ct-campos { display: flex; flex-direction: column; gap: 14px; }
 .ct-campos .v-campo { gap: 4px; }
-.ct-campos input, .ct-campos select { width: 100%; }
+.ct-campos input, .ct-campos select, .ct-campos textarea { width: 100%; }
+.ct-numero { font-variant-numeric: tabular-nums; }
+.ct-campos select:disabled { color: var(--v-muted-2); background: var(--v-bg); cursor: not-allowed; }
 .ct-casilla { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer; }
 .ct-casilla input { width: 20px; height: 20px; accent-color: var(--v-navy); }
 .ct-codigo { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--v-ink); white-space: nowrap; }
