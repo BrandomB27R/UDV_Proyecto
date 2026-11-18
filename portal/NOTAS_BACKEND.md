@@ -4,7 +4,7 @@ Lo que la interfaz de `portal/` todavía necesita de la API y resuelve con rodeo
 Ninguno de estos cambios va en `pm/ui-unificada`: esta rama solo toca `portal/` y
 `grupos/udv-styles/`.
 
-## Ya resuelto con la API nueva (PR #47, #49, #52 y #53)
+## Ya resuelto con la API nueva (PR #47, #49, #52, #53, #55 y #56)
 
 Se quitaron los rodeos que dependían de esto:
 
@@ -27,6 +27,9 @@ Se quitaron los rodeos que dependían de esto:
   programa" desde la tarea), `viewer_actions` en la versión (los botones salen solo
   de ahí) y `GET /graduate-profiles` (selector de Perfil de egreso). `/changes`
   compara la primera versión de un período con la versión de la que se copió.
+- "Quitar" en cada archivo del intento abierto: `DELETE /assignments/{id}/files/{file_id}`
+  (PR #56). La lista se repinta con `files` de la respuesta, sin perder el mensaje;
+  tras entregar ya no aparece.
 
 ## Pendiente
 
@@ -43,7 +46,15 @@ la manda en `name`. Al descargar, el archivo se guarda con ese nombre.
 Lo correcto: columna `archivo.descripcion` (migración del G1) y devolverla en
 `files[].description` junto a `name`.
 
-### 2. `delivery` según lo que acepta `POST /files` (G4 y G2)
+### 2. Editar la descripción de un archivo ya subido (G4 y G1)
+
+"Quitar" ya funciona (ver arriba). Lo que sigue pendiente es editar en línea la
+descripción de un archivo, como en el mockup `vinci-entrega`: la descripción solo
+existe como nombre del archivo subido (§1). Hoy la pantalla la pide antes de elegir
+el archivo (opcional; si no se escribe, se usa el nombre del archivo) y, para
+cambiarla, el docente quita el archivo y lo vuelve a subir. Se resuelve junto con §1.
+
+### 3. `delivery` según lo que acepta `POST /files` (G4 y G2)
 
 `delivery.extensions` ya viene recortado a lo que acepta el G2 (PDF, JPG, PNG) y
 `not_accepted` dice el resto; la pantalla lo muestra así. Si el G2 amplía los tipos
@@ -51,26 +62,26 @@ Lo correcto: columna `archivo.descripcion` (migración del G1) y devolverla en
 
 ## Programas de curso (etapa 2)
 
-### 3. Contenidos por unidad y módulo (G5)
+### 4. Contenidos por unidad y módulo (G5)
 
 El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e ignora
 `unidad_padre_id`. La pantalla edita unidades (título y horas) con temas,
 reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
 `unidad_padre_id`.
 
-### 4. "Sin prerrequisitos" no se guarda (G5)
+### 5. "Sin prerrequisitos" no se guarda (G5)
 
 La sección se da por completa con al menos un curso o con la casilla "Sin
 prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
 navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
 
-### 5. `/changes` devuelve identificadores internos (G5)
+### 6. `/changes` devuelve identificadores internos (G5)
 
 Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
 contenido sea el mismo. La pantalla los filtra y muestra etiquetas legibles; lo
 correcto es que `/changes` compare solo el contenido.
 
-### 6. Versión enlazada a la tarea y lectura del docente (G4 y G5)
+### 7. Versión enlazada a la tarea y lectura del docente (G4 y G5)
 
 Si la tarea tiene `programa_version_id` (la de la semilla), el detalle de cada
 asignación trae esa misma versión aunque el docente no sea su responsable; ese
