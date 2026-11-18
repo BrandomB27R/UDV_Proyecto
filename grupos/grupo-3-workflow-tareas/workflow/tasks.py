@@ -80,6 +80,10 @@ _STATUS_SQL_MYSQL = {
     "published": "(t.estado_codigo NOT IN ('draft', 'cancelled') AND t.eliminado_en IS NULL)",
     "cancelled": "(t.estado_codigo = 'cancelled' OR t.eliminado_en IS NOT NULL)",
 }
+# Baja administrativa: una tarea ya publicada con eliminado_en (la aplicación solo da de baja
+# borradores; las publicadas las cancela por estado). Son datos retirados por administración,
+# por ejemplo pruebas, y no se listan en ninguna pestaña.
+_NOT_RETIRED_MYSQL = "NOT (t.eliminado_en IS NOT NULL AND t.estado_codigo <> 'draft')"
 _INTERNAL_KEYS = ("alcance", "sede_destino_id", "unidad_destino_id")
 _COURSE_KEYS = ("course_id", "course_code", "course_name", "period_id", "period_code",
                 "program_version_id", "created_by_name", "reviewer_name")
@@ -431,7 +435,7 @@ def get_task(conn, actor, task_id):
 
 def _list_tasks_mysql(conn, actor, status, page, page_size, include=()):
     roles = _roles(actor)
-    where, params = [], []
+    where, params = [_NOT_RETIRED_MYSQL], []
     if AUTHORITY not in roles:
         clauses = []
         if COORDINATOR in roles:

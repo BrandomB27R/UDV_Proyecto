@@ -882,3 +882,20 @@ def test_una_version_nueva_no_hereda_la_tarea_de_su_origen(c, s):
         assert r.json()["assignment_id"] is None
     else:   # ya hay un borrador abierto de ese período: la regla no aplica en esta corrida
         es_error_comun(r, 409)
+
+
+def test_una_tarea_retirada_por_administracion_no_sale_en_ninguna_lista(c, s):
+    import sqlalchemy as sa
+    _, asign = publicar(c, s, para=(DOC1,), tipo=4, revisor=COORD)
+    tarea_id = c.get(f"/api/v1/assignments/{asign[DOC1]}", headers=s["coordinacion"]).json()["task_id"]
+    borrador = _tarea(c, s).json()["id"]
+    assert c.post(f"/api/v1/tasks/{borrador}/cancel", headers=s["coordinacion"], json={}).status_code == 200
+    motor = sa.create_engine(os.environ["UDV_TEST_MYSQL_URL"])
+    with motor.begin() as con:
+        con.execute(sa.text("UPDATE tarea SET eliminado_en = UTC_TIMESTAMP(3), eliminado_por = 1 WHERE id = :i"), {"i": tarea_id})
+    def ids(estado):
+        return {x["id"] for x in c.get(f"/api/v1/tasks?status={estado}&per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert tarea_id not in ids("published") | ids("cancelled") | ids("draft")
+    assert tarea_id not in {x["id"] for x in c.get("/api/v1/tasks?per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert borrador in ids("cancelled")              # un borrador cancelado desde la aplicación sí sale
+    assert asign[DOC1] not in {x["id"] for x in _items(c.get("/api/v1/inbox", headers=s["docente1"]).json())}
