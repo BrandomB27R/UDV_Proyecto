@@ -13,13 +13,13 @@ const ROLES_PANEL = ["coordinator", "authority", "admin", "auditor"];
 export function secciones(yo) {
   const roles = yo.roles || [];
   const p = perfiles(roles);
-  const s = [];
+  // «Inicio» primero para todos los perfiles (se marca activo en inicio.html).
+  const s = [{ id: "inicio", texto: "Inicio", href: RUTAS.inicio }];
   if (puedeRevisar(yo)) s.push({ id: "por-revisar", texto: "Por revisar", href: RUTAS.porRevisar });
   if (roles.includes("coordinator")) s.push({ id: "tareas", texto: "Tareas", href: RUTAS.tareas });
   if (p.docente) s.push({ id: "mis-tareas", texto: "Mis tareas", href: RUTAS.misTareas });
   if (roles.some((r) => ROLES_PANEL.includes(r))) s.push({ id: "panel", texto: "Panel", href: RUTAS.panel });
   if (p.docente || p.coordinacion || p.administracion) s.push({ id: "programas", texto: "Programas de curso", href: RUTAS.programas });
-  if (!s.length) s.push({ id: "inicio", texto: "Inicio", href: RUTAS.inicio });
   return s;
 }
 
