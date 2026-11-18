@@ -17,7 +17,7 @@ export const etiquetaAccion = (a) => ACCIONES[a] || legible(a);
 // ── Entidades ───────────────────────────────────────────────
 const ENTIDADES = {
   usuario: "Usuario", auth: "Sesión", sesion_token: "Sesión", tarea: "Tarea",
-  tarea_destinatario: "Asignación", programa_version: "Versión de programa",
+  tarea_destinatario: "Asignación", programa_version: "Versión de programa", tipo_tarea: "Tipo de tarea",
 };
 export const etiquetaEntidad = (e) => ENTIDADES[e] || legible(e);
 // Para "La tarea dejó de listarse": artículo y pronombre de cada entidad.
@@ -40,7 +40,10 @@ const CAMPOS = {
   horas_clase_semanal: "Horas por semana", descripcion: "Descripción", prioridad: "Prioridad", resumen_cambios: "Resumen de cambios",
   docente_responsable_id: "Docente responsable", publicada_en: "Fecha de publicación", periodo_id: "Período",
   curso_id: "Curso", sede_id: "Sede", codigo: "Código",
+  modalidad_entrega: "Cómo se entrega", requiere_archivo: "Archivo obligatorio",
 };
+// Modalidad de entrega de un tipo de tarea (G1). Si exige archivo lo dice «Archivo obligatorio».
+const MODALIDAD_ENTREGA = { texto: "Solo texto", ambos: "Texto y archivo", archivo: "Archivo", formulario: "Formulario", programa: "Programa de curso" };
 // Nunca se muestran (valores enmascarados, hashes, contraseñas, tokens).
 const OCULTO = /contrasena|password|hash|token|secret|clave/i;
 const FECHA_HORA = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/;
@@ -60,7 +63,8 @@ export function valorLegible(entidad, campo, v, ctx = {}) {
   if (v === null || v === undefined || v === "") return "—";
   if (campo === "estado") return nombreEstado(entidad, v);
   if (campo === "prioridad") return PRIORIDADES[v] || legible(v);
-  if (typeof v === "boolean" || ((campo === "activo") && (v === 0 || v === 1))) return v ? "Sí" : "No";
+  if (typeof v === "boolean" || ((campo === "activo" || campo === "requiere_archivo") && (v === 0 || v === 1))) return v ? "Sí" : "No";
+  if (campo === "modalidad_entrega") return MODALIDAD_ENTREGA[v] || legible(v);
   if (CAMPOS_USUARIO.has(campo)) { const u = ctx.usuarios?.get(Number(v)); return u?.name || u?.email || `usuario n.º ${v}`; }
   if (campo === "fecha_limite") return fechaLarga(v);
   if (typeof v === "string" && FECHA_HORA.test(v)) return fechaCorta(v.replace(" ", "T"));

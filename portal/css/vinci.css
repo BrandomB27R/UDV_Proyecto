@@ -54,6 +54,8 @@ body.vinci--blanco { background: var(--v-white); }
 .vinci .v-nav a { font-size: 14px; font-weight: 600; color: var(--v-white); text-decoration: none; padding: 12px 18px; border-radius: var(--v-pill); }
 .vinci .v-nav a:hover { background: rgba(255,255,255,.1); color: var(--v-white); }
 .vinci .v-nav a[aria-current="page"] { font-weight: 700; color: var(--v-navy); background: var(--v-white); }
+.v-nav--compacta { gap: 4px; }
+.vinci .v-nav--compacta a { padding: 12px 12px; }
 .v-campana { position: relative; width: 44px; height: 44px; background: transparent; border: 1px solid var(--v-navy-line); border-radius: var(--v-pill); color: var(--v-white); cursor: pointer; display: flex; align-items: center; justify-content: center; font: inherit; }
 .v-campana:hover { background: rgba(255,255,255,.08); }
 .v-campana__n { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; background: var(--v-cyan); color: var(--v-navy); font-size: 12px; font-weight: 800; border-radius: var(--v-pill); display: flex; align-items: center; justify-content: center; }
@@ -77,9 +79,6 @@ body.vinci--blanco { background: var(--v-white); }
 .v-cols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 28px; }
 .v-cols__main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
 .v-cols__lado { flex: 1 1 320px; max-width: 420px; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
-.v-ruta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; color: var(--v-muted); }
-.v-ruta a { font-weight: 600; padding: 12px 0; }
-.v-ruta [aria-current] { font-weight: 600; color: var(--v-ink); }
 
 .v-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--v-gold); }
 .v-h1 { font-size: 34px; line-height: 1.15; font-weight: 800; color: var(--v-navy); letter-spacing: -0.01em; overflow-wrap: anywhere; }
@@ -484,7 +483,6 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-cab__in { max-width: 1200px; margin: 0 auto; padding: 14px 32px 16px; display: flex; flex-direction: column; gap: 12px; }
 .d-cab__fila { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; }
 .d-cab__titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
-.vinci a.d-volver { font-size: 13px; font-weight: 600; padding: 6px 0; }
 .d-cab__h1 { font-size: 22px; line-height: 1.2; font-weight: 800; color: var(--v-navy); letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .d-etiqueta { font-size: 12px; font-weight: 700; color: var(--v-navy); background: #E8EEF6; padding: 5px 10px; border-radius: var(--v-pill); white-space: nowrap; }
 .d-cab__meta { font-size: 13px; color: var(--v-muted-2); display: flex; flex-wrap: wrap; gap: 2px 8px; }
@@ -894,3 +892,36 @@ body.d-pagina { display: flex; flex-direction: column; }
   .pn-fila--cerrar { border-left-width: 4px !important; border-left-color: #0B3D91 !important; }
   .pn-fila--terminada { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
 }
+
+/* ══ Catálogos (solo administración): lista a la izquierda, formulario a la derecha ══ */
+.ct-cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 24px; align-items: start; }
+.ct-lista, .ct-form { padding: 22px 24px; gap: 16px; }
+.ct-form { scroll-margin-top: 96px; }   /* al pulsar «Editar», el título no queda bajo la barra fija */
+.ct-buscar { max-width: 360px; gap: 4px; }
+.ct-buscar label { font-size: 12px; color: var(--v-muted); }
+.ct-buscar input { padding: 10px 12px; font-size: 14px; }
+.ct-campos { display: flex; flex-direction: column; gap: 14px; }
+.ct-campos .v-campo { gap: 4px; }
+.ct-campos input, .ct-campos select, .ct-campos textarea { width: 100%; }
+.ct-numero { font-variant-numeric: tabular-nums; }
+.ct-campos select:disabled { color: var(--v-muted-2); background: var(--v-bg); cursor: not-allowed; }
+.ct-casilla { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer; }
+.ct-casilla input { width: 20px; height: 20px; accent-color: var(--v-navy); }
+.ct-codigo { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--v-ink); white-space: nowrap; }
+.ct-fila--editando td { background: #EEF3FB; }
+.ct-fila--editando td:first-child { border-left-color: var(--v-navy); }
+.vinci .ct-editar { font-size: 13px; font-weight: 700; padding: 10px 0; }
+@media (max-width: 900px) {
+  .ct-cuerpo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .ct-lista, .ct-form { padding: 18px 16px; }
+  .ct-buscar { max-width: none; }
+  .vinci .ct-form .v-acciones .v-btn { width: 100%; }
+}
+
+/* ══ Botón de regreso (componentes.js · botonVolver): igual en todas las páginas de detalle ══ */
+.v-volver { display: flex; justify-content: flex-start; }
+.vinci .v-volver__btn { min-height: 44px; padding: 10px 18px; }
+.vinci .v-volver .v-volver__btn { width: auto; flex: 0 0 auto; }   /* también en el teléfono: a la izquierda, no a todo el ancho */
+

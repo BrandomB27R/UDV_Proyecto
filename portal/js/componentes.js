@@ -43,6 +43,32 @@ export function marcaRequisito(estado) {
   return h("span", { class: `v-req__marca-txt v-req__marca-txt--${TEXTO_MARCA[estado] ? estado : "opcional"}` }, TEXTO_MARCA[estado] || TEXTO_MARCA.opcional);
 }
 
+/**
+ * Botón de regreso, igual en todas las páginas de detalle: con contorno, en su propia línea arriba
+ * del título. destino: {texto: "Mis tareas" | "la tarea" | …, href}. El texto queda «← Volver a …».
+ */
+export function botonVolver(destino) {
+  // «a Mis tareas», «a la tarea», «al inicio» (a + el = al).
+  const texto = destino.texto.startsWith("el ") ? `al ${destino.texto.slice(3)}` : `a ${destino.texto}`;
+  return h("div", { class: "v-volver" },
+    h("a", { class: "v-btn v-btn--sec v-btn--chico v-volver__btn", href: destino.href }, `← Volver ${texto}`));
+}
+
+/**
+ * De qué página de Vinci se llegó (document.referrer, mismo sitio), si es una de las conocidas.
+ * conocidas: {"/app/mis-tareas.html": "Mis tareas", "/app/tarea.html": "la tarea", …}.
+ * Devuelve {texto, href} con la URL completa de origen (conserva filtros y pestaña) o null.
+ */
+export function origenConocido(conocidas) {
+  try {
+    if (!document.referrer) return null;
+    const u = new URL(document.referrer);
+    if (u.origin !== location.origin || u.pathname === location.pathname) return null;
+    const texto = conocidas[u.pathname];
+    return texto ? { texto, href: `${u.pathname}${u.search}${u.hash}` } : null;
+  } catch { return null; }
+}
+
 /** Estado vacío: una frase y, si aplica, una acción. */
 export function vacio(frase, accion) {
   return h("div", { class: "v-vacio" },

@@ -17,9 +17,8 @@ export const RUTAS = {
   programas: "/app/programas.html",
   programa: (versionId, asignacionId) =>
     `/app/programa.html?version=${encodeURIComponent(versionId)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}`,
-  panelAdmin: "/app/g6/panel.html",
-  catalogos: "/app/g6/catalogos.html",
-  // Auditoría de Vinci (la del G6 sigue en /app/g6/auditoria.html, sin enlazar).
+  // Catálogos y auditoría de Vinci (las pantallas del G6 siguen en /app/g6/, sin enlazar).
+  catalogos: "/app/catalogos.html",
   auditoria: "/app/auditoria.html",
 };
 

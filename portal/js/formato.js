@@ -35,6 +35,18 @@ export const TIPOS = {
 };
 export const etiquetaTipo = (codigo) => TIPOS[codigo] || legible(codigo);
 
+/**
+ * Cómo se entrega un tipo de tarea (G3: delivery_mode + requires_evidence). Igual que flujo.js:
+ * si exige archivo, «Archivo obligatorio»; «formulario» sin archivo obligatorio se entrega con texto.
+ */
+export function formaDeEntrega(modo, requiereArchivo) {
+  if (modo === "programa") return "Programa de curso";
+  if (requiereArchivo || modo === "archivo") return "Archivo obligatorio";
+  if (modo === "texto" || modo === "formulario") return "Solo texto";
+  if (modo === "ambos") return "Texto y archivo opcional";
+  return legible(modo || "");
+}
+
 // ── Perfiles y roles ────────────────────────────────────────
 export const ROLES = {
   admin: "Administración", coordinator: "Coordinación", teacher: "Docente",

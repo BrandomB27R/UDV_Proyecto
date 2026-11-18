@@ -5,7 +5,7 @@ import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { PRIORIDADES, fechaLarga, hoyGuatemala, nombreCompleto, ROLES } from "../formato.js";
-import { todasLasPaginas, guardarAviso, sinAcceso, textoDeError } from "../componentes.js";
+import { todasLasPaginas, guardarAviso, sinAcceso, textoDeError, botonVolver } from "../componentes.js";
 import { requerirSesion } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
@@ -134,9 +134,7 @@ const botones = h("div", { class: "v-acciones v-acciones--form" });
 for (const ev of ["input", "change"]) cuerpo.addEventListener(ev, () => poner(zonaError));
 
 poner(raiz,
-  h("nav", { class: "v-ruta", "aria-label": "Ruta" },
-    h("a", { href: RUTAS.tareas }, "Tareas"), h("span", { "aria-hidden": "true" }, "/"),
-    h("span", { "aria-current": "page" }, tareaId ? "Editar borrador" : "Nueva tarea")),
+  botonVolver({ texto: "Tareas", href: RUTAS.tareas }),
   h("h1", { class: "v-h1" }, tareaId ? "Editar borrador" : "Nueva tarea"),
   h("section", { class: "v-card v-card--form", "aria-labelledby": "t-paso-form" }, indicador, zonaError, cuerpo, botones));
 pintar();

@@ -159,3 +159,28 @@ Propuesta: que las filas de `/review-queue` y `/inbox` traigan `approved_by_name
 `approved_at` y `closed_at` (y en la cola, `can_close` con la misma regla de
 `viewer_actions`). Con eso se quitan las consultas por fila y el tope de 20.
 
+## Tipos de tarea en Catálogos (18-nov)
+
+### 13. Nombre del tipo de tarea en la auditoría (G6)
+
+`GET /audit` trae `entity_label` para las entidades del G6, pero no para
+`tipo_tarea`. Las filas que solo cambian «Activo» llegaban sin nombre y se veían
+como «Tipo de tarea · n.º 7». La pantalla de Auditoría lo resuelve hoy pidiendo
+`GET /task-types?include_inactive=true` (una vez por página, solo si hay filas de
+tipos sin nombre). Auditoría (rol auditor) solo recibe los tipos activos, así que
+un tipo desactivado le sigue saliendo con «n.º».
+
+Propuesta: que el G6 ponga `entity_label` = `tipo_tarea.nombre` en esas filas.
+Con eso se quita la consulta de la pantalla.
+
+### 14. Mensajes de validación con el nombre del campo en inglés (G3)
+
+Los 422 de `POST` y `PATCH /task-types` dicen el campo con su nombre de la API:
+«name es obligatorio», «name admite hasta 100 caracteres», «description admite
+hasta 300 caracteres», «delivery inválido». La pantalla los muestra tal cual junto
+al campo.
+
+Propuesta: mensajes para quien usa la pantalla («El nombre es obligatorio.»,
+«Usa hasta 100 caracteres.»), como los del G6. `details.field` sigue diciendo
+qué campo es.
+
