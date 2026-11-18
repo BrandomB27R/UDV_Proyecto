@@ -807,3 +807,11 @@ body.d-pagina { display: flex; flex-direction: column; }
   .au-flecha { display: none; }
   .au-antes::after { content: " →"; text-decoration: none; display: inline-block; margin-left: 4px; }
 }
+
+/* Inicio de dirección: «Por autorizar» y sus filas en verde (el de «Aprobada»/«Autorizada») */
+.v-indicador--autorizar { border-left: 5px solid #0E6B3A; }
+.v-indicador--autorizar .v-indicador__titulo { color: #0E6B3A; }
+.pn-fila--autorizar td:first-child { border-left-color: #0E6B3A; }
+@media (max-width: 720px) {
+  .pn-fila--autorizar { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
+}

@@ -3,10 +3,12 @@
 //   /review-queue  revisión, coordinación y administración (G4)
 //   /dashboard     coordinación, dirección, administración y auditoría (G6)
 //   /tasks         coordinación, revisión y dirección (G3)
+//   /course-programs?estado=approved  dirección (autoriza los programas; G5 lo deja leer a todos)
 import { api } from "../api.js";
 import { RUTAS } from "../config.js";
 import { h } from "../dom.js";
 import { chipEstado, etiquetaTipo, fechaLimiteCorta, haceCuando, diasDesde, diasHasta } from "../formato.js";
+import { etiquetaEstadoPrograma, claseEstadoPrograma } from "../programa/flujo-programa.js";
 import { indicador, vacio, todasLasPaginas } from "../componentes.js";
 import { tieneRol, puedeRevisar } from "../sesion.js";
 import { puedeVerPanel } from "../barra.js";
@@ -18,17 +20,20 @@ const DIAS_ENTREGA_VIEJA = 7;
 
 /** Qué puede leer quien mira (por roles, antes de pedir nada). */
 export function lecturasDe(yo) {
-  return { cola: puedeRevisar(yo), panel: puedeVerPanel(yo), tareas: tieneRol(yo, "coordinator", "reviewer", "authority") };
+  return { cola: puedeRevisar(yo), panel: puedeVerPanel(yo), tareas: tieneRol(yo, "coordinator", "reviewer", "authority"), autoriza: tieneRol(yo, "authority") };
 }
 
 /** {titulo, contadores, bloques, accion} de coordinación, revisión o dirección. */
 export async function inicioCoordinacion(yo) {
   const lee = lecturasDe(yo);
-  const [cola, panel, tareas, tipos] = await Promise.all([
+  // Dirección sin coordinación: su inicio es autorizar y el cumplimiento (no la lista de tareas).
+  const soloDireccion = lee.autoriza && !lee.cola;
+  const [cola, panel, tareas, tipos, porAutorizar] = await Promise.all([
     lee.cola ? todasLasPaginas(api, "/review-queue") : null,
     lee.panel ? api(`/dashboard?limit=${MAX_SEGUIMIENTO}`) : null,
     lee.tareas ? todasLasPaginas(api, "/tasks?include=progress") : null,
     lee.panel ? api("/task-types?per_page=100").catch(() => ({ data: [] })) : null,
+    lee.autoriza ? programasPorAutorizar() : null,
   ]);
 
   // Solo lo que le toca a quien mira (mine): primero las que ya tomó, luego la entrega más antigua.
@@ -39,20 +44,30 @@ export async function inicioCoordinacion(yo) {
   const vencidas = Number(panel?.overdue?.total) || 0;
   const porVencer = Number(panel?.due_soon?.total) || 0;
 
+  const nAutorizar = porAutorizar?.length || 0;
   let titulo;
-  if (lee.cola) titulo = mias.length ? `Tienes ${plural(mias.length, "entrega por revisar", "entregas por revisar")}.` : "No tienes entregas por revisar.";
+  if (soloDireccion && nAutorizar) titulo = `Tienes ${plural(nAutorizar, "programa por autorizar", "programas por autorizar")}.`;
+  else if (lee.cola) titulo = mias.length ? `Tienes ${plural(mias.length, "entrega por revisar", "entregas por revisar")}.` : "No tienes entregas por revisar.";
   else if (lee.panel) titulo = vencidas || porVencer
     ? `Hay ${plural(vencidas, "tarea vencida", "tareas vencidas")} y ${porVencer} por vencer.` : "No hay tareas vencidas ni por vencer.";
   else titulo = "No tienes nada pendiente por hoy.";
 
   const contadores = [];
+  if (soloDireccion) contadores.push(indicador("Por autorizar", nAutorizar, "Programas ya aprobados", "autorizar"));
   if (lee.cola) contadores.push(indicador("Por revisar", mias.length,
     tomadas ? `${tomadas} ${tomadas === 1 ? "ya la tomaste" : "ya las tomaste"}` : "Ninguna tomada todavía", "revisar"));
   if (lee.panel) {
     contadores.push(indicador("Vencidas", vencidas, "Docentes con la fecha pasada", "alerta"));
     contadores.push(indicador("Por vencer", porVencer, `En los próximos ${panel.due_soon_days ?? 3} días`, "aviso"));
   }
-  if (lee.tareas) {
+  if (soloDireccion && panel) {
+    const c = panel.compliance || {};
+    const pct = c.percentage == null ? null : Number(c.percentage);
+    contadores.push(indicador("Cumplimiento", pct == null ? "—" : `${pct.toLocaleString("es-GT", { maximumFractionDigits: 0 })} %`,
+      c.expected ? `${c.completed} de ${c.expected} asignaciones entregadas` : "Todavía no hay asignaciones"));
+  }
+  // Dirección usa /tasks solo para el tipo y el curso del seguimiento; su contador es Cumplimiento.
+  if (tareas && !soloDireccion) {
     const lista = tareas.data || [];
     const publicadas = lista.filter((t) => t.status === "published");
     const terminadas = publicadas.filter((t) => Number(t.progress?.total) > 0 && Number(t.progress?.done) === Number(t.progress?.total)).length;
@@ -63,8 +78,10 @@ export async function inicioCoordinacion(yo) {
 
   const nombresTipo = new Map((tipos?.data || []).map((t) => [t.id, t.name]));
   const tareasPorId = new Map((tareas?.data || []).map((t) => [t.id, t]));
+  // «Te toca autorizar» va antes del seguimiento; con coordinación, debajo de «Te toca revisar» y solo si hay.
   const bloques = [
     lee.cola ? tablaPorRevisar(mias, (cola?.data || []).length) : null,
+    porAutorizar && (soloDireccion || nAutorizar) ? tablaPorAutorizar(porAutorizar) : null,
     lee.panel ? tablaSeguimiento(panel, tareasPorId, nombresTipo) : null,
   ];
   const accion = tieneRol(yo, "coordinator") ? h("a", { class: "v-btn", href: RUTAS.nuevaTarea }, "Nueva tarea") : null;
@@ -103,6 +120,47 @@ function tablaPorRevisar(filas, totalCola) {
       : vacio("No tienes entregas por revisar. Las nuevas aparecerán aquí."),
     otras > 0 ? h("p", { class: "ini-pie" }, h("a", { href: RUTAS.porRevisar }, "Ver todo lo pendiente de revisar"),
       ` · incluye ${plural(otras, "entrega de otros revisores", "entregas de otros revisores")}`) : null);
+}
+
+/**
+ * Versiones aprobadas que falta autorizar. La lista (/course-programs) no trae quién elaboró: se lee del
+ * detalle de cada versión aprobada (responsables.docente; son pocas). Quién aprobó y cuándo no lo da la API
+ * de forma fiable (responsables.revisor puede venir copiado de la versión de origen): la columna «Aprobó»
+ * aparece cuando la lista traiga aprobado_por y aprobado_en (NOTAS_BACKEND §10).
+ */
+async function programasPorAutorizar() {
+  const r = await todasLasPaginas(api, "/course-programs?estado=approved");
+  const filas = (r.data || []).filter((x) => x.estado === "approved" && x.programa_version_id);
+  return Promise.all(filas.map(async (x) => {
+    const v = await api(`/program-versions/${encodeURIComponent(x.programa_version_id)}`).catch(() => null);
+    const resp = v?.secciones?.responsables?.contenido || {};
+    return { ...x, elaboro: x.docente_responsable || resp.docente || null, aprobo: x.aprobado_por || null, aprobadoEn: x.aprobado_en || null };
+  }));
+}
+
+function tablaPorAutorizar(filas) {
+  const conAprobo = filas.some((x) => x.aprobo);
+  return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-autorizar" },
+    h("div", { class: "ini-cab" },
+      h("h2", { id: "t-autorizar", class: "v-h2" }, "Te toca autorizar"),
+      filas.length ? h("p", { class: "v-nota" }, "Programas aprobados por revisión. Al autorizarlos quedan como la versión vigente.") : null),
+    filas.length ? h("table", { class: "pn-tabla ini-tabla" },
+      h("caption", { class: "v-sr" }, "Programas aprobados por autorizar"),
+      h("thead", {}, h("tr", {}, ["Programa", "Elaboró", ...(conAprobo ? ["Aprobó"] : []), "Estado"].map((t) => h("th", { scope: "col" }, t)),
+        h("th", { scope: "col" }, h("span", { class: "v-sr" }, "Acción")))),
+      h("tbody", {}, filas.map((x) => {
+        const titulo = `${x.codigo} · ${x.asignatura}`;
+        return h("tr", { class: "pn-fila pn-fila--autorizar" },
+          h("td", { "data-etiqueta": "Programa" }, h("div", { class: "pn-tarea" },
+            h("a", { href: RUTAS.programa(x.programa_version_id) }, titulo),
+            h("span", {}, [`Versión ${x.numero_version}`, x.periodo, x.sede].filter(Boolean).join(" · ")))),
+          h("td", { "data-etiqueta": "Elaboró" }, h("strong", {}, x.elaboro || "—")),
+          conAprobo ? h("td", { "data-etiqueta": "Aprobó" }, h("div", { class: "pn-tarea" },
+            h("strong", {}, x.aprobo || "—"), x.aprobadoEn ? h("span", {}, haceCuando(x.aprobadoEn)) : null)) : null,
+          h("td", { "data-etiqueta": "Estado" }, h("span", { class: `v-chip v-chip--${claseEstadoPrograma(x.estado)}` }, etiquetaEstadoPrograma(x.estado))),
+          h("td", { class: "pn-accion ini-accion" }, h("a", { class: "v-btn v-btn--chico", href: RUTAS.programa(x.programa_version_id), "aria-label": `Revisar y autorizar: ${titulo}, versión ${x.numero_version}` }, "Revisar y autorizar")));
+      })))
+      : vacio("No hay programas por autorizar. Cuando revisión apruebe uno, aparecerá aquí."));
 }
 
 /** Vencidas (la más atrasada arriba) y por vencer del panel, hasta cinco. */

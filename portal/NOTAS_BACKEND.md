@@ -122,3 +122,17 @@ muestra `last_return_comment`, y «En espera de revisión» dice quién la tiene
   un parámetro `tz=America/Guatemala`.
 - `/audit/filters` da los usuarios solo con correo; con `name` el filtro «Usuario» y los
   campos como «Revisor» (hoy «revisor_id» se muestra con el correo) dirían el nombre.
+
+### 10. Programas por autorizar: quién elaboró y quién aprobó (G5)
+
+«Te toca autorizar» lista `GET /course-programs?estado=approved` y pide el detalle de
+cada versión aprobada solo para saber quién la elaboró (`responsables.docente`).
+
+- Propuesta: que cada fila de `/course-programs` traiga `docente_responsable`,
+  `aprobado_por` y `aprobado_en` (de `programa_aprobacion`). Con eso se quitan las
+  consultas por fila y aparece la columna «Aprobó» (nombre y hace cuánto), que hoy
+  no se muestra.
+- Defecto: en `responsables` del detalle, lo guardado en la metadata del G5 (copiada
+  de la versión de origen) pisa al revisor real (`revisor_id`). Ejemplo: la versión 4
+  la tomó y aprobó Carlos Coordinador y `responsables.revisor` dice «Rosa Revisora».
+  Por eso la pantalla no lo usa como «Aprobó».
