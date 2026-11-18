@@ -20,7 +20,6 @@ router = APIRouter(
     tags=["Files"]
 )
 
-
 MAX_SIZE = 5 * 1024 * 1024  # 5 MB
 
 # Definir los tipos de archivos permitidos y sus extensiones correspondientes
@@ -116,9 +115,6 @@ async def verificar_archivo(file: UploadFile = File(...),
         "file_id": nuevo_archivo.id,
         "nombre_interno": nombre_interno
     }
-    
-
-
 
 # Tarea a la que pertenece un archivo: archivo -> entrega -> tarea_destinatario -> tarea (tablas del G1).
 # Devuelve quien creo la tarea y el revisor designado (el del destinatario o, si no tiene, el de la tarea).
@@ -131,27 +127,26 @@ _SQL_TAREA_DE_LA_ENTREGA = text(
     "WHERE e.id = :entrega_id AND t.eliminado_en IS NULL"
 )
 
-
 # Regla de descarga que decidio el PM (17-nov):
 #  - dueño del archivo y admin: pueden siempre.
-#  - auditoria: cualquier archivo ya vinculado a una entrega, un comentario o una version de programa.
+#  - auditoria: Cualquier archivo ya vinculado a una entrega, un comentario o una version de programa.
 #  - revisor: solo si el archivo es de una entrega de una tarea donde es el revisor designado
 #    (si la tarea no tiene revisor designado, la revisa la coordinacion que la creo o un admin).
-#  - coordinacion: solo si el archivo es de una entrega de una tarea que el creo.
+#  - coordinacion: Solo si el archivo es de una entrega de una tarea que el creo.
 #  - un archivo todavia suelto (sin vincular) solo lo descargan su dueño y el admin.
 #  - docente ajeno, autoridad y cualquiera sin el permiso files.download: 403.
-def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo) -> bool:
+def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo):
     if registro.autor_id == usuario.id:
         return True
     roles = {rol.codigo for rol in usuario.roles}
     if "admin" in roles:
         return True
-    # fuera del dueño y el admin, hace falta el permiso files.download (matriz del Grupo 1)
+    # fuera del dueño y el admin, hace falta el permiso files.download (matriz del Grupo 1).
     if not any(p.codigo == "files.download" for rol in usuario.roles for p in rol.permisos):
         return False
     if "auditor" in roles:
         return any(v is not None for v in (registro.entrega_id, registro.comentario_id, registro.programa_version_id))
-    # revisor y coordinacion: se valida la tarea de la entrega; sin entrega vinculada no hay acceso
+    # revisor y coordinacion: se valida la tarea de la entrega; sin entrega vinculada no hay acces.o
     if registro.entrega_id is None or not roles & {"reviewer", "coordinator"}:
         return False
     fila = db.execute(_SQL_TAREA_DE_LA_ENTREGA, {"entrega_id": registro.entrega_id}).first()
@@ -160,10 +155,10 @@ def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo) -> bool:
     creador_id, revisor_id = fila
     if "coordinator" in roles and creador_id == usuario.id:
         return True
-    # revisor designado (sea revisor o coordinacion). Sin revisor designado no descarga cualquier revisor:
-    # esa tarea la revisa la coordinacion que la creo o un admin (decision B, revisada el 16-nov).
+    # Solo descarga el revisor designado, sea con rol de revisor o de coordinacion (decision B, revisada el 16-nov).
+    # Si la tarea no tiene revisor designado, revisor_id es None y esta comparacion da False:
+    # la revisa la coordinacion que la creo (el if de arriba) o un admin (ya paso antes).
     return revisor_id == usuario.id
-
 
 @router.get("/{id}")
 async def descargar_archivo(
