@@ -53,7 +53,7 @@ El archivo `.env` **nunca se sube** al repositorio. Se copia desde `.env.example
 | `CORS_ORIGINS` | Orígenes del frontend permitidos, separados por coma. |
 | `LOGIN_MAX_INTENTOS` | Intentos fallidos antes del bloqueo (5 intentos). |
 | `LOGIN_BLOQUEO_MINUTOS` | Minutos de bloqueo (15 minutos). |
-| `LOGIN_MAX_INTENTOS_IP` | Fallos de login permitidos desde una misma IP en esos minutos (20; `0` lo desactiva). Detrás de un proxy como Railway la IP que ve la API puede ser la del proxy: si ocurre, sube el valor o usa `0`. |
+| `LOGIN_MAX_INTENTOS_IP` | Fallos de login permitidos desde una misma IP en esos minutos (20 por defecto; `0` lo desactiva). **En Railway se deja en `0`** (decisión del PM): ahí la API ve la IP del proxy y 20 fallos de cualquier usuario bloquearían el login de todos. Úsalo con un valor mayor que 0 solo donde la IP del cliente sea la real. |
 | `CONTRASENA_MIN` / `CONTRASENA_MAX` | Largo de la contraseña (de 8 a 64 caracteres). |
 | `UPLOAD_DIR` | Carpeta donde se guardan los archivos subidos. En un servidor usa una ruta absoluta dentro de un volumen persistente. |
 
@@ -95,9 +95,9 @@ En `auditoria` solo se escriben a mano los eventos de acceso (login, login falli
 - Contraseñas solo con hash bcrypt; ninguna respuesta las devuelve.
 - Autorización en el servidor con `Authorization: Bearer <token>`.
 - Errores en el formato común, sin trazas, SQL ni rutas internas.
-- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado (cualquier revisor si la tarea no tiene uno) o que ellos crearon (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
+- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado o que ellos crearon (una tarea sin revisor designado la revisa la coordinación que la creó o un admin) (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
 - Subida de `/files`: se lee por bloques de 1 MB y se corta al pasar 5 MB, sin cargar el archivo entero en memoria.
-- Login: si el correo no existe se verifica igual una contraseña falsa (misma demora), el bloqueo de 5 intentos sigue respondiendo 429 y también se limita por IP (`LOGIN_MAX_INTENTOS_IP`).
+- Login: si el correo no existe se verifica igual una contraseña falsa (misma demora), el bloqueo de 5 intentos sigue respondiendo 429 y también se limita por IP (`LOGIN_MAX_INTENTOS_IP`; en Railway queda en `0`, desactivado).
 - Token: `verificar_token` exige `exp` y `sub`. Un admin no puede desactivarse ni quitarse su propio rol, y cambiar una contraseña cierra las sesiones abiertas de ese usuario.
 - Sin credenciales en el código: todo va en `.env`.
 
@@ -168,10 +168,10 @@ grupos/grupo-2-api-seguridad/
 
 | Persona | Cuenta de GitHub | Archivos |
 |-|-|-|
-| Daniel - Persona 1 (Coordinador) | `dancobs` | `routers/auth.py`, `seguridad.py`, `tests/test_auth.py`, `tests/test_hallazgos_pm.py`, `GUIA_GRUPO2.md` |
-| Randy - Persona 2 | `rtorresixcoy375` | `routers/users.py`, `routers/roles.py`, `middleware/auth_middleware.py`, `tests/test_users.py` |
-| Edgar - Persona 3 | `zeusgeo99-code` | `middleware/error_handler.py`, `utils/paginacion.py`, `utils/registro.py`, `tests/test_errores.py` |
-| Fulvio - Persona 4 | `Ful55` | `routers/files.py`, `frontend-login/`, `tests/test_file.py` |
-| Robert - Persona 5 | `Davids107` | `main.py`, `config.py`, `database.py`, `models.py`, `requirements.txt`, `.env.example`, `.gitignore`, `README.md`, `tests/conftest.py`, `tests/test_openapi.py`, `g2_api/openapi_docs.py` |
+| Daniel - Persona 1 (Coordinador) | `dancobs` | `g2_api/routers/auth.py`, `g2_api/seguridad.py`, `tests/test_auth.py`, `tests/test_hallazgos_pm.py`, `tests/test_seguridad_pm.py`, `GUIA_GRUPO2.md` |
+| Randy - Persona 2 | `rtorresixcoy375` | `g2_api/routers/users.py`, `g2_api/routers/roles.py`, `g2_api/middleware/auth_middleware.py`, `tests/test_users.py` |
+| Edgar - Persona 3 | `zeusgeo99-code` | `g2_api/middleware/error_handler.py`, `g2_api/utils/paginacion.py`, `g2_api/utils/registro.py`, `tests/test_errores.py` |
+| Fulvio - Persona 4 | `Ful55` | `g2_api/routers/files.py`, `frontend-login/imagen.webp`, `frontend-login/index.html`, `frontend-login/logo.webp`, `frontend-login/script.js`, `frontend-login/style.css`, `tests/test_file.py` |
+| Robert - Persona 5 | `Davids107` | `g2_api/main.py`, `g2_api/config.py`, `g2_api/database.py`, `g2_api/models.py`, `requirements.txt`, `.env.example`, `PENDIENTES_QA.md`, `.gitignore`, `README.md`, `tests/conftest.py`, `tests/test_seguridad_pm.py`, `tests/test_openapi.py`, `g2_api/openapi_docs.py` |
 | Jonathan Veras - PM | — | `CONTRATO.md`, `CONTRATO_COMUN.md`, los `.docx` de requerimientos y la raíz del repo |
 
