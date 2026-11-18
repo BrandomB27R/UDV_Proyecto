@@ -976,3 +976,34 @@ def test_programas_por_autorizar_dicen_quien_elaboro_y_quien_aprobo(c, s):
     assert fila["aprobado_por"] == "Carlos Coordinador" and fila["aprobado_en"]
     v = c.get(f"/api/v1/program-versions/{vid}", headers=s["direccion"]).json()
     assert v["secciones"]["responsables"]["contenido"]["revisor"] == "Carlos Coordinador"
+
+
+def test_tipo_de_tarea_se_renombra_se_desactiva_y_queda_en_auditoria(c, s):
+    nombre = f"Tipo temporal {uuid.uuid4().hex[:5]}"
+    tipo = c.post("/api/v1/task-types", headers=s["coordinacion"], json={"name": nombre, "delivery": "texto"}).json()
+    assert tipo["active"] == 1
+    url = f"/api/v1/task-types/{tipo['id']}"
+    es_error_comun(c.patch(url, headers=s["docente1"], json={"active": False}), 403)
+    es_error_comun(c.patch("/api/v1/task-types/999999", headers=s["coordinacion"], json={"active": False}), 404)
+    es_error_comun(c.patch(url, headers=s["coordinacion"], json={"name": "  "}), 422)
+    es_error_comun(c.patch(url, headers=s["coordinacion"], json={"name": "Entregar factura"}), 409)
+    es_error_comun(c.patch("/api/v1/task-types/1", headers=s["admin"], json={"active": False}), 409)
+
+    r = c.patch(url, headers=s["admin"], json={"name": nombre + " (v2)", "description": "Solo para pruebas"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == nombre + " (v2)" and r.json()["description"] == "Solo para pruebas"
+    assert c.patch(url, headers=s["coordinacion"], json={"active": False}).json()["active"] == 0
+
+    def ids(quien, extra=""):
+        return {t["id"] for t in _items(c.get(f"/api/v1/task-types?per_page=100{extra}", headers=s[quien]).json())}
+
+    assert tipo["id"] not in ids("coordinacion") and tipo["id"] not in ids("docente1")
+    assert tipo["id"] in ids("coordinacion", "&include_inactive=true")
+    assert tipo["id"] not in ids("docente1", "&include_inactive=true")   # solo quien los administra
+    es_error_comun(_tarea(c, s, type_id=tipo["id"]), 422)                # ya no se puede asignar
+
+    assert c.patch(url, headers=s["coordinacion"], json={"active": True}).json()["active"] == 1
+    assert tipo["id"] in ids("docente1")
+    registros = c.get("/api/v1/audit?entity=tipo_tarea&per_page=50", headers=s["auditoria"]).json()["data"]
+    propios = [d for d in registros if d["entity_id"] == tipo["id"]]
+    assert {d["action"] for d in propios} == {"insert", "update"} and len(propios) == 4
