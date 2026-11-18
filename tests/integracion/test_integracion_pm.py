@@ -684,11 +684,25 @@ def test_la_tarea_abre_el_borrador_del_programa_a_nombre_del_docente(c, s):
     es_error_comun(c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente1"]), 404)
 
 
-def test_la_tarea_sin_curso_o_sin_programa_previo_no_abre_borrador(c, s):
+def test_la_tarea_sin_curso_no_abre_borrador_y_el_primer_programa_se_abre_en_blanco(c, s):
     sin_curso = _asignar_programa(c, s)
     es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["docente2"]), 422)
+    # Curso sin programa autorizado: el docente abre el primero, en blanco y a su nombre.
     sin_programa = _asignar_programa(c, s, course_id=4, period_id=2)
-    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"]), 409)
+    r = c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"])
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"] is None
+    assert v["viewer_actions"] == ["edit", "submit"] and v["nombre"].endswith("2026-2")
+    assert c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"]).json()["id"] == v["id"]
+    r = c.put(f"/api/v1/program-versions/{v['id']}/sections/metodologia", headers=s["docente2"],
+              json={"contenido": {"texto": "Clases prácticas."}})
+    assert r.status_code == 200, r.text
+    assert c.get(f"/api/v1/assignments/{sin_programa}", headers=s["docente2"]).json()["program_version"]["id"] == v["id"]
+    # Otro docente con la misma tarea de ese curso abre su propio borrador en el mismo programa.
+    otra = _asignar_programa(c, s, docente=DOC1, course_id=4, period_id=2)
+    v2 = c.post(f"/api/v1/program-versions/for-assignment/{otra}", headers=s["docente1"]).json()
+    assert v2["id"] != v["id"] and v2["programa_id"] == v["programa_id"]
     es_error_comun(c.post("/api/v1/program-versions/for-assignment/999999", headers=s["docente2"]), 404)
     es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["auditoria"]), 403)
 
