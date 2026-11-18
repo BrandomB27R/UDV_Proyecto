@@ -414,7 +414,8 @@ function adjuntos() {
 }
 
 function filaArchivo(f, actual = false) {
-  const zona = h("span", { class: "d-archivo__error", role: "status" });
+  // Si Descargar o Quitar fallan, el aviso de error ocupa todo el ancho de la fila del archivo.
+  const zona = h("div", { class: "d-archivo__aviso" });
   const ext = extensionDe(f.name);
   const subido = aInstante(f.uploaded_at);
   return h("li", { class: `d-archivo${actual ? " d-archivo--actual" : ""}` },
@@ -422,34 +423,34 @@ function filaArchivo(f, actual = false) {
     h("div", { class: "d-archivo__info" },
       h("span", { class: "d-archivo__nombre" }, sinExtension(f.name)),
       h("span", { class: "d-archivo__dato", title: fechaHora(f.uploaded_at) },
-        [tamano(f.size), subido ? `subido ${actual ? "a las" : "el"} ${actual ? hora(subido) : fechaCorta(f.uploaded_at)}` : null].filter(Boolean).join(" · ")),
-      zona),
+        [tamano(f.size), subido ? `subido ${actual ? "a las" : "el"} ${actual ? hora(subido) : fechaCorta(f.uploaded_at)}` : null].filter(Boolean).join(" · "))),
     h("div", { class: "d-archivo__acciones" },
       h("button", { type: "button", class: "d-enlace", onclick: async (e) => {
         e.target.disabled = true;
-        zona.textContent = "";
-        try { await descargarArchivo(f.file_id, f.name); } catch (err) { zona.textContent = err.message; }
+        poner(zona);
+        try { await descargarArchivo(f.file_id, f.name); } catch (err) { poner(zona, mensaje("error", `No se pudo descargar: ${err.message}`)); }
         e.target.disabled = false;
       } }, "Descargar"),
       // Solo los archivos del intento que todavía no se envía se pueden quitar.
       actual && capacidades(st.a).editarEntrega
         ? h("button", { type: "button", class: "d-enlace d-enlace--quitar", "aria-label": `Quitar ${sinExtension(f.name)}`, onclick: (e) => quitarArchivo(f, e.target, zona) }, "Quitar")
-        : null));
+        : null),
+    zona);
 }
 
 /** DELETE /assignments/{id}/files/{file_id} → {status, files}: la lista se repinta con la respuesta. */
 async function quitarArchivo(f, boton, zona) {
   boton.disabled = true;
-  zona.textContent = "";
+  poner(zona);
   try {
     const r = await api(`/assignments/${st.a.id}/files/${encodeURIComponent(f.file_id)}`, { method: "DELETE" });
     st.a.files = Array.isArray(r?.files) ? r.files : (st.a.files || []).filter((x) => String(x.file_id) !== String(f.file_id));
     st.avisoArchivo = { tipo: "ok", texto: `Quitaste «${sinExtension(f.name)}».` };
     pintar();
   } catch (e) {
-    zona.textContent = e instanceof ApiError && e.status === 409 ? "Ese archivo ya se envió con la entrega; no se puede quitar."
+    poner(zona, mensaje("error", e instanceof ApiError && e.status === 409 ? "Ese archivo ya se envió con la entrega; no se puede quitar."
       : e instanceof ApiError && e.status === 404 ? "Ese archivo ya no está en la entrega. Recarga la página."
-        : e.message;
+        : `No se pudo quitar: ${e.message}`));
     boton.disabled = false;
   }
 }
@@ -466,16 +467,21 @@ function controlPrograma(r) {
       h("div", { class: "v-acciones" }, h("a", { class: "v-btn v-btn--sec v-btn--chico", href: RUTAS.programa(pv.id, st.a.id) },
         r.estado === "hecho" ? "Ver el programa" : "Continuar el programa")));
   }
-  const zona = h("span", { class: "v-req__detalle", role: "status" });
+  // Si falla, el aviso de error va pegado al botón (no como texto de ayuda): que se vea que algo pasó.
+  const zona = h("div", { class: "d-control__aviso" });
   const boton = h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: async () => {
-    boton.disabled = true; boton.textContent = "Abriendo…"; zona.textContent = "";
+    boton.disabled = true; boton.textContent = "Abriendo…"; poner(zona);
     try {
       const v = await abrirVersionDeAsignacion(st.a.id);
       location.assign(RUTAS.programa(v.id, st.a.id));
     } catch (e) {
-      // 422: la tarea no tiene curso y período; 409: no hay versión de la cual partir.
-      zona.textContent = e.message;
+      // 422: la tarea no indica curso y período (con vinci-6, un curso sin programa autorizado ya abre un borrador en blanco).
+      const texto = e instanceof ApiError && e.status === 422
+        ? `No se pudo abrir el programa: ${e.message.replace(/\.?$/, ".")} Pide a coordinación que indique el curso y el período en la tarea.`
+        : `No se pudo abrir el programa: ${e.message}`;
+      poner(zona, mensaje("error", texto));
       boton.disabled = false; boton.textContent = "Completar el programa";
+      boton.focus();
     }
   } }, "Completar el programa");
   return h("div", { class: "d-control" }, h("div", { class: "v-acciones" }, boton), zona);

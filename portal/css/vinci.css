@@ -604,3 +604,9 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-archivo__acciones { display: flex; align-items: center; gap: 4px 8px; }
 .d-enlace--quitar { color: #B42318; text-decoration: none; }
 .d-enlace--quitar:hover { text-decoration: underline; }
+
+/* Avisos de error junto a la acción que falló */
+.d-control__aviso:empty, .d-archivo__aviso:empty, .p-cabecera__aviso:empty { display: none; }
+.d-control__aviso .v-msg, .d-archivo__aviso .v-msg { margin-top: 2px; }
+.d-archivo__aviso { flex: 1 1 100%; }
+.p-cabecera__aviso { flex: 1 1 100%; }

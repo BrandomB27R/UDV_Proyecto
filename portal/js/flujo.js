@@ -147,7 +147,7 @@ export function pasoActual(a, yo, ctx = {}) {
       const av = ctx.programa?.avance;
       const listo = !!av && av.listas === av.total;
       req.push({ id: "programa", titulo: "Completar el programa del curso", obligatorio: true, estado: listo ? ETQ.hecho : ETQ.pendiente,
-        detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso."
+        detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso o, si todavía no tiene programa, de uno en blanco."
           : !av ? `Versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}.`
             : listo ? `Las ${av.total} secciones están listas (versión ${pv.number}).`
               : `${av.listas} de ${av.total} secciones listas. Faltan ${av.faltan.map((x) => x.titulo).join(", ")}.`,

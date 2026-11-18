@@ -130,7 +130,8 @@ function cabecera() {
   const v = st.v;
   const g = contenidoDe(v, "general");
   const pdf = ["authorized", "superseded"].includes(v.estado);
-  const zonaPdf = h("span", { class: "v-nota", role: "status" });
+  // Si el PDF falla, aviso de error destacado bajo los botones del encabezado.
+  const zonaPdf = h("div", { class: "p-cabecera__aviso" });
   const selector = h("select", { id: "selector-version", "aria-label": "Versión", onchange: (e) => {
     location.assign(`/app/programa.html?version=${encodeURIComponent(e.target.value)}${asignacionId ? `&asignacion=${encodeURIComponent(asignacionId)}` : ""}`);
   } }, st.versiones.map((x) => h("option", { value: String(x.id), selected: x.id === v.id },
@@ -148,9 +149,9 @@ function cabecera() {
       v.version_origen_id || st.versiones.length > 1 ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", "aria-expanded": String(st.verCambios),
         onclick: () => { st.verCambios = !st.verCambios; pintar(); } }, st.verCambios ? "Ocultar cambios" : "Ver cambios") : null,
       pdf ? h("button", { type: "button", class: "v-btn v-btn--chico", onclick: async (e) => {
-        e.target.disabled = true; zonaPdf.textContent = "";
+        e.target.disabled = true; poner(zonaPdf);
         try { await descargarPdf(v.id, `${g.codigo || "programa"}-version-${v.numero_version}.pdf`); }
-        catch (err) { zonaPdf.textContent = err.message; }
+        catch (err) { poner(zonaPdf, mensaje("error", `No se pudo descargar el PDF: ${err.message}`)); }
         e.target.disabled = false;
       } }, "Descargar PDF") : null,
       zonaPdf));
