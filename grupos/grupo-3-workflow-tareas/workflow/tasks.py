@@ -58,6 +58,8 @@ _TASK_COLS_MYSQL = (
     "      WHEN t.estado_codigo IN ('draft', 'cancelled') THEN t.estado_codigo"
     "      ELSE 'published' END AS status,"
     " t.creado_por AS created_by, NULL AS responsible_id, t.revisor_id AS reviewer_id,"
+    " CONCAT(cr.nombres, ' ', cr.apellidos) AS created_by_name,"
+    " CONCAT(rv.nombres, ' ', rv.apellidos) AS reviewer_name,"
     " t.publicada_en AS published_at,"
     " COALESCE(t.eliminado_en, CASE WHEN t.estado_codigo = 'cancelled'"
     "                              THEN t.actualizado_en END) AS cancelled_at,"
@@ -69,7 +71,9 @@ _TASK_COLS_MYSQL = (
     " t.alcance, t.sede_destino_id, t.unidad_destino_id, 'standard' AS flow")
 _TASK_FROM_MYSQL = ("FROM tarea t JOIN workflow w ON w.id = t.workflow_id"
                     " LEFT JOIN curso cu ON cu.id = t.curso_id"
-                    " LEFT JOIN periodo pe ON pe.id = t.periodo_id")
+                    " LEFT JOIN periodo pe ON pe.id = t.periodo_id"
+                    " LEFT JOIN usuario cr ON cr.id = t.creado_por"
+                    " LEFT JOIN usuario rv ON rv.id = t.revisor_id")
 
 _STATUS_SQL_MYSQL = {
     "draft": "(t.estado_codigo = 'draft' AND t.eliminado_en IS NULL)",
@@ -78,7 +82,7 @@ _STATUS_SQL_MYSQL = {
 }
 _INTERNAL_KEYS = ("alcance", "sede_destino_id", "unidad_destino_id")
 _COURSE_KEYS = ("course_id", "course_code", "course_name", "period_id", "period_code",
-                "program_version_id")
+                "program_version_id", "created_by_name", "reviewer_name")
 
 
 def _end_of_day(iso_date):
@@ -777,9 +781,10 @@ def get_history(conn, actor, assignment_id):
     mysql = _is_mysql(conn)
     if mysql:
         row = conn.execute(
+            # Mismos JOIN que _TASK_FROM_MYSQL: las columnas de la tarea leen curso, período y nombres.
             f"SELECT td.usuario_id AS assignee_id, {_TASK_COLS_MYSQL}"
-            f" FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id"
-            f" JOIN workflow w ON w.id = t.workflow_id WHERE td.id = ?",
+            f" {_TASK_FROM_MYSQL} JOIN tarea_destinatario td ON td.tarea_id = t.id"
+            f" WHERE td.id = ?",
             (assignment_id,)).fetchone()
     else:
         row = conn.execute(

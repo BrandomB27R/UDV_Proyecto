@@ -209,7 +209,7 @@ Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 ### Base de datos, entorno local y despliegue
 
 - **Una sola base:** `db_udv` en MySQL 8.4, con el esquema del G1 (versión
-  1.2.2). Ningún grupo crea, borra ni altera tablas desde su código (nada de
+  1.2.3). Ningún grupo crea, borra ni altera tablas desde su código (nada de
   `Base.metadata.create_all`); un cambio de esquema se le pide al G1, que lo
   entrega como migración numerada.
 - **Conexión:** siempre por la variable `DATABASE_URL`
@@ -292,3 +292,4 @@ tras revisión · **merge** = la integración aprobada.
 | 2026-10-13 | §5: motor MySQL 8 en lugar de SQLite; driver PyMySQL; despliegue con Docker en Railway; SQLAlchemy, PyMySQL y cryptography en versiones oficiales; prohibidos los rangos de versión; nueva sección de base de datos, entorno local y despliegue; prioridades y dueño de acciones de asignación quedan pendientes. §4: archivos nuevos de la raíz (`main.py`, Docker, `railway.json`, `requirements-base.txt`), regla de una sola app con `APIRouter` y ramas `qa/*` y `pm/*` documentadas | G1 montó el esquema en MySQL; el deploy en Railway fallaba porque `main` no tenía punto de entrada; G3, G4 y G5 levantaban cada uno su propia app y base; G3 y G4 usan prioridades distintas e implementan las mismas transiciones; QA se separó como equipo aparte y sus ramas no estaban documentadas |
 | 2026-11-17 | §2: el paquete del G3 es `workflow`; carpetas del PM. §4: `portal/`, `tests/integracion/` y `grupos/udv-styles/` en la raíz del PM; nueva sección "Interfaz" con las rutas de las pantallas. §5: quedan ✅ migraciones, prioridad (`urgent`), dueño de las acciones (G3), zona horaria (UTC), frontend y transporte de eventos; nueva tabla de decisiones de integración A–D; `python-dotenv` en versiones oficiales; base, entorno local y despliegue al día (MySQL 8.4, UTC, portal, cuentas de demostración, volumen, `/api/v1/health`, pruebas de integración). §6: mezclar `main` y correr las pruebas de integración antes del PR | El documento seguía como el 13-oct: marcaba pendientes seis decisiones ya tomadas y aplicadas, y no mencionaba el portal, las pantallas ni las pruebas de integración |
 | 2026-11-17 (noche) | §5: decisiones C y D en `main`; nueva decisión E (perfil de coordinación con tres roles); esquema 1.2.2 | Cierre de entregas de los grupos: el PM integra G2 y G5 y escribe la migración 1.2.2 que el G1 no entregó |
+| 2026-11-17 (noche, 2) | Esquema 1.2.3: el texto de una entrega se puede corregir mientras el intento no se haya enviado (cambia un trigger del G1; sin tablas nuevas) | El texto quedaba fijo al adjuntar el primer archivo y el docente no podía corregirlo antes de entregar |

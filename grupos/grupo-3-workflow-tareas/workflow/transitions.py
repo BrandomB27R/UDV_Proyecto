@@ -265,6 +265,29 @@ def _create_entrega(conn, assignment_id, actor_id):
         (assignment_id, actor_id, assignment_id, assignment_id, assignment_id))
 
 
+def _sync_entrega_with_draft(conn, entrega_id, assignment_id):
+    """Pone en el intento abierto el texto vigente del borrador, justo antes de enviarlo.
+
+    G4 crea la fila de `entrega` al vincular el primer archivo, con el texto de ese momento;
+    si el docente lo corrige después, aquí llega a la entrega. Hay que llamarla ANTES de
+    registrar la transición: el trigger de G1 (1.2.3) solo deja cambiar un intento no enviado.
+    Con una base anterior a 1.2.3 el trigger rechaza el cambio y la entrega conserva su texto.
+    """
+    try:
+        conn.execute(
+            "UPDATE entrega e JOIN entrega_borrador b"
+            "   ON b.tarea_destinatario_id = e.tarea_destinatario_id"
+            " SET e.contenido_texto = b.contenido_texto,"
+            "     e.programa_version_id = COALESCE(b.programa_version_id, e.programa_version_id)"
+            " WHERE e.id = ? AND e.tarea_destinatario_id = ?"
+            "   AND NOT (e.contenido_texto <=> b.contenido_texto"
+            "            AND e.programa_version_id <=> COALESCE(b.programa_version_id, e.programa_version_id))",
+            (entrega_id, assignment_id))
+    except Exception as exc:                       # base sin la migración 1.2.3
+        if "no se modifica" not in str(exc):
+            raise
+
+
 def perform(conn, assignment_id, action, actor, comment=None):
     """Ejecuta una acción sobre una asignación. Devuelve la asignación actualizada."""
     if action not in ACTIONS:
@@ -312,6 +335,9 @@ def perform(conn, assignment_id, action, actor, comment=None):
                     "Este tipo de tarea requiere adjuntar un archivo para entregar",
                     details={"field": "file"}
                 )
+
+        if entrega_id is not None:
+            _sync_entrega_with_draft(conn, entrega_id, assignment_id)
 
         now = utcnow()
         try:

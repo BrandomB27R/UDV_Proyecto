@@ -79,13 +79,17 @@ def _sesion(actor_id: Optional[int] = None):
 
 def fetch_asignaciones_inbox(usuario_id: Optional[int] = None) -> List[Asignacion]:
     sql = """
-        SELECT asignacion_id, usuario_id, tarea_id, titulo, tipo_codigo,
-               estado_codigo, prioridad, fecha_limite
-        FROM v_inbox
+        SELECT v.asignacion_id, v.usuario_id, v.tarea_id, v.titulo, v.tipo_codigo,
+               v.estado_codigo, v.prioridad, v.fecha_limite,
+               cu.codigo AS curso_codigo, cu.nombre AS curso_nombre, pe.codigo AS periodo_codigo
+        FROM v_inbox v
+        JOIN tarea t ON t.id = v.tarea_id
+        LEFT JOIN curso cu ON cu.id = t.curso_id
+        LEFT JOIN periodo pe ON pe.id = t.periodo_id
     """
     parametros = {}
     if usuario_id is not None:
-        sql += " WHERE usuario_id = :usuario_id"
+        sql += " WHERE v.usuario_id = :usuario_id"
         parametros["usuario_id"] = usuario_id
 
     sesion = _sesion()
@@ -106,6 +110,10 @@ def fetch_asignaciones_inbox(usuario_id: Optional[int] = None) -> List[Asignacio
             status=fila["estado_codigo"],
             priority=fila["prioridad"],
             due_at=due_at,
+            task_id=fila["tarea_id"],
+            course_code=fila["curso_codigo"],
+            course_name=fila["curso_nombre"],
+            period_code=fila["periodo_codigo"],
         ))
     return resultado
 
@@ -536,6 +544,7 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
                    t.id AS tarea_id, t.creado_por,
                    COALESCE(td.revisor_id, t.revisor_id) AS revisor_id,
                    CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
+                   cu.codigo AS curso_codigo, cu.nombre AS curso_nombre, pe.codigo AS periodo_codigo,
                    ult.id AS ultima_transicion_id, env.creado_en AS enviado_en,
                    (SELECT COUNT(*) FROM tarea_transicion x
                      WHERE x.tarea_destinatario_id = td.id AND x.estado_nuevo = 'submitted') AS envios,
@@ -547,6 +556,8 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id
             JOIN usuario u     ON u.id = td.usuario_id
             LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
+            LEFT JOIN curso cu ON cu.id = t.curso_id
+            LEFT JOIN periodo pe ON pe.id = t.periodo_id
             LEFT JOIN tarea_transicion ult ON ult.id = (
                 SELECT MAX(x.id) FROM tarea_transicion x WHERE x.tarea_destinatario_id = td.id)
             LEFT JOIN tarea_transicion env ON env.id = (
@@ -576,6 +587,9 @@ def fetch_cola_revision(usuario_id: int, roles) -> List[dict]:
             "reviewer_id": f["revisor_id"],
             "reviewer_name": f["revisor_nombre"],
             "created_by": f["creado_por"],
+            "course_code": f["curso_codigo"],
+            "course_name": f["curso_nombre"],
+            "period_code": f["periodo_codigo"],
             # Le toca a quien mira: es el revisor designado o, si la tarea no tiene, quien la creó.
             "mine": (f["revisor_id"] == usuario_id) if f["revisor_id"] is not None
                     else (f["creado_por"] == usuario_id),
