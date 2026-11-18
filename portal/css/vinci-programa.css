@@ -12,6 +12,9 @@
 .v-versiones { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; flex: 1 1 280px; justify-content: flex-end; }
 .vinci a.v-version-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--v-ink); text-decoration: none; padding: 6px 6px 6px 12px; border: 1px solid var(--v-line); border-radius: var(--v-pill); min-height: 40px; }
 .vinci a.v-version-chip:hover { border-color: var(--v-navy); }
+.v-programa-fila__versiones { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 1 1 280px; min-width: 0; }
+.v-programa-fila__versiones .v-versiones { flex: 0 1 auto; }
+.vinci a.v-programa-fila__mas { font-size: 13px; font-weight: 600; color: var(--v-navy); padding: 8px 4px; min-height: 40px; display: inline-flex; align-items: center; }
 
 /* ── Programa: encabezado fijo ───────────────────────────── */
 .p-cabecera { position: sticky; top: var(--alto-barra, 68px); z-index: 10; background: var(--v-bg); padding: 14px 0; margin-top: -14px; border-bottom: 1px solid var(--v-line); display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
@@ -23,6 +26,9 @@
 .p-cabecera__datos dd { font-size: 14px; font-weight: 700; }
 .p-cabecera__acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .p-selector select { padding: 8px 12px; font-size: 14px; min-height: 40px; }
+/* Autorizada en verde también en el selector (el de «Aprobada»); las demás opciones con el color normal. */
+.p-selector .p-opcion--autorizada { color: #0E6B3A; font-weight: 700; }
+.p-selector .p-opcion { color: var(--v-ink); font-weight: 400; }
 
 /* ── Editor: secciones a la izquierda ────────────────────── */
 .p-editor { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
@@ -84,6 +90,17 @@
 .v-unidad__titulo { font-weight: 700; color: var(--v-navy); }
 .v-url { overflow-wrap: anywhere; }
 
+/* Historial de versiones */
+.p-historial__cab { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.p-historial__cab h2:focus { outline: none; }
+.p-historial__marco { overflow-x: auto; }
+.p-historial__tabla td, .p-historial__tabla th { vertical-align: middle; }
+.p-historial__tabla tbody th { font-weight: 700; white-space: nowrap; }
+.p-historial__actual { background: #EEF2F7; }
+.p-historial__aqui { font-weight: 600; color: var(--v-muted-2); }
+.p-historial__acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; }
+.p-historial__tabla .v-enlace { padding: 10px 0; min-height: 40px; }
+
 /* Cambios frente a la versión anterior */
 .p-cambios { display: flex; flex-direction: column; gap: 8px; }
 .p-cambios + .p-cambios { border-top: 1px solid var(--v-line); padding-top: 14px; }
@@ -110,4 +127,16 @@
   .v-unidad__datos, .v-tema__campos { grid-template-columns: minmax(0, 1fr); }
   .v-tema { flex-direction: column; align-items: stretch; }
   .p-cambios__lista li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .v-programa-fila__versiones { align-items: flex-start; }
+  .v-programa-fila__versiones .v-versiones { justify-content: flex-start; }
+  /* Historial: cada versión en su propia tarjeta, con la etiqueta antes del dato */
+  .p-historial__tabla thead { display: none; }
+  .p-historial__tabla, .p-historial__tabla tbody, .p-historial__tabla tr, .p-historial__tabla th, .p-historial__tabla td { display: block; }
+  .p-historial__tabla tbody { display: flex; flex-direction: column; gap: 10px; }
+  .p-historial__tabla tr { border: 1px solid var(--v-line); border-radius: 10px; padding: 6px 14px; }
+  .p-historial__tabla tbody th, .p-historial__tabla td { border-bottom: none; padding: 6px 0; }
+  .p-historial__tabla tbody th { font-size: 15px; color: var(--v-navy); }
+  .p-historial__tabla td[data-etq] { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .p-historial__tabla td[data-etq]::before { content: attr(data-etq); font-size: 12px; font-weight: 600; color: var(--v-muted); }
+  .p-historial__acciones { justify-content: flex-start; border-top: 1px solid var(--v-line); margin-top: 4px; }
 }
