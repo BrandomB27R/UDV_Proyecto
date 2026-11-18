@@ -45,6 +45,11 @@ class Asignacion:
     status: str
     priority: str
     due_at: date | None = None
+    # La tarea de origen y, si la tarea lo indica, el curso y el período (columnas de G1).
+    task_id: int | None = None
+    course_code: str | None = None
+    course_name: str | None = None
+    period_code: str | None = None
 
     def to_dict(self):
         datos = asdict(self)

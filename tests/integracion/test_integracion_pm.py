@@ -210,10 +210,40 @@ def test_otro_docente_no_descarga_archivo_ajeno(c, s):
     assert c.get(f"/api/v1/files/{fid}", headers=s["docente2"]).status_code in (403, 404)
 
 
-def test_revisor_puede_descargar_evidencia_del_docente(c, s):
-    """El revisor tiene files.download en la matriz del G1 y debe ver la evidencia."""
+def _entregar_archivo(c, s, revisor):
+    """Tarea para docente1 con un PDF vinculado a su entrega; devuelve el id del archivo."""
+    _, asign = publicar(c, s, revisor=revisor)
+    a = asign[DOC1]
+    assert c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={}).status_code == 200
     fid = _subir(c, s["docente1"])
-    assert c.get(f"/api/v1/files/{fid}", headers=s["revisor"]).status_code == 200
+    r = c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+               json={"file_id": str(fid), "name": "evidencia.pdf"})
+    assert r.status_code == 200, r.text
+    return fid
+
+
+def test_descarga_de_la_evidencia_segun_la_tarea(c, s):
+    """Decisión D: dueño, admin y auditoría siempre; revisor y coordinación solo en su tarea."""
+    fid = _entregar_archivo(c, s, REVISOR)
+    for quien in ("docente1", "admin", "auditoria", "revisor", "coordinacion"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code == 200, quien
+    for quien in ("docente2", "direccion"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code in (403, 404), quien
+
+
+def test_sin_revisor_designado_descarga_la_coordinacion_no_cualquier_revisor(c, s):
+    """Decisión B revisada: sin revisor designado revisa la coordinación dueña o un admin."""
+    fid = _entregar_archivo(c, s, None)
+    assert c.get(f"/api/v1/files/{fid}", headers=s["coordinacion"]).status_code == 200
+    assert c.get(f"/api/v1/files/{fid}", headers=s["revisor"]).status_code == 403
+
+
+def test_archivo_sin_vincular_solo_lo_descargan_su_dueno_y_admin(c, s):
+    fid = _subir(c, s["docente1"])
+    assert c.get(f"/api/v1/files/{fid}", headers=s["docente1"]).status_code == 200
+    assert c.get(f"/api/v1/files/{fid}", headers=s["admin"]).status_code == 200
+    for quien in ("revisor", "coordinacion", "auditoria"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code == 403, quien
 
 
 def test_archivo_eliminado_no_se_descarga(c, s, app):
@@ -390,3 +420,453 @@ def test_programa_admite_version_en_otro_periodo(c, s):
     r = c.post("/api/v1/course-programs", headers=s["docente1"], json={
         "curso_id": 1, "sede_id": 1, "modalidad_id": 1, "periodo_id": 2})
     assert r.status_code == 201, f"{r.status_code} {r.text[:200]}"
+
+
+# ------------------------------------------- 9. lo que necesita la interfaz Vinci
+COORD = 2   # coordinacion@demo (coordinator + reviewer + authority desde la migración 1.2.2)
+
+
+def _tarea(c, s, **extra):
+    cuerpo = {"type_id": 1, "title": f"PMINT-{uuid.uuid4().hex[:6].upper()}",
+              "due_date": (date.today() + timedelta(days=10)).isoformat(), **extra}
+    return c.post("/api/v1/tasks", headers=s["coordinacion"], json=cuerpo)
+
+
+def test_la_tarea_guarda_y_devuelve_curso_y_periodo(c, s):
+    r = _tarea(c, s, course_id=1, period_id=2)
+    assert r.status_code == 201, r.text
+    t = r.json()
+    assert (t["course_id"], t["period_id"]) == (1, 2)
+    assert t["course_code"] and t["course_name"] and t["period_code"]
+    leida = c.get(f"/api/v1/tasks/{t['id']}", headers=s["coordinacion"]).json()
+    assert (leida["course_id"], leida["period_id"]) == (1, 2)
+    r = c.patch(f"/api/v1/tasks/{t['id']}", headers=s["coordinacion"], json={"course_id": 3})
+    assert r.status_code == 200 and r.json()["course_id"] == 3 and r.json()["period_id"] == 2
+    sin = _tarea(c, s).json()
+    assert sin["course_id"] is None and sin["period_id"] is None
+
+
+def test_curso_o_periodo_inexistente_responde_422(c, s):
+    es_error_comun(_tarea(c, s, course_id=999999, period_id=1), 422)
+    es_error_comun(_tarea(c, s, course_id=1, period_id=999999), 422)
+
+
+def test_docentes_sugeridos_por_curso(c, s):
+    r = c.get("/api/v1/tasks/eligible-teachers?course_id=1&period_id=2", headers=s["coordinacion"])
+    assert r.status_code == 200, r.text
+    ids = {d["id"] for d in r.json()["data"]}
+    assert DOC1 in ids and r.json()["total"] == len(r.json()["data"])
+    assert all({"id", "name", "email", "period_code", "campus"} <= set(d) for d in r.json()["data"])
+    otro = c.get("/api/v1/tasks/eligible-teachers?course_id=4&period_id=2", headers=s["coordinacion"])
+    assert otro.status_code == 200 and otro.json()["data"] == []
+    es_error_comun(c.get("/api/v1/tasks/eligible-teachers?course_id=1", headers=s["docente1"]), 403)
+    es_error_comun(c.get("/api/v1/tasks/eligible-teachers?course_id=999999", headers=s["coordinacion"]), 422)
+
+
+def test_el_detalle_trae_nombres_tarea_curso_e_intentos(c, s):
+    t = _tarea(c, s, course_id=1, period_id=2, reviewer_id=REVISOR).json()
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Primer intento"})
+    assert c.post(f"/api/v1/assignments/{a}/comments", headers=s["docente1"],
+                  json={"text": "Una duda"}).status_code == 200
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    d = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert d["task_id"] == t["id"] and d["created_by"] == COORD and d["reviewer_id"] == REVISOR
+    assert d["reviewer_name"] and d["created_by_name"] and d["assignee_name"]
+    assert (d["course_id"], d["period_id"]) == (1, 2) and d["course_name"] and d["period_code"]
+    com = d["comments"][0]
+    assert com["author_id"] == DOC1 and com["author_name"] and com["created_at"].endswith("Z")
+    assert d["attempts"] == [{"number": 1, "text": "Primer intento", "created_at": d["attempts"][0]["created_at"]}]
+    assert d["history"][0]["action"] == "publish"
+
+
+def test_viewer_actions_cruza_el_estado_con_quien_mira(c, s):
+    """allowed_actions depende del estado; viewer_actions, además, de la persona."""
+    _, asign = publicar(c, s, revisor=None)          # sin revisor designado
+    a = asign[DOC1]
+    ver = lambda quien: c.get(f"/api/v1/assignments/{a}", headers=s[quien]).json()
+    assert ver("docente1")["viewer_actions"] == ["start"]
+    assert ver("coordinacion")["viewer_actions"] == []
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={})
+    assert ver("docente1")["viewer_actions"] == []
+    assert ver("coordinacion")["viewer_actions"] == ["review"]      # la creó: le toca revisar
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["revisor"]).status_code == 403   # no es el designado
+    c.post(f"/api/v1/assignments/{a}/review", headers=s["coordinacion"], json={})
+    assert set(ver("coordinacion")["viewer_actions"]) == {"return", "approve"}
+    assert ver("direccion")["viewer_actions"] == ["approve"]        # la autoridad aprueba cualquiera
+    assert c.post(f"/api/v1/assignments/{a}/approve", headers=s["coordinacion"], json={}).status_code == 200
+    d = ver("coordinacion")
+    assert d["allowed_actions"] == ["close"] and d["viewer_actions"] == ["close"]
+    assert ver("docente1")["viewer_actions"] == []
+    assert c.post(f"/api/v1/assignments/{a}/close", headers=s["coordinacion"], json={}).status_code == 200
+    assert ver("coordinacion")["history"][-1]["action"] == "close"
+
+
+def test_la_cola_de_revision_dice_de_quien_es_cada_entrega(c, s):
+    _, propia = publicar(c, s, revisor=None)          # sin revisor: le toca a quien la creó
+    _, ajena = publicar(c, s, revisor=REVISOR)
+    for a in (propia[DOC1], ajena[DOC1]):
+        c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+        assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    filas = {f["id"]: f for f in c.get("/api/v1/review-queue?per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert filas[propia[DOC1]]["mine"] is True and filas[propia[DOC1]]["reviewer_id"] is None
+    assert filas[ajena[DOC1]]["mine"] is False and filas[ajena[DOC1]]["reviewer_id"] == REVISOR
+    assert filas[ajena[DOC1]]["reviewer_name"] and filas[ajena[DOC1]]["task_id"]
+    del_revisor = c.get("/api/v1/review-queue?per_page=100", headers=s["revisor"]).json()["data"]
+    assert all(f["mine"] for f in del_revisor) and ajena[DOC1] in {f["id"] for f in del_revisor}
+
+
+def test_los_avisos_dicen_a_que_asignacion_se_refieren(c, s):
+    _, asign = publicar(c, s, revisor=None)
+    a = asign[DOC1]
+    avisos = c.get("/api/v1/notifications?per_page=100", headers=s["docente1"]).json()["data"]
+    assert any(n["event"] == "task.published" and n["assignment_id"] == a for n in avisos)
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={})
+    # Sin revisor designado, la entrega le avisa a la coordinación que creó la tarea.
+    avisos = c.get("/api/v1/notifications?per_page=100", headers=s["coordinacion"]).json()["data"]
+    assert any(n["event"] == "assignment.submitted" and n["assignment_id"] == a for n in avisos)
+
+
+# --------------------------------- 10. programas: lectura de versiones y PDF (G5)
+PUBLICADAS = ("authorized", "superseded")
+
+
+def _versiones(c, s):
+    """Las versiones del programa 1 con su estado actual (otras pruebas las mueven)."""
+    return c.get("/api/v1/course-programs/1", headers=s["coordinacion"]).json()["versiones"]
+
+
+def test_un_docente_lee_las_versiones_autorizadas_de_otro_pero_no_sus_borradores(c, s):
+    """El historial es del curso: una versión autorizada la lee cualquier docente; una que
+    sigue en elaboración o en revisión, solo su responsable y quienes revisan."""
+    versiones = _versiones(c, s)
+    assert any(v["estado"] in PUBLICADAS for v in versiones)
+    for v in versiones:
+        esperado = 200 if v["estado"] in PUBLICADAS else 404
+        r = c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente2"])
+        assert r.status_code == esperado, (v["id"], v["estado"], r.status_code)
+        assert c.get(f"/api/v1/program-versions/{v['id']}", headers=s["coordinacion"]).status_code == 200
+    visibles = c.get("/api/v1/course-programs/1", headers=s["docente2"]).json()["versiones"]
+    assert {v["id"] for v in visibles} == {v["id"] for v in versiones if v["estado"] in PUBLICADAS}
+    lista = c.get("/api/v1/course-programs", headers=s["docente2"]).json()["data"]
+    assert lista and all(p["estado"] in PUBLICADAS for p in lista)
+    publicada = next(v for v in versiones if v["estado"] in PUBLICADAS)
+    r = c.put(f"/api/v1/program-versions/{publicada['id']}/sections/metodologia",
+              headers=s["docente2"], json={"contenido": {"texto": "x"}})
+    assert r.status_code in (403, 409), r.text       # leer no da permiso de editar
+
+
+def test_el_pdf_de_una_version_autorizada_es_un_documento(c, s):
+    versiones = _versiones(c, s)
+    publicada = next(v for v in versiones if v["estado"] in PUBLICADAS)
+    r = c.get(f"/api/v1/program-versions/{publicada['id']}/pdf", headers=s["docente2"])
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF") and len(r.content) > 5000
+    for v in versiones:
+        if v["estado"] not in PUBLICADAS:
+            es_error_comun(c.get(f"/api/v1/program-versions/{v['id']}/pdf",
+                                 headers=s["coordinacion"]), 409)
+
+
+def test_el_error_de_un_trigger_llega_como_mensaje_limpio(c, s):
+    """Pasar de 100 puntos lo rechaza un trigger del G1: el mensaje no trae el número de MySQL."""
+    borrador = next((v for v in _versiones(c, s) if v["estado"] in ("draft", "returned")), None)
+    if borrador is None:
+        pytest.skip("No queda una versión en borrador para probar")
+    r = c.put(f"/api/v1/program-versions/{borrador['id']}/sections/evaluacion", headers=s["docente1"],
+              json={"contenido": [{"nombre": "A", "ponderacion": 60}, {"nombre": "B", "ponderacion": 60}]})
+    es_error_comun(r, 422)
+    mensaje = r.json()["error"]["message"]
+    assert "1644" not in mensaje and "ERROR" not in mensaje and "(" not in mensaje, mensaje
+    assert "100" in mensaje
+
+
+# ------------------------------------------------ 11. segunda tanda para Vinci
+def test_el_historial_de_una_asignacion_responde(c, s):
+    """GET /assignments/{id}/history dejó de responder al agregar el curso a la tarea (PR #49)."""
+    _, asign = publicar(c, s)
+    a = asign[DOC1]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    for quien in ("docente1", "coordinacion"):
+        r = c.get(f"/api/v1/assignments/{a}/history", headers=s[quien])
+        assert r.status_code == 200, (quien, r.text)
+        assert [h["action"] for h in _items(r.json())] == ["publish", "start"]
+    assert c.get(f"/api/v1/assignments/{a}/history", headers=s["docente2"]).status_code == 403
+
+
+def test_las_bandejas_y_la_lista_de_tareas_traen_curso_y_nombres(c, s):
+    t = _tarea(c, s, course_id=1, period_id=2, reviewer_id=REVISOR).json()
+    assert t["created_by_name"] and t["reviewer_name"]
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+    en_lista = next(x for x in c.get("/api/v1/tasks?per_page=100", headers=s["coordinacion"]).json()["data"]
+                    if x["id"] == t["id"])
+    assert en_lista["course_code"] and en_lista["reviewer_name"] and en_lista["created_by_name"]
+    fila = next(x for x in c.get("/api/v1/inbox?per_page=100", headers=s["docente1"]).json()["data"]
+                if x["id"] == a)
+    assert fila["task_id"] == t["id"] and fila["course_code"] and fila["course_name"] and fila["period_code"]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    en_cola = next(x for x in c.get("/api/v1/review-queue?per_page=100", headers=s["revisor"]).json()["data"]
+                   if x["id"] == a)
+    assert en_cola["course_code"] and en_cola["course_name"] and en_cola["period_code"]
+
+
+def test_el_texto_se_puede_corregir_despues_de_adjuntar_y_antes_de_entregar(c, s):
+    """Migración 1.2.3: el intento abierto toma el texto vigente del borrador al entregar;
+    una vez enviado, la entrega no se modifica."""
+    from sqlalchemy import create_engine, text
+    _, asign = publicar(c, s, tipo=2)                 # SUBIR_CV exige archivo
+    a = asign[DOC1]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Primera versión"})
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "cv.pdf"}).status_code == 200
+    ver = lambda: c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert ver()["attempts"][0]["text"] == "Primera versión"      # así quedó al adjuntar
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Texto corregido"})
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    d = ver()
+    assert [(i["number"], i["text"]) for i in d["attempts"]] == [(1, "Texto corregido")]
+    assert [f["attempt"] for f in d["files"]] == [1]
+    motor = create_engine(URL)
+    try:
+        with pytest.raises(Exception, match="no se modifica"):
+            with motor.begin() as cx:
+                cx.execute(text("UPDATE entrega SET contenido_texto = 'cambiada' "
+                                "WHERE tarea_destinatario_id = :a"), {"a": a})
+    finally:
+        motor.dispose()
+    assert ver()["attempts"][0]["text"] == "Texto corregido"
+
+
+
+# --------------------------------- 10. el programa que pide una tarea (G5, para Vinci)
+def _asignar_programa(c, s, docente=DOC2, **extra):
+    t = _tarea(c, s, reviewer_id=REVISOR, **extra).json()
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [docente]})
+    return c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+
+
+def test_la_tarea_abre_el_borrador_del_programa_a_nombre_del_docente(c, s):
+    a = _asignar_programa(c, s, course_id=1, period_id=2)
+    ruta = f"/api/v1/program-versions/for-assignment/{a}"
+    es_error_comun(c.post(ruta, headers=s["docente1"]), 403)
+    es_error_comun(c.post(ruta, headers=s["coordinacion"]), 403)
+    r = c.post(ruta, headers=s["docente2"])
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"]
+    assert v["secciones"] and v["viewer_actions"] == ["edit", "submit"]
+    assert v["nombre"].endswith("2026-2") or "2026-1" not in v["nombre"]
+    # Al ser la primera versión de su período, los cambios se comparan con la versión de origen.
+    cambios = c.get(f"/api/v1/program-versions/{v['id']}/changes", headers=s["docente2"]).json()
+    assert cambios["version_anterior"] == v["version_origen_id"]
+    # Llamarla otra vez no abre otro borrador.
+    assert c.post(ruta, headers=s["docente2"]).json()["id"] == v["id"]
+    # Es suyo: lo lee, lo edita, y la entrega (G4) lo encuentra.
+    leida = c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente2"])
+    assert leida.status_code == 200 and leida.json()["viewer_actions"] == ["edit", "submit"]
+    r = c.put(f"/api/v1/program-versions/{v['id']}/sections/metodologia", headers=s["docente2"],
+              json={"contenido": {"texto": "Clases prácticas con proyecto integrador."}})
+    assert r.status_code == 200, r.text
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["docente2"]).json()
+    assert detalle["program_version"]["id"] == v["id"]
+    # Otro docente no ve el borrador ajeno.
+    es_error_comun(c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente1"]), 404)
+
+
+def test_la_tarea_sin_curso_no_abre_borrador_y_el_primer_programa_se_abre_en_blanco(c, s):
+    sin_curso = _asignar_programa(c, s)
+    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["docente2"]), 422)
+    # Curso sin programa autorizado: el docente abre el primero, en blanco y a su nombre.
+    sin_programa = _asignar_programa(c, s, course_id=4, period_id=2)
+    r = c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"])
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["estado"] == "draft" and v["periodo_id"] == 2 and v["version_origen_id"] is None
+    assert v["viewer_actions"] == ["edit", "submit"] and v["nombre"].endswith("2026-2")
+    assert c.post(f"/api/v1/program-versions/for-assignment/{sin_programa}", headers=s["docente2"]).json()["id"] == v["id"]
+    r = c.put(f"/api/v1/program-versions/{v['id']}/sections/metodologia", headers=s["docente2"],
+              json={"contenido": {"texto": "Clases prácticas."}})
+    assert r.status_code == 200, r.text
+    assert c.get(f"/api/v1/assignments/{sin_programa}", headers=s["docente2"]).json()["program_version"]["id"] == v["id"]
+    # Otro docente con la misma tarea de ese curso abre su propio borrador en el mismo programa.
+    otra = _asignar_programa(c, s, docente=DOC1, course_id=4, period_id=2)
+    v2 = c.post(f"/api/v1/program-versions/for-assignment/{otra}", headers=s["docente1"]).json()
+    assert v2["id"] != v["id"] and v2["programa_id"] == v["programa_id"]
+    es_error_comun(c.post("/api/v1/program-versions/for-assignment/999999", headers=s["docente2"]), 404)
+    es_error_comun(c.post(f"/api/v1/program-versions/for-assignment/{sin_curso}", headers=s["auditoria"]), 403)
+
+
+def test_viewer_actions_del_programa_sigue_el_flujo(c, s):
+    a = _asignar_programa(c, s, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente2"]).json()["id"]
+
+    def puede(quien):
+        return c.get(f"/api/v1/program-versions/{vid}", headers=s[quien]).json()["viewer_actions"]
+
+    def hacer(accion, quien, **cuerpo):
+        r = c.post(f"/api/v1/program-versions/{vid}/{accion}", headers=s[quien], json=cuerpo)
+        assert r.status_code == 200, f"{accion}: {r.status_code} {r.text[:300]}"
+
+    assert puede("docente2") == ["edit", "submit"]
+    assert puede("revisor") == ["edit"]            # gestiona programas, pero no es quien lo envía
+    assert puede("auditoria") == [] and puede("direccion") == []
+    hacer("submit", "docente2")
+    assert puede("docente2") == [] and puede("revisor") == ["review"]
+    hacer("review", "revisor")
+    assert puede("revisor") == ["return", "approve"] and puede("docente2") == []
+    hacer("return", "revisor", comentario="Falta detallar la unidad 2.")
+    assert puede("docente2") == ["edit", "submit"]
+    hacer("submit", "docente2")
+    hacer("review", "coordinacion")
+    assert puede("coordinacion") == ["return", "approve"]
+    hacer("approve", "coordinacion")
+    assert puede("revisor") == [] and puede("direccion") == ["authorize"]
+    assert puede("coordinacion") == ["authorize"]  # decisión E: coordinación también autoriza
+    hacer("authorize", "direccion")
+    assert puede("direccion") == [] and puede("docente2") == []
+
+
+def test_quien_envio_el_programa_no_tiene_la_accion_de_aprobarlo(c, s):
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    # La coordinación lo envía en nombre del docente y luego lo toma en revisión.
+    assert c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["coordinacion"]).status_code == 200
+    assert c.post(f"/api/v1/program-versions/{vid}/review", json={}, headers=s["coordinacion"]).status_code == 200
+    acciones = c.get(f"/api/v1/program-versions/{vid}", headers=s["coordinacion"]).json()["viewer_actions"]
+    assert acciones == ["return"]
+    es_error_comun(c.post(f"/api/v1/program-versions/{vid}/approve", json={}, headers=s["coordinacion"]), 409)
+    assert c.get(f"/api/v1/program-versions/{vid}", headers=s["revisor"]).json()["viewer_actions"] == ["return", "approve"]
+
+
+def test_catalogo_de_perfiles_de_egreso(c, s):
+    r = c.get("/api/v1/graduate-profiles", headers=s["docente1"])
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["total"] == len(cuerpo["data"]) >= 1
+    assert all({"id", "codigo", "descripcion"} <= set(p) for p in cuerpo["data"])
+    es_error_comun(c.get("/api/v1/graduate-profiles"), 401)
+
+
+# ------------------------------------------- 11. tipos de tarea nuevos (G3, para Vinci)
+def test_coordinacion_crea_un_tipo_de_tarea_y_recorre_su_flujo(c, s):
+    nombre = f"Entregar constancia {uuid.uuid4().hex[:5]}"
+    r = c.post("/api/v1/task-types", headers=s["coordinacion"],
+               json={"name": nombre, "delivery": "archivo", "description": "Constancia en PDF"})
+    assert r.status_code == 201, r.text
+    tipo = r.json()
+    assert tipo["name"] == nombre and tipo["requires_evidence"] == 1 and tipo["delivery_mode"] == "ambos"
+    assert tipo["code"] and len(tipo["code"]) <= 30
+    listados = _items(c.get("/api/v1/task-types?per_page=100", headers=s["docente1"]).json())
+    assert tipo["id"] in {t["id"] for t in listados}
+    assert all("delivery_mode" in t for t in listados)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"], json={"name": nombre}), 409)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["docente1"], json={"name": "Otro tipo"}), 403)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"], json={"name": "  "}), 422)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"],
+                          json={"name": "Tipo raro", "delivery": "paloma"}), 422)
+    # El tipo nuevo recorre el mismo flujo: exige archivo, se revisa, aprueba y cierra.
+    _, asign = publicar(c, s, para=(DOC1,), tipo=tipo["id"], revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    es_error_comun(_accion(c, s["docente1"], a, "submit"), 422)
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "Constancia"}).status_code in (200, 201)
+    for quien, accion in (("docente1", "submit"), ("coordinacion", "review"),
+                          ("coordinacion", "approve"), ("coordinacion", "close")):
+        r = _accion(c, s[quien], a, accion)
+        assert r.status_code == 200, f"{accion}: {r.status_code} {r.text[:200]}"
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert detalle["status"] == "closed" and detalle["task_type"]
+
+
+def test_un_tipo_solo_de_texto_se_entrega_sin_archivo(c, s):
+    r = c.post("/api/v1/task-types", headers=s["coordinacion"],
+               json={"name": f"Responder encuesta {uuid.uuid4().hex[:5]}", "delivery": "texto"})
+    assert r.status_code == 201, r.text
+    assert r.json()["requires_evidence"] == 0 and r.json()["delivery_mode"] == "texto"
+    _, asign = publicar(c, s, para=(DOC1,), tipo=r.json()["id"], revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    assert c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"],
+                 json={"comment": "Encuesta respondida."}).status_code == 200
+    assert _accion(c, s["docente1"], a, "submit").status_code == 200
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["delivery"]["mode"] == "texto"
+
+
+# ------------------------------------------- 12. quitar un archivo antes de entregar (G4)
+def test_el_docente_quita_un_archivo_del_intento_sin_enviar(c, s):
+    _, asign = publicar(c, s, para=(DOC1,), tipo=5, revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "El que no era"}).status_code in (200, 201)
+    ruta = f"/api/v1/assignments/{a}/files/{fid}"
+    es_error_comun(c.delete(ruta, headers=s["docente2"]), 403)
+    es_error_comun(c.delete(f"/api/v1/assignments/{a}/files/999999", headers=s["docente1"]), 404)
+    r = c.delete(ruta, headers=s["docente1"])
+    assert r.status_code == 200 and r.json()["files"] == [], r.text
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["files"] == []
+    es_error_comun(c.delete(ruta, headers=s["docente1"]), 404)          # ya no está
+    es_error_comun(_accion(c, s["docente1"], a, "submit"), 422)         # sin archivo no se entrega
+    # Con otro archivo se entrega; lo ya enviado no se puede quitar.
+    fid2 = _subir(c, s["docente1"], "correcto.pdf")
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid2), "name": "El correcto"}).status_code in (200, 201)
+    assert _accion(c, s["docente1"], a, "submit").status_code == 200
+    es_error_comun(c.delete(f"/api/v1/assignments/{a}/files/{fid2}", headers=s["docente1"]), 409)
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["coordinacion"]).json()
+    assert [f["name"] for f in detalle["files"]] == ["correcto.pdf"]
+
+
+# ------------------------------------------- 13. resúmenes para Panel y Tareas (G3 y G6)
+def test_la_lista_de_tareas_trae_el_avance_si_se_pide(c, s):
+    _, asign = publicar(c, s, para=(DOC1, DOC2), tipo=4, revisor=COORD)
+    _accion(c, s["docente1"], asign[DOC1], "start")
+    c.put(f"/api/v1/assignments/{asign[DOC1]}/submission-draft", headers=s["docente1"], json={"comment": "Sí asistiré."})
+    assert _accion(c, s["docente1"], asign[DOC1], "submit").status_code == 200
+    _, uno = publicar(c, s, para=(DOC2,), tipo=4, revisor=COORD)
+    lista = c.get("/api/v1/tasks?status=published&per_page=100&include=progress", headers=s["coordinacion"]).json()["data"]
+    assert all("progress" in t for t in lista)
+    por_asignacion = {}
+    for t in lista:
+        ids = {a["id"] for a in _items(c.get(f"/api/v1/tasks/{t['id']}/assignments", headers=s["coordinacion"]).json())}
+        por_asignacion[t["id"]] = ids
+    dos = next(t for t in lista if asign[DOC1] in por_asignacion[t["id"]])["progress"]
+    assert (dos["total"], dos["to_review"], dos["done"], dos["assignee_name"]) == (2, 1, 0, None)
+    assert dos["by_status"] == {"submitted": 1, "assigned": 1}
+    assert dos["assignee_names"] == ["Daniel López", "Diana Pérez"]
+    solo = next(t for t in lista if uno[DOC2] in por_asignacion[t["id"]])["progress"]
+    assert solo["total"] == 1 and solo["assignee_name"] == "Daniel López"
+    assert solo["assignee_names"] == ["Daniel López"]
+    sin = c.get("/api/v1/tasks?status=published&per_page=5", headers=s["coordinacion"]).json()["data"]
+    assert all("progress" not in t for t in sin)
+
+
+def test_el_resumen_por_docente_cuadra_con_el_panel(c, s):
+    panel = c.get("/api/v1/dashboard?limit=100", headers=s["coordinacion"]).json()
+    r = c.get("/api/v1/dashboard/teachers", headers=s["coordinacion"])
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["total"] == len(cuerpo["data"]) >= 1
+    suma = lambda k: sum(d[k] for d in cuerpo["data"])
+    assert suma("overdue") == panel["overdue"]["total"]
+    assert suma("due_soon") == panel["due_soon"]["total"]
+    estados = panel["assignments"]["by_state"]
+    assert suma("to_review") == estados["submitted"] + estados["under_review"]
+    assert suma("finished") == estados["approved"] + estados["closed"]
+    assert suma("assigned") == panel["compliance"]["expected"]
+    assert c.get("/api/v1/dashboard/teachers", headers=s["auditoria"]).status_code == 200
+    es_error_comun(c.get("/api/v1/dashboard/teachers", headers=s["docente1"]), 403)

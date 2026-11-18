@@ -384,8 +384,18 @@ def test_translate_db_error_maps_g1_trigger_messages(args, expected):
     assert isinstance(transitions._translate_db_error(FakeDbError(*args)), expected)
 
 
-@pytest.mark.parametrize("exc", [ValueError("x"), FakeDbError(1062, "Duplicate entry"),
-                                 FakeDbError(1644, "mensaje sin codigo")])
+def test_translate_db_error_duplicate_entrega():
+    error = transitions._translate_db_error(
+        FakeDbError(1062, "Duplicate entry")
+    )
+    assert isinstance(error, Conflict)
+    assert error.code == "DUPLICATE_ENTREGA"
+
+
+@pytest.mark.parametrize("exc", [
+    ValueError("x"),
+    FakeDbError(1644, "mensaje sin codigo"),
+])
 def test_translate_db_error_ignores_other_errors(exc):
     assert transitions._translate_db_error(exc) is None
 

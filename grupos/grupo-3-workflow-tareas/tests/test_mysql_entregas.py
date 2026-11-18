@@ -165,3 +165,28 @@ def test_el_orden_de_errores_se_mantiene_403_antes_que_422(api):
     asig = _asignacion_en_progreso(api, TIPO_CON_ARCHIVO)
     api.como(OTRO_DOCENTE)
     assert api.post(f"{P}/assignments/{asig}/submit").status_code == 403
+def test_doble_submit_simultaneo_no_duplica_entrega(api):
+    """Dos solicitudes simultáneas: una entrega y la otra recibe 409."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    asig = _asignacion_en_progreso(api, TIPO_SIN_ARCHIVO)
+    barrera = Barrier(2)
+
+    def entregar():
+        # Cada petición obtiene su propia conexión mediante get_conn.
+        barrera.wait(timeout=10)
+        return api.post(f"{P}/assignments/{asig}/submit")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futuro1 = executor.submit(entregar)
+        futuro2 = executor.submit(entregar)
+        respuestas = [futuro1.result(), futuro2.result()]
+
+    codigos = sorted(r.status_code for r in respuestas)
+
+    assert codigos == [200, 409], [
+        (r.status_code, r.text) for r in respuestas
+    ]
+    assert _estado(asig) == "submitted"
+    assert [n for n, _ in _entregas(asig)] == [1]

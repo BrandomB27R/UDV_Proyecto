@@ -201,12 +201,16 @@ class MySQLConn:
 
 
 def _connect_mysql(url: str) -> MySQLConn:
-    import pymysql                      # import perezoso: solo hace falta con MySQL
+    import pymysql
     u = urlparse(url)
     raw = pymysql.connect(
         host=u.hostname or "localhost", port=u.port or 3306,
         user=unquote(u.username or ""), password=unquote(u.password or ""),
         database=u.path.lstrip("/"), charset="utf8mb4", autocommit=True)
+
+    with raw.cursor() as cur:
+        cur.execute("SET time_zone = '+00:00'")
+
     return MySQLConn(raw)
 
 

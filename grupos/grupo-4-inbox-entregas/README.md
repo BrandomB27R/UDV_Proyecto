@@ -40,6 +40,9 @@ producción lo sirve la app principal).
   la vinculación de archivos con su fila de `entrega`. Es lo que se usa
   siempre; los datos en memoria solo los usan las pruebas
   (`G4_USAR_MYSQL=0`, lo pone `tests/conftest.py`).
+- `g4_inbox/revision.py` - la bandeja de revisión (`GET /review-queue`): qué
+  entregas le tocan a cada revisor, en qué orden. La pantalla es
+  `static/revision.html`.
 - `g4_inbox/main.py` - solo sirve para correr G4 por su cuenta en
   local. La raíz del proyecto usa `routes.py` directo, no este archivo.
 - `static/` - las dos pantallas, con sus propios css y js.
@@ -95,7 +98,11 @@ camino de MySQL. Hay dos archivos que sí usan una base de verdad:
    restos viejos ni cambios fuera de la carpeta, y corre todas las
    pruebas: las nuestras, las de MySQL y las de integración del PM que
    tocan a G4. Si algo falla, se detiene y dice qué.
-4. Si pasa, otra persona del equipo revisa el cambio antes del push.
+4. Si cambiaste un archivo de `g4_inbox/static/js` o `g4_inbox/static/css`,
+   cambia también el `?v=` en `inbox.html`, `detalle.html` y `revision.html`
+   (el mismo valor en las tres; la prueba lo revisa). Si no, el navegador de
+   quien prueba sigue usando el archivo viejo.
+5. Si pasa, otra persona del equipo revisa el cambio antes del push.
 
 `py verificar.py --sin-mysql` sirve para revisar rápido mientras se
 trabaja, pero ese resultado no vale para abrir el PR.

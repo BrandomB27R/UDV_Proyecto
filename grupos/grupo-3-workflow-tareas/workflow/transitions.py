@@ -207,7 +207,12 @@ def _translate_db_error(exc):
     if len(args) != 2 or not isinstance(args[0], int):
         return None
     errno, msg = args[0], str(args[1])
-    if errno in (1205, 1213):                              # lock wait timeout / deadlock
+    if errno == 1062:
+        return Conflict(
+            "Ya existe una entrega con ese número de intento",
+            code="DUPLICATE_ENTREGA"
+        )
+    if errno in (1205, 1213):
         return Conflict("La asignación está siendo modificada por otra solicitud",
                         code="CONCURRENT_UPDATE")
     if errno == 1644:                                      # SIGNAL SQLSTATE '45000'
@@ -260,6 +265,29 @@ def _create_entrega(conn, assignment_id, actor_id):
         (assignment_id, actor_id, assignment_id, assignment_id, assignment_id))
 
 
+def _sync_entrega_with_draft(conn, entrega_id, assignment_id):
+    """Pone en el intento abierto el texto vigente del borrador, justo antes de enviarlo.
+
+    G4 crea la fila de `entrega` al vincular el primer archivo, con el texto de ese momento;
+    si el docente lo corrige después, aquí llega a la entrega. Hay que llamarla ANTES de
+    registrar la transición: el trigger de G1 (1.2.3) solo deja cambiar un intento no enviado.
+    Con una base anterior a 1.2.3 el trigger rechaza el cambio y la entrega conserva su texto.
+    """
+    try:
+        conn.execute(
+            "UPDATE entrega e JOIN entrega_borrador b"
+            "   ON b.tarea_destinatario_id = e.tarea_destinatario_id"
+            " SET e.contenido_texto = b.contenido_texto,"
+            "     e.programa_version_id = COALESCE(b.programa_version_id, e.programa_version_id)"
+            " WHERE e.id = ? AND e.tarea_destinatario_id = ?"
+            "   AND NOT (e.contenido_texto <=> b.contenido_texto"
+            "            AND e.programa_version_id <=> COALESCE(b.programa_version_id, e.programa_version_id))",
+            (entrega_id, assignment_id))
+    except Exception as exc:                       # base sin la migración 1.2.3
+        if "no se modifica" not in str(exc):
+            raise
+
+
 def perform(conn, assignment_id, action, actor, comment=None):
     """Ejecuta una acción sobre una asignación. Devuelve la asignación actualizada."""
     if action not in ACTIONS:
@@ -268,8 +296,25 @@ def perform(conn, assignment_id, action, actor, comment=None):
     mysql = _is_mysql(conn)
 
     with transaction(conn):
-        set_actor(conn, actor["id"])           # auditoría de G1 (@actor_id); no-op en SQLite
-        row = conn.execute(_SELECT_MYSQL if mysql else _SELECT_SQLITE, (assignment_id,)).fetchone()
+        set_actor(conn, actor["id"])
+
+        if mysql and action in ENTREGA_ACTIONS:
+            try:
+                conn.execute(
+                    "SELECT id FROM tarea_destinatario WHERE id = ? FOR UPDATE",
+                    (assignment_id,)
+                ).fetchone()
+            except Exception as exc:
+                mapped = _translate_db_error(exc)
+                if mapped is None:
+                    raise
+                raise mapped from exc
+
+        row = conn.execute(
+            _SELECT_MYSQL if mysql else _SELECT_SQLITE,
+            (assignment_id,)
+        ).fetchone()
+
         if row is None:
             raise NotFound(f"Asignación {assignment_id} no existe")
 
@@ -290,6 +335,9 @@ def perform(conn, assignment_id, action, actor, comment=None):
                     "Este tipo de tarea requiere adjuntar un archivo para entregar",
                     details={"field": "file"}
                 )
+
+        if entrega_id is not None:
+            _sync_entrega_with_draft(conn, entrega_id, assignment_id)
 
         now = utcnow()
         try:

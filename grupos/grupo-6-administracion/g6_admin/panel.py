@@ -18,14 +18,18 @@ asignaciones no se muestran como vencidas ni próximas, aunque alguna haya
 quedado en un estado pendiente (el G1 no cambia las asignaciones al cancelar
 la tarea). Ya no hay nada que entregar ahí.
 
-Las fechas de la base están en UTC; "ahora" también se toma en UTC.
-docs/panel.md trae las consultas SQL para comprobar cada número.
+"Ahora" es la hora de la base (NOW(3) en MySQL), la misma con la que el G1
+calcula la vista y genera los avisos de vencimiento, y la misma zona en que
+guarda sus fechas. Así el panel no cambia si el servidor de la app tiene otra
+hora o zona. Las fechas de la respuesta llevan la diferencia de la base con
+UTC ("Z" si la base está en UTC). docs/panel.md trae las consultas SQL para
+comprobar cada número.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from . import tablas
@@ -41,14 +45,16 @@ ESTADOS_FINALES_TAREA = ("cancelled", "closed")  # es_final en estado_tarea del 
 DIAS_AVISO_PREDETERMINADO = 3  # El mismo valor de la semilla del G1.
 
 
-def _ahora() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _iso(valor: datetime | None) -> str | None:
+def _iso(valor: datetime | None, desfase: int = 0) -> str | None:
+    """Fecha de la base en ISO 8601, con su diferencia con UTC en minutos."""
     if valor is None:
         return None
-    return valor.replace(microsecond=0).isoformat() + "Z"
+    texto = valor.replace(microsecond=0).isoformat()
+    if desfase == 0:
+        return texto + "Z"
+    signo = "+" if desfase > 0 else "-"
+    horas, minutos = divmod(abs(desfase), 60)
+    return f"{texto}{signo}{horas:02d}:{minutos:02d}"
 
 
 class RepositorioPanel:
@@ -56,6 +62,14 @@ class RepositorioPanel:
 
     def __init__(self, sesion: Session) -> None:
         self.sesion = sesion
+
+    def reloj(self) -> tuple[datetime, int]:
+        """La hora de la base y su diferencia con UTC, en minutos."""
+        if self.sesion.get_bind().dialect.name == "mysql":
+            ahora, utc = self.sesion.execute(text("SELECT NOW(3), UTC_TIMESTAMP(3)")).one()
+        else:  # SQLite de las pruebas: CURRENT_TIMESTAMP ya es UTC.
+            ahora = utc = self.sesion.execute(select(func.current_timestamp())).scalar_one()
+        return ahora, round((ahora - utc).total_seconds() / 60)
 
     def dias_aviso(self) -> int:
         valor = self.sesion.execute(select(tablas.parametro.c.valor).where(
@@ -105,16 +119,64 @@ class RepositorioPanel:
             "assignment_id": f.id, "task_id": f.tarea_id, "task_title": f.titulo,
             "user_id": f.usuario_id, "user_email": f.correo,
             "user_name": " ".join(p for p in (f.nombres, f.apellidos) if p) or None,
-            "state": f.estado_codigo, "due_date": _iso(f.vence)} for f in filas]
+            "state": f.estado_codigo, "due_date": f.vence} for f in filas]
+
+
+    def resumen_por_docente(self, *, ahora: datetime, hasta: datetime) -> list[dict[str, Any]]:
+        """Una fila por docente con los mismos criterios de las tarjetas del panel.
+
+        Cuenta asignaciones de tareas no eliminadas, sin las canceladas. Vencidas
+        y por vencer usan la misma condición que `pendientes_que_vencen`.
+        """
+        t, td, u = tablas.tarea, tablas.tarea_destinatario, tablas.usuario
+        vence = func.coalesce(td.c.fecha_limite, t.c.fecha_limite)
+        pendiente = (td.c.estado_codigo.in_(ESTADOS_PENDIENTES)
+                     & t.c.estado_codigo.not_in(ESTADOS_FINALES_TAREA) & vence.is_not(None))
+
+        def cuenta(condicion):
+            return func.sum(case((condicion, 1), else_=0))
+
+        filas = self.sesion.execute(
+            select(td.c.usuario_id, u.c.nombres, u.c.apellidos, u.c.correo,
+                   func.count().label("asignadas"),
+                   cuenta(pendiente & (vence < ahora)).label("vencidas"),
+                   cuenta(pendiente & (vence >= ahora) & (vence < hasta)).label("por_vencer"),
+                   cuenta(td.c.estado_codigo.in_(("submitted", "under_review"))).label("por_revisar"),
+                   cuenta(td.c.estado_codigo.in_(("approved", "closed"))).label("terminadas"))
+            .join(t, t.c.id == td.c.tarea_id)
+            .outerjoin(u, u.c.id == td.c.usuario_id)
+            .where(t.c.eliminado_en.is_(None), td.c.estado_codigo != "cancelled")
+            .group_by(td.c.usuario_id, u.c.nombres, u.c.apellidos, u.c.correo))
+        datos = [{
+            "user_id": f.usuario_id, "user_email": f.correo,
+            "name": " ".join(p for p in (f.nombres, f.apellidos) if p) or None,
+            "assigned": int(f.asignadas), "overdue": int(f.vencidas or 0),
+            "due_soon": int(f.por_vencer or 0), "to_review": int(f.por_revisar or 0),
+            "finished": int(f.terminadas or 0)} for f in filas]
+        datos.sort(key=lambda d: (-d["overdue"], -d["due_soon"], -d["to_review"], d["name"] or ""))
+        return datos
 
 
 class ServicioPanel:
     def __init__(self, repositorio: RepositorioPanel) -> None:
         self.repositorio = repositorio
 
+    def por_docente(self, *, ahora: datetime | None = None) -> dict[str, Any]:
+        """Resumen por docente; sus sumas cuadran con las tarjetas de `indicadores`."""
+        hora_de_la_base, desfase = self.repositorio.reloj()
+        ahora = ahora or hora_de_la_base
+        dias = self.repositorio.dias_aviso()
+        datos = self.repositorio.resumen_por_docente(ahora=ahora, hasta=ahora + timedelta(days=dias))
+        return {"generated_at": _iso(ahora, desfase), "due_soon_days": dias,
+                "total": len(datos), "data": datos}
+
     def indicadores(self, *, limite: int = 20, ahora: datetime | None = None) -> dict[str, Any]:
-        """Todo el panel en una respuesta. `limite` corta las listas, no los totales."""
-        ahora = ahora or _ahora()
+        """Todo el panel en una respuesta. `limite` corta las listas, no los totales.
+
+        `ahora` solo se pasa en las pruebas; si no, es la hora de la base.
+        """
+        hora_de_la_base, desfase = self.repositorio.reloj()
+        ahora = ahora or hora_de_la_base
         dias = self.repositorio.dias_aviso()
         tareas = self.repositorio.tareas_por_estado()
         asignaciones = self.repositorio.asignaciones_por_estado()
@@ -124,10 +186,13 @@ class ServicioPanel:
         total_proximas, proximas = self.repositorio.pendientes_que_vencen(
             desde=ahora, hasta=ahora + timedelta(days=dias), limite=limite)
 
+        for item in vencidas + proximas:
+            item["due_date"] = _iso(item["due_date"], desfase)
+
         cumplidas = sum(asignaciones.get(e, 0) for e in ESTADOS_CUMPLIDOS)
         esperadas = sum(n for e, n in asignaciones.items() if e != "cancelled")
         return {
-            "generated_at": _iso(ahora),
+            "generated_at": _iso(ahora, desfase),
             "due_soon_days": dias,
             "tasks": _conteo(tareas),
             "assignments": _conteo(asignaciones),

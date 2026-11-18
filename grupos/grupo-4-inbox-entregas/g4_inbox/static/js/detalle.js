@@ -8,6 +8,14 @@ const API_BASE = "/api/v1";
 
 const idAsignacion = new URLSearchParams(location.search).get("id");
 
+// Si se llegó desde la bandeja de revisión, "Volver" regresa a la bandeja
+// y no al inbox (el revisor trabaja desde la bandeja).
+if (new URLSearchParams(location.search).get("desde") === "revision") {
+  const volver = document.getElementById("enlaceVolver");
+  volver.href = "revision.html";
+  volver.textContent = "← Volver a la bandeja de revisión";
+}
+
 const NOMBRE_ESTADO = {
   assigned: "Asignada", in_progress: "En progreso", submitted: "Entregada",
   under_review: "En revisión", returned: "Devuelta", approved: "Aprobada",
@@ -118,12 +126,14 @@ function ocultarAvisos() {
   });
 }
 
-// "2026-11-15T16:41" -> "15/11/2026 16:41". Se arma a mano para mostrar la
-// hora tal como viene de la base, sin que el navegador la cambie de zona.
-function formatearFecha(iso) {
-  const [dia, hora] = iso.split("T");
-  const [a, m, d] = dia.split("-");
-  return `${d}/${m}/${a}${hora ? " " + hora.slice(0, 5) : ""}`;
+// Horas que manda la API (UTC) -> hora de Guatemala, como pidió el PM.
+// Si una hora llegara sin zona ("2026-11-15T16:41"), se toma como UTC.
+function horaGuatemala(valor) {
+  const texto = String(valor);
+  const conZona = /(Z|[+-]\d{2}:?\d{2})$/.test(texto) ? texto : texto + "Z";
+  const fecha = new Date(conZona);
+  if (Number.isNaN(fecha.getTime())) return texto;
+  return fecha.toLocaleString("es-GT", { timeZone: "America/Guatemala" });
 }
 
 function adaptarTarea(api) {
@@ -142,15 +152,101 @@ function adaptarTarea(api) {
     // revisor los de revisar. Los demás (coordinación, auditoría) solo leen.
     esDestinatario: Boolean(api.viewer && api.viewer.is_assignee),
     esRevisor: Boolean(api.viewer && api.viewer.is_reviewer),
-    archivo: (api.files || []).length ? api.files[api.files.length - 1].name : null,
     archivos: api.files || [],
+    comentarios: api.comments || [],
+    historial: api.history || [],
+    puedeComentar: Boolean(api.viewer && api.viewer.can_comment),
     // Por defecto true: si el backend no manda este campo (no debería
     // pasar), es más seguro seguir pidiendo evidencia que dejar de pedirla.
     requiereArchivo: api.requiere_archivo !== false,
+    // Cómo se entrega según el tipo de tarea (tipo_tarea de G1, limitado a
+    // lo que acepta G2): modalidad, extensiones y tamaño máximo.
+    entrega: api.delivery || { mode: "ambos", extensions: ["pdf", "jpg", "jpeg", "png"], max_mb: 5, not_accepted: [] },
+    versionPrograma: api.program_version || null,
   };
 }
 
 let tareaActual = null;
+
+// ---------- Comentarios ----------
+
+// Cada dato va con textContent, nunca con innerHTML: el texto lo escribió
+// otra persona.
+function itemDeLista(meta, texto) {
+  const li = document.createElement("li");
+  const linea = document.createElement("div");
+  linea.className = "g4-lista__meta";
+  linea.textContent = meta;
+  li.appendChild(linea);
+  if (texto) {
+    const p = document.createElement("p");
+    p.className = "g4-lista__texto";
+    p.textContent = texto;
+    li.appendChild(p);
+  }
+  return li;
+}
+
+function agregarComentarioALaLista(c) {
+  const meta = [c.author_name || `Usuario ${c.author}`, c.at ? horaGuatemala(c.at) : null]
+    .filter(Boolean).join(" · ");
+  document.getElementById("listaComentarios").appendChild(itemDeLista(meta, c.text));
+  document.getElementById("sinComentarios").style.display = "none";
+}
+
+function mostrarComentarios(tarea) {
+  document.getElementById("listaComentarios").innerHTML = "";
+  document.getElementById("sinComentarios").style.display = tarea.comentarios.length ? "none" : "block";
+  tarea.comentarios.forEach(agregarComentarioALaLista);
+  // Solo quien puede comentar ve la caja (auditoría solo lee).
+  document.getElementById("nuevoComentario").style.display = tarea.puedeComentar ? "block" : "none";
+}
+
+async function comentar() {
+  const caja = document.getElementById("textoComentario");
+  const aviso = document.getElementById("avisoComentario");
+  aviso.style.display = "none";
+  const texto = caja.value.trim();
+  if (!texto) {
+    aviso.textContent = "Escribe el comentario antes de enviarlo.";
+    aviso.style.display = "block";
+    return;
+  }
+  const boton = document.getElementById("btnComentar");
+  boton.disabled = true;
+  try {
+    const nuevo = await apiFetch(`/assignments/${tareaActual.id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ text: texto }),
+    });
+    agregarComentarioALaLista(nuevo);
+    caja.value = "";
+  } catch (error) {
+    // El texto se queda en la caja para no perderlo.
+    aviso.textContent = `No se pudo enviar el comentario: ${error.message}`;
+    aviso.style.display = "block";
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+// ---------- Historial ----------
+
+const NOMBRE_ACCION = {
+  publish: "Publicada", start: "Iniciada", submit: "Entregada", resubmit: "Reenviada",
+  review: "Tomada para revisión", return: "Devuelta", approve: "Aprobada",
+};
+
+function mostrarHistorial(tarea) {
+  const lista = document.getElementById("listaHistorial");
+  lista.innerHTML = "";
+  tarea.historial.forEach((h) => {
+    const accion = NOMBRE_ACCION[h.action] || NOMBRE_ESTADO[h.new_status] || h.new_status;
+    const meta = [accion, h.actor, h.at ? horaGuatemala(h.at) : null].filter(Boolean).join(" · ");
+    lista.appendChild(itemDeLista(meta, h.comment));
+  });
+  document.getElementById("detHistorial").style.display = tarea.historial.length ? "block" : "none";
+}
 
 function agregarBoton(contenedor, texto, clase, accion) {
   const btn = document.createElement("button");
@@ -160,24 +256,120 @@ function agregarBoton(contenedor, texto, clase, accion) {
   contenedor.appendChild(btn);
 }
 
+// ---------- Formulario según el tipo de tarea ----------
+
+// Archivos ya vinculados al intento que se va a entregar. Cada entrega
+// (submit o resubmit) cierra un intento: los archivos de intentos anteriores
+// no cuentan para el reenvío (G3 lo rechazaría con 422).
+function archivosDelIntentoActual(tarea) {
+  const envios = tarea.historial.filter((h) => h.new_status === "submitted").length;
+  return tarea.archivos.filter((f) => !f.attempt || f.attempt > envios);
+}
+
+// Se muestra el campo de archivo si el tipo lo exige o si su modalidad
+// admite archivos; en "texto" o "programa" sin archivo obligatorio, no.
+function admiteArchivos(tarea) {
+  return tarea.requiereArchivo || ["archivo", "ambos"].includes(tarea.entrega.mode);
+}
+
+function textoExtensiones(extensiones) {
+  return extensiones.filter((e) => e !== "jpeg").map((e) => e.toUpperCase()).join(", ");
+}
+
+function mostrarVersionPrograma(tarea) {
+  const caja = document.getElementById("detPrograma");
+  caja.innerHTML = "";
+  if (tarea.entrega.mode !== "programa") {
+    caja.style.display = "none";
+    return;
+  }
+  caja.style.display = "block";
+  const v = tarea.versionPrograma;
+  const p = document.createElement("p");
+  if (!v) {
+    p.textContent = "Esta tarea no tiene una versión del programa enlazada. Pide a coordinación que la enlace antes de entregar.";
+    caja.appendChild(p);
+    return;
+  }
+  p.textContent = `Programa: ${v.name} · versión ${v.number} · ${NOMBRE_ESTADO_PROGRAMA[v.status] || v.status}`;
+  caja.appendChild(p);
+  const ayuda = document.createElement("p");
+  ayuda.style.cssText = "font-size:.85rem;color:var(--udv-text-muted);";
+  ayuda.textContent = "Los cambios del programa se hacen en Programas. Al entregar, esta versión queda en tu entrega.";
+  caja.appendChild(ayuda);
+  const enlace = document.createElement("a");
+  enlace.className = "btn-udv btn-udv-dark btn-udv-sm";
+  enlace.href = `/app/g5/Programa.html?program_id=${encodeURIComponent(v.program_id)}` +
+    `&tarea_destinatario_origen_id=${encodeURIComponent(tarea.id)}`;
+  enlace.textContent = "Abrir en Programas";
+  caja.appendChild(enlace);
+}
+
+const NOMBRE_ESTADO_PROGRAMA = {
+  draft: "borrador", submitted: "enviada", under_review: "en revisión", returned: "devuelta",
+  approved: "aprobada", authorized: "autorizada", superseded: "reemplazada",
+};
+
+// Lista lo que se va a subir, o lo que ya está registrado en este intento.
+function mostrarArchivosElegidos(tarea) {
+  const info = document.getElementById("archivoInfo");
+  info.innerHTML = "";
+  const elegidos = [...document.getElementById("entregaArchivo").files];
+  const yaVinculados = archivosDelIntentoActual(tarea);
+  if (!admiteArchivos(tarea)) {
+    info.textContent = "Esta tarea no requiere evidencia adjunta.";
+    return;
+  }
+  const nombres = elegidos.length ? elegidos.map((f) => `${f.name} (${textoTamano(f.size)})`)
+    : yaVinculados.map((f) => f.name);
+  if (!nombres.length) {
+    info.textContent = tarea.requiereArchivo ? "Selecciona la evidencia que vas a registrar." : "";
+    return;
+  }
+  info.textContent = elegidos.length ? "Se van a subir:" : "Ya registrados en esta entrega:";
+  const ul = document.createElement("ul");
+  nombres.forEach((n) => { const li = document.createElement("li"); li.textContent = n; ul.appendChild(li); });
+  info.appendChild(ul);
+}
+
+// Revisa cada archivo antes de subir: así el docente sabe cuál está mal
+// sin esperar a que G2 lo rechace.
+function validarArchivos(tarea, archivos) {
+  const maximo = tarea.entrega.max_mb * 1024 * 1024;
+  for (const f of archivos) {
+    const extension = (f.name.split(".").pop() || "").toLowerCase();
+    if (!tarea.entrega.extensions.includes(extension)) {
+      return `${f.name}: solo se aceptan ${textoExtensiones(tarea.entrega.extensions)}.`;
+    }
+    if (f.size === 0) return `${f.name}: el archivo está vacío.`;
+    if (f.size > maximo) return `${f.name}: supera el límite de ${tarea.entrega.max_mb} MB.`;
+  }
+  return null;
+}
+
 function mostrarFormularioEntrega(tarea) {
   document.getElementById("formEntrega").style.display = "block";
   document.getElementById("entregaComentario").value = tarea.borrador || "";
-  document.getElementById("entregaArchivo").value = "";
+  mostrarVersionPrograma(tarea);
 
-  // Este tipo de tarea no pide evidencia — se oculta el campo de archivo
-  // en vez de mostrarlo y luego dejar entregar sin usarlo.
   const campoArchivo = document.getElementById("entregaArchivo");
+  campoArchivo.value = "";
+  const visible = admiteArchivos(tarea);
   const etiquetaArchivo = document.querySelector('label[for="entregaArchivo"]');
-  campoArchivo.style.display = tarea.requiereArchivo ? "block" : "none";
-  if (etiquetaArchivo) etiquetaArchivo.style.display = tarea.requiereArchivo ? "block" : "none";
-  document.getElementById("entregaArchivoNota").style.display = tarea.requiereArchivo ? "block" : "none";
-
-  document.getElementById("archivoInfo").textContent = !tarea.requiereArchivo
-    ? "Esta tarea no requiere evidencia adjunta."
-    : tarea.archivo
-      ? `📎 Archivo registrado: ${tarea.archivo}`
-      : "Selecciona la evidencia que vas a registrar.";
+  campoArchivo.style.display = visible ? "block" : "none";
+  if (etiquetaArchivo) {
+    etiquetaArchivo.style.display = visible ? "block" : "none";
+    etiquetaArchivo.textContent = tarea.requiereArchivo ? "Adjuntar evidencia (obligatoria)" : "Adjuntar evidencia (opcional)";
+  }
+  campoArchivo.accept = tarea.entrega.extensions.map((e) => "." + e).join(",");
+  const nota = document.getElementById("entregaArchivoNota");
+  nota.style.display = visible ? "block" : "none";
+  nota.textContent = `${textoExtensiones(tarea.entrega.extensions)}, hasta ${tarea.entrega.max_mb} MB cada uno. Puedes elegir varios.`;
+  if (tarea.entrega.not_accepted && tarea.entrega.not_accepted.length) {
+    nota.textContent += ` Este tipo de tarea también admite ${textoExtensiones(tarea.entrega.not_accepted)}, pero el servicio de archivos todavía no los recibe.`;
+  }
+  campoArchivo.onchange = () => mostrarArchivosElegidos(tarea);
+  mostrarArchivosElegidos(tarea);
   const botones = document.getElementById("entregaBotones");
   botones.innerHTML = "";
   // el estilo "outline" de udv.css es blanco, para fondos oscuros: aquí no se vería
@@ -207,6 +399,8 @@ async function cargarDetalle() {
     document.getElementById("formEntrega").style.display = "none";
 
     mostrarArchivos(tareaActual.archivos);
+    mostrarComentarios(tareaActual);
+    mostrarHistorial(tareaActual);
 
     const contComentario = document.getElementById("detComentario");
     contComentario.innerHTML = "";
@@ -214,7 +408,7 @@ async function cargarDetalle() {
       const d = tareaActual.devolucion;
       const aviso = document.createElement("div");
       aviso.className = "udv-alert udv-alert-danger";
-      const fecha = d.at ? ` (${formatearFecha(d.at)})` : "";
+      const fecha = d.at ? ` (${horaGuatemala(d.at)})` : "";
       aviso.textContent = `Observación del revisor${fecha}: ${d.comment}`;
       contComentario.appendChild(aviso);
     }
@@ -222,7 +416,7 @@ async function cargarDetalle() {
       const d = tareaActual.aprobacion;
       const aviso = document.createElement("div");
       aviso.className = "udv-alert udv-alert-success";
-      const fecha = d.at ? ` (${formatearFecha(d.at)})` : "";
+      const fecha = d.at ? ` (${horaGuatemala(d.at)})` : "";
       aviso.textContent = `Comentario del revisor al aprobar${fecha}: ${d.comment}`;
       contComentario.appendChild(aviso);
     }
@@ -276,26 +470,43 @@ async function guardarBorrador(tarea) {
 // id que devolvió G2; 4) pide a G3 el submit o resubmit.
 async function confirmarEntrega(tarea) {
   const comentario = document.getElementById("entregaComentario").value.trim();
-  const archivoInput = document.getElementById("entregaArchivo");
-  const archivoNuevo = archivoInput.files[0];
+  const nuevos = [...document.getElementById("entregaArchivo").files];
+  const aviso = document.getElementById("avisoEntregaOk");
   document.getElementById("avisoEntregaError").style.display = "none";
-  document.getElementById("avisoEntregaOk").style.display = "none";
+  aviso.style.display = "none";
 
-  if (tarea.requiereArchivo && !tarea.archivo && !archivoNuevo) {
-    mostrarError("Debes seleccionar la evidencia antes de entregar.", "avisoEntregaError");
+  if (tarea.requiereArchivo && !archivosDelIntentoActual(tarea).length && !nuevos.length) {
+    mostrarError(tarea.estado === "returned"
+      ? "Para reenviar debes adjuntar la evidencia corregida."
+      : "Debes seleccionar la evidencia antes de entregar.", "avisoEntregaError");
     return;
   }
+  if (tarea.entrega.mode === "programa" && !tarea.versionPrograma) {
+    mostrarError("No se puede entregar sin una versión del programa enlazada.", "avisoEntregaError");
+    return;
+  }
+  const problema = validarArchivos(tarea, nuevos);
+  if (problema) {
+    mostrarError(problema, "avisoEntregaError");
+    return;
+  }
+  const subidos = [];
   try {
+    // El borrador va primero: lleva el comentario y, en tareas de programa,
+    // la versión del programa que G3 copia a la entrega.
     await apiFetch(`/assignments/${tarea.id}/submission-draft`, {
       method: "PUT",
       body: JSON.stringify({ comment: comentario }),
     });
-    if (archivoNuevo) {
-      const idArchivo = await subirArchivo(archivoNuevo);
+    for (const [i, archivo] of nuevos.entries()) {
+      aviso.textContent = `Subiendo ${i + 1} de ${nuevos.length}: ${archivo.name}…`;
+      aviso.style.display = "flex";
+      const idArchivo = await subirArchivo(archivo);
       await apiFetch(`/assignments/${tarea.id}/files`, {
         method: "POST",
-        body: JSON.stringify({ file_id: String(idArchivo), name: archivoNuevo.name }),
+        body: JSON.stringify({ file_id: String(idArchivo), name: archivo.name }),
       });
+      subidos.push(archivo.name);
     }
     const accion = tarea.estado === "returned" ? "resubmit" : "submit";
     await apiFetch(`/assignments/${tarea.id}/${accion}`, {
@@ -306,7 +517,12 @@ async function confirmarEntrega(tarea) {
     ok.textContent = accion === "resubmit" ? "Reenvío registrado correctamente." : "Entrega registrada correctamente.";
     ok.style.display = "flex";
   } catch (error) {
-    mostrarError(error.message, "avisoEntregaError");
+    aviso.style.display = "none";
+    // Si algunos archivos ya se subieron, quedan en esta entrega: se dice
+    // cuáles, para que el docente solo vuelva a elegir los que faltan.
+    const parte = subidos.length ? ` Ya quedaron registrados: ${subidos.join(", ")}.` : "";
+    if (subidos.length) await cargarDetalle();   // primero: recargar oculta los avisos
+    mostrarError(`${error.message.replace(/\.$/, "")}.${parte}`, "avisoEntregaError");
   }
 }
 
@@ -357,5 +573,6 @@ if (!idAsignacion) {
   document.getElementById("cargando").style.display = "none";
   mostrarError("No se indicó qué asignación mostrar. Vuelve al inbox y elige una tarjeta.");
 } else {
+  document.getElementById("btnComentar").addEventListener("click", comentar);
   cargarDetalle();
 }

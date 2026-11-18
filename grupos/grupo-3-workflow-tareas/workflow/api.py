@@ -8,6 +8,9 @@ Expone un `router` (APIRouter con prefijo /api/v1) que el main.py de la raíz mo
 - Paginación: {"page": 1, "per_page": 20, "total": 0, "data": [...]}
 """
 from typing import Optional
+import json
+from datetime import datetime, timezone
+from fastapi.responses import Response
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -25,7 +28,7 @@ from .matrix import SHORT, STANDARD
 PREFIX = "/api/v1"
 
 # Las 6 acciones de asignación que ahora son de G3 (antes las hacía G4).
-ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve")
+ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve", "close")
 
 
 def _codigo_mayusculas(body):
@@ -35,35 +38,91 @@ def _codigo_mayusculas(body):
         err["code"] = err["code"].upper()
     return body
 
+def _fechas_utc_z(value):
+    """Normaliza fechas UTC sin modificar los demás campos."""
+    if isinstance(value, list):
+        return [_fechas_utc_z(item) for item in value]
+
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key.endswith(("_at", "_en")) and isinstance(item, str):
+                try:
+                    dt = datetime.fromisoformat(
+                        item.replace("Z", "+00:00")
+                    )
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+
+                    result[key] = (
+                        dt.astimezone(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    )
+                    continue
+                except ValueError:
+                    pass
+
+            result[key] = _fechas_utc_z(item)
+
+        return result
+
+    return value
+
+    return value
 
 class FormatoErrorRoute(APIRoute):
-    """Convierte los errores de dominio y de validación al formato del CONTRATO_COMUN, sin
-    depender de manejadores registrados en la app de la raíz."""
+    """Maneja los errores de las rutas."""
 
     def get_route_handler(self):
         original = super().get_route_handler()
 
         async def handler(request: Request):
             try:
-                return await original(request)
+                response = await original(request)
+
+                if (
+                    response.headers.get("content-type", "").startswith("application/json")
+                    and hasattr(response, "body")
+                ):
+                    try:
+                        data = json.loads(response.body)
+                        data = _fechas_utc_z(data)
+                        response.body = json.dumps(
+                            data, ensure_ascii=False
+                        ).encode("utf-8")
+                        response.headers["content-length"] = str(len(response.body))
+                    except (ValueError, TypeError):
+                        pass
+
+                return response
+
             except WorkflowError as exc:
-                return JSONResponse(_codigo_mayusculas(exc.to_dict()), status_code=exc.status_code)
+                return JSONResponse(
+                    _codigo_mayusculas(exc.to_dict()),
+                    status_code=exc.status_code
+                )
             except RequestValidationError as exc:
-                return JSONResponse(_codigo_mayusculas(validation_body(exc)), status_code=422)
+                return JSONResponse(
+                    _codigo_mayusculas(validation_body(exc)),
+                    status_code=422
+                )
+
 
         return handler
-
 
 router = APIRouter(prefix=PREFIX, route_class=FormatoErrorRoute)
 
 
 # ---------------------------------------------------------------- esquemas
 class TaskTypeIn(BaseModel):
-    code: str
+    code: Optional[str] = None             # si falta, se arma a partir del nombre
     name: str
     requires_evidence: bool = False
     evidence_type: Optional[str] = None
     flow: str = "standard"
+    delivery: Optional[str] = None         # texto | ambos | archivo
+    description: Optional[str] = None
 
 
 class TaskIn(BaseModel):
@@ -74,6 +133,8 @@ class TaskIn(BaseModel):
     due_date: str
     responsible_id: Optional[int] = None
     reviewer_id: Optional[int] = None
+    course_id: Optional[int] = None      # curso del que trata la tarea (catálogo de G1)
+    period_id: Optional[int] = None      # período académico
 
 
 class TaskPatch(BaseModel):
@@ -84,6 +145,8 @@ class TaskPatch(BaseModel):
     due_date: Optional[str] = None
     responsible_id: Optional[int] = None
     reviewer_id: Optional[int] = None
+    course_id: Optional[int] = None
+    period_id: Optional[int] = None
 
 
 class RecipientsIn(BaseModel):
@@ -116,14 +179,25 @@ def post_task_type(body: TaskTypeIn, conn=Depends(get_conn), user=Depends(curren
 # ------------------------------------------------------------------ tasks
 @router.get("/tasks", tags=["tasks"])
 def get_tasks(status: Optional[str] = None, page: int = Query(1),
-              per_page: int = Query(20), conn=Depends(get_conn),
-              user=Depends(current_user)):
-    return tasks.list_tasks(conn, user, status, page, per_page)
+              per_page: int = Query(20),
+              include: Optional[str] = Query(None, description="progress: agrega el avance de cada tarea"),
+              conn=Depends(get_conn), user=Depends(current_user)):
+    return tasks.list_tasks(conn, user, status, page, per_page,
+                            include=tuple(x.strip() for x in (include or "").split(",") if x.strip()))
 
 
 @router.post("/tasks", status_code=201, tags=["tasks"])
 def post_task(body: TaskIn, conn=Depends(get_conn), user=Depends(current_user)):
     return tasks.create_task(conn, user, body.model_dump())
+
+
+# Va antes de /tasks/{task_id}: si no, "eligible-teachers" se leería como un id.
+@router.get("/tasks/eligible-teachers", tags=["tasks"],
+            summary="Docentes que dan un curso, para proponerlos como destinatarios")
+def get_eligible_teachers(course_id: int = Query(..., ge=1),
+                          period_id: Optional[int] = Query(None, ge=1),
+                          conn=Depends(get_conn), user=Depends(current_user)):
+    return tasks.list_course_teachers(conn, user, course_id, period_id)
 
 
 @router.get("/tasks/{task_id}", tags=["tasks"])
@@ -189,8 +263,8 @@ for _action in ASSIGNMENT_ACTIONS:
              deprecated=True)
 def post_action(assignment_id: int, action: str, body: ActionIn = ActionIn(),
                 conn=Depends(get_conn), user=Depends(current_user)):
-    """Ruta genérica anterior; se mantiene para `close` y `cancel`, que no tienen ruta propia.
-    Para las 6 acciones del contrato usar /assignments/{id}/<acción>."""
+    """Ruta genérica anterior, conservada por compatibilidad.
+    Para las acciones del contrato usar /assignments/{id}/<acción>."""
     return transitions.perform(conn, assignment_id, action, user, body.comment)
 
 
