@@ -124,7 +124,7 @@ def completar_openapi(app: FastAPI):
                         r["200"]["description"] = (
                             "Archivo descargado. Lo descargan su dueño y un admin; auditoría, si el archivo ya está "
                             "vinculado; revisor y coordinación, solo si el archivo es de una entrega de una tarea donde "
-                            "son el revisor designado (o cualquier revisor, si la tarea no tiene uno) o que ellos crearon. "
+                            "son el revisor designado o que ellos crearon. "
                             "Un archivo sin vincular solo lo descargan su dueño y un admin. Cualquier otro usuario recibe 403."
                         )
                 if "422" in r:

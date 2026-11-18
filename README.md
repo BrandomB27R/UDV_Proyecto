@@ -181,8 +181,9 @@ Reglas que tocan a más de un grupo. El texto completo está en
 |---|---|---|---|
 | A | Quién escribe la tabla `entrega` | G3 crea la fila al hacer `submit`/`resubmit`; G4 solo la crea al vincular el primer archivo si aún no existe | 2026-11-13 · en `main` |
 | B | Quién revisa una asignación | Con revisor designado, solo ese revisor; sin revisor, la coordinación dueña de la tarea o un administrador | 2026-11-12, revisada 2026-11-16 · en `main` |
-| C | Quién elabora el programa de curso | El docente elabora y envía el suyo; coordinación y revisor revisan y aprueban; dirección autoriza | 2026-11-13 · en `main`; falta la migración 1.2.2 del G1 (permisos) |
-| D | Quién descarga un archivo | Dueño, administrador y auditoría siempre; revisor y coordinación solo en tareas donde son revisor designado o creador | 2026-11-16 · pendiente en G2 |
+| C | Quién elabora el programa de curso | El docente elabora y envía el suyo; coordinación y revisor revisan y aprueban; dirección autoriza | 2026-11-13 · en `main`, con los permisos de la migración 1.2.2 |
+| D | Quién descarga un archivo | Dueño y administrador siempre; auditoría, cualquier archivo ya vinculado; revisor y coordinación solo en tareas donde son revisor designado o creador | 2026-11-16 · en `main` |
+| E | Perfil de coordinación | Coordinación, revisión y autoridad los ejerce la misma persona: su usuario tiene los roles `coordinator`, `reviewer` y `authority`. Los seis roles se conservan | 2026-11-17 · migración 1.2.2 |
 
 ### Versiones oficiales de librerías compartidas
 
@@ -208,7 +209,7 @@ Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 ### Base de datos, entorno local y despliegue
 
 - **Una sola base:** `db_udv` en MySQL 8.4, con el esquema del G1 (versión
-  1.2.1). Ningún grupo crea, borra ni altera tablas desde su código (nada de
+  1.2.2). Ningún grupo crea, borra ni altera tablas desde su código (nada de
   `Base.metadata.create_all`); un cambio de esquema se le pide al G1, que lo
   entrega como migración numerada.
 - **Conexión:** siempre por la variable `DATABASE_URL`
@@ -290,3 +291,4 @@ tras revisión · **merge** = la integración aprobada.
 | 2026-10-10 | §5: FastAPI, SQLite e identificadores enteros pasan a ✅; tabla de versiones oficiales de librerías compartidas. §4: los `requirements.txt` de subpaquetes solo apuntan al del grupo | G2, G3 y G4 ya escribían código sobre estas decisiones; G4 pedía `fastapi==0.115.0` y G2 `0.142.1`, y las dependencias de G3 y G4 no se instalaban desde la raíz |
 | 2026-10-13 | §5: motor MySQL 8 en lugar de SQLite; driver PyMySQL; despliegue con Docker en Railway; SQLAlchemy, PyMySQL y cryptography en versiones oficiales; prohibidos los rangos de versión; nueva sección de base de datos, entorno local y despliegue; prioridades y dueño de acciones de asignación quedan pendientes. §4: archivos nuevos de la raíz (`main.py`, Docker, `railway.json`, `requirements-base.txt`), regla de una sola app con `APIRouter` y ramas `qa/*` y `pm/*` documentadas | G1 montó el esquema en MySQL; el deploy en Railway fallaba porque `main` no tenía punto de entrada; G3, G4 y G5 levantaban cada uno su propia app y base; G3 y G4 usan prioridades distintas e implementan las mismas transiciones; QA se separó como equipo aparte y sus ramas no estaban documentadas |
 | 2026-11-17 | §2: el paquete del G3 es `workflow`; carpetas del PM. §4: `portal/`, `tests/integracion/` y `grupos/udv-styles/` en la raíz del PM; nueva sección "Interfaz" con las rutas de las pantallas. §5: quedan ✅ migraciones, prioridad (`urgent`), dueño de las acciones (G3), zona horaria (UTC), frontend y transporte de eventos; nueva tabla de decisiones de integración A–D; `python-dotenv` en versiones oficiales; base, entorno local y despliegue al día (MySQL 8.4, UTC, portal, cuentas de demostración, volumen, `/api/v1/health`, pruebas de integración). §6: mezclar `main` y correr las pruebas de integración antes del PR | El documento seguía como el 13-oct: marcaba pendientes seis decisiones ya tomadas y aplicadas, y no mencionaba el portal, las pantallas ni las pruebas de integración |
+| 2026-11-17 (noche) | §5: decisiones C y D en `main`; nueva decisión E (perfil de coordinación con tres roles); esquema 1.2.2 | Cierre de entregas de los grupos: el PM integra G2 y G5 y escribe la migración 1.2.2 que el G1 no entregó |

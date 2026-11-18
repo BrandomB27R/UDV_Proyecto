@@ -95,7 +95,7 @@ En `auditoria` solo se escriben a mano los eventos de acceso (login, login falli
 - Contraseñas solo con hash bcrypt; ninguna respuesta las devuelve.
 - Autorización en el servidor con `Authorization: Bearer <token>`.
 - Errores en el formato común, sin trazas, SQL ni rutas internas.
-- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado (cualquier revisor si la tarea no tiene uno) o que ellos crearon (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
+- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado o que ellos crearon (una tarea sin revisor designado la revisa la coordinación que la creó o un admin) (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
 - Subida de `/files`: se lee por bloques de 1 MB y se corta al pasar 5 MB, sin cargar el archivo entero en memoria.
 - Login: si el correo no existe se verifica igual una contraseña falsa (misma demora), el bloqueo de 5 intentos sigue respondiendo 429 y también se limita por IP (`LOGIN_MAX_INTENTOS_IP`).
 - Token: `verificar_token` exige `exp` y `sub`. Un admin no puede desactivarse ni quitarse su propio rol, y cambiar una contraseña cierra las sesiones abiertas de ese usuario.

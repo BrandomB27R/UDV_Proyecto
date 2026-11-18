@@ -210,10 +210,40 @@ def test_otro_docente_no_descarga_archivo_ajeno(c, s):
     assert c.get(f"/api/v1/files/{fid}", headers=s["docente2"]).status_code in (403, 404)
 
 
-def test_revisor_puede_descargar_evidencia_del_docente(c, s):
-    """El revisor tiene files.download en la matriz del G1 y debe ver la evidencia."""
+def _entregar_archivo(c, s, revisor):
+    """Tarea para docente1 con un PDF vinculado a su entrega; devuelve el id del archivo."""
+    _, asign = publicar(c, s, revisor=revisor)
+    a = asign[DOC1]
+    assert c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={}).status_code == 200
     fid = _subir(c, s["docente1"])
-    assert c.get(f"/api/v1/files/{fid}", headers=s["revisor"]).status_code == 200
+    r = c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+               json={"file_id": str(fid), "name": "evidencia.pdf"})
+    assert r.status_code == 200, r.text
+    return fid
+
+
+def test_descarga_de_la_evidencia_segun_la_tarea(c, s):
+    """Decisión D: dueño, admin y auditoría siempre; revisor y coordinación solo en su tarea."""
+    fid = _entregar_archivo(c, s, REVISOR)
+    for quien in ("docente1", "admin", "auditoria", "revisor", "coordinacion"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code == 200, quien
+    for quien in ("docente2", "direccion"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code in (403, 404), quien
+
+
+def test_sin_revisor_designado_descarga_la_coordinacion_no_cualquier_revisor(c, s):
+    """Decisión B revisada: sin revisor designado revisa la coordinación dueña o un admin."""
+    fid = _entregar_archivo(c, s, None)
+    assert c.get(f"/api/v1/files/{fid}", headers=s["coordinacion"]).status_code == 200
+    assert c.get(f"/api/v1/files/{fid}", headers=s["revisor"]).status_code == 403
+
+
+def test_archivo_sin_vincular_solo_lo_descargan_su_dueno_y_admin(c, s):
+    fid = _subir(c, s["docente1"])
+    assert c.get(f"/api/v1/files/{fid}", headers=s["docente1"]).status_code == 200
+    assert c.get(f"/api/v1/files/{fid}", headers=s["admin"]).status_code == 200
+    for quien in ("revisor", "coordinacion", "auditoria"):
+        assert c.get(f"/api/v1/files/{fid}", headers=s[quien]).status_code == 403, quien
 
 
 def test_archivo_eliminado_no_se_descarga(c, s, app):

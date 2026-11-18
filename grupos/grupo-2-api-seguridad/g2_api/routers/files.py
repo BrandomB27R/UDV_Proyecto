@@ -136,7 +136,7 @@ _SQL_TAREA_DE_LA_ENTREGA = text(
 #  - dueño del archivo y admin: pueden siempre.
 #  - auditoria: cualquier archivo ya vinculado a una entrega, un comentario o una version de programa.
 #  - revisor: solo si el archivo es de una entrega de una tarea donde es el revisor designado
-#    (si la tarea no tiene revisor designado, cualquier revisor).
+#    (si la tarea no tiene revisor designado, la revisa la coordinacion que la creo o un admin).
 #  - coordinacion: solo si el archivo es de una entrega de una tarea que el creo.
 #  - un archivo todavia suelto (sin vincular) solo lo descargan su dueño y el admin.
 #  - docente ajeno, autoridad y cualquiera sin el permiso files.download: 403.
@@ -160,7 +160,9 @@ def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo) -> bool:
     creador_id, revisor_id = fila
     if "coordinator" in roles and creador_id == usuario.id:
         return True
-    return "reviewer" in roles and (revisor_id is None or revisor_id == usuario.id)
+    # revisor designado (sea revisor o coordinacion). Sin revisor designado no descarga cualquier revisor:
+    # esa tarea la revisa la coordinacion que la creo o un admin (decision B, revisada el 16-nov).
+    return revisor_id == usuario.id
 
 
 @router.get("/{id}")
