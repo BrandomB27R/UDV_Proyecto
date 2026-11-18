@@ -42,7 +42,8 @@ export function resumenPasoPrograma(estado) {
 }
 
 /**
- * Qué toca ahora. ctx: {acciones: Set, avance: {listas, total, faltan}, sinGuardar: [titulos], motivo, responsable}
+ * Qué toca ahora. ctx: {acciones: Set, avance: {listas, total, faltan}, sinGuardar: [titulos], motivo, responsable, conTarea}
+ * conTarea: se abrió desde la tarea del docente y al enviar también se entrega la tarea.
  * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria, conMotivo}.
  */
 export function pasoPrograma(v, ctx) {
@@ -64,9 +65,10 @@ export function pasoPrograma(v, ctx) {
       titulo: v.estado === "returned" ? "Corrige el programa y vuelve a enviarlo" : "Completa el programa y envíalo a revisión",
       resumen: !puedeEnviar ? "Puedes editarlo; el envío lo hace el docente responsable."
         : faltanReq.length ? `Para pasar a «Enviada» ${faltanReq.length === 1 ? "falta un requisito" : `faltan ${faltanReq.length} requisitos`}.`
-          : "Todo listo: ya puedes enviarlo a revisión.",
+          : ctx.conTarea ? "Todo listo: al enviarlo a revisión también se entrega la tarea." : "Todo listo: ya puedes enviarlo a revisión.",
       requisitos: req,
-      principal: puedeEnviar ? { accion: "submit", etiqueta: v.estado === "returned" ? "Reenviar a revisión" : "Enviar a revisión", habilitada: !faltanReq.length,
+      principal: puedeEnviar ? { accion: "submit", habilitada: !faltanReq.length,
+        etiqueta: ctx.conTarea ? "Enviar a revisión y entregar la tarea" : v.estado === "returned" ? "Reenviar a revisión" : "Enviar a revisión",
         motivo: faltanReq.length ? (sinGuardar.length && !faltan.length ? "Se habilita cuando guardes tus cambios." : "Se habilita cuando las nueve secciones estén listas.") : "" } : null,
     };
   }

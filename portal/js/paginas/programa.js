@@ -7,7 +7,7 @@ import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, icono, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
-import { sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
+import { sinAcceso, textoDeError, todasLasPaginas, guardarAviso } from "../componentes.js";
 import { api } from "../api.js";
 import { requerirSesion, tieneRol } from "../sesion.js";
 import {
@@ -35,6 +35,7 @@ const EXITO = {
 
 const st = {
   v: null, programa: null, versiones: [], acciones: new Set(),
+  asignacion: null,             // la tarea de ?asignacion=, si quien mira puede verla
   cursos: null, perfiles: undefined,
   seccion: SECCIONES.find((s) => `#${s.id}` === location.hash)?.id || "general",
   editores: new Map(),          // seccion -> {editor, base, guardadoEn}
@@ -58,6 +59,7 @@ async function cargar() {
     st.versiones = [...(p.versiones || [])].sort((a, b) => b.numero_version - a.numero_version);
   } catch { st.versiones = [st.v]; }
   st.acciones = accionesDeVersion(st.v);
+  if (asignacionId) st.asignacion = await api(`/assignments/${encodeURIComponent(asignacionId)}`).catch(() => null);
   st.editores.clear();
   if (st.acciones.has("edit")) await cargarCatalogos();
   const g = contenidoDe(st.v, "general");
@@ -71,6 +73,12 @@ async function cargarCatalogos() {
 }
 
 const editable = () => st.acciones.has("edit");
+
+// Abierta desde su tarea por el docente de esa asignación, con la tarea por entregar:
+// enviar el programa también entrega la tarea (submit, o resubmit si se la devolvieron).
+const ESTADOS_POR_ENTREGAR = ["in_progress", "returned"];
+const conTarea = () => !!st.asignacion && st.asignacion.assignee_id === yo.id
+  && ESTADOS_POR_ENTREGAR.includes(st.asignacion.status) && st.acciones.has("submit");
 
 function editorDe(id) {
   if (!st.editores.has(id)) {
@@ -187,7 +195,7 @@ let campoMotivo = null;
 function pintarPaso(zona) {
   const avance = avanceDe(st.v);
   const responsable = contenidoDe(st.v, "responsables")?.docente || null;
-  const p = pasoPrograma(st.v, { acciones: st.acciones, avance, sinGuardar: seccionesSinGuardar().map((s) => s.titulo), motivo: st.motivo, responsable });
+  const p = pasoPrograma(st.v, { acciones: st.acciones, avance, sinGuardar: seccionesSinGuardar().map((s) => s.titulo), motivo: st.motivo, responsable, conTarea: conTarea() });
   // El campo de observación se conserva entre repintados para no perder el foco.
   if (p.conMotivo && !campoMotivo) {
     campoMotivo = h("div", { class: "v-campo" },
@@ -238,8 +246,11 @@ async function ejecutar(accion, zonaError) {
   }
   st.ocupado = true;
   poner(zonaError);
+  const entregar = accion === "submit" && conTarea();
+  if (entregar) refrescarEstado();     // botón deshabilitado mientras se envía
   try {
     await transicionVersion(st.v.id, accion, ["return", "approve"].includes(accion) ? st.motivo.trim() || null : null);
+    if (entregar) return await entregarTarea();
     st.aviso = { tipo: "ok", texto: EXITO[accion] || "Listo." };
     st.motivo = ""; campoMotivo = null;
     st.ocupado = false;
@@ -250,6 +261,20 @@ async function ejecutar(accion, zonaError) {
     // 409: por ejemplo, quien elaboró la versión no puede aprobarla. Se muestra el mensaje tal cual.
     poner(zonaError, mensaje("error", e.message));
   }
+}
+
+/** Segundo paso de «Enviar a revisión y entregar la tarea»: el programa ya se envió. Siempre vuelve a la tarea. */
+async function entregarTarea() {
+  const a = st.asignacion;
+  const accion = a.status === "returned" ? "resubmit" : "submit";
+  try {
+    await api(`/assignments/${encodeURIComponent(a.id)}/${accion}`, { method: "POST", body: {} });
+    guardarAviso({ asignacion: a.id, tipo: "ok", texto: accion === "resubmit" ? "Programa enviado a revisión y tarea reentregada." : "Programa enviado a revisión y tarea entregada." });
+  } catch (e) {
+    guardarAviso({ asignacion: a.id, tipo: "aviso", enfocarEntrega: true,
+      texto: `El programa se envió, pero falta entregar la tarea. ${e.message ? `${e.message.replace(/\.?$/, ".")} ` : ""}Usa el botón «${accion === "resubmit" ? "Reentregar" : "Entregar"}».` });
+  }
+  location.assign(RUTAS.asignacion(a.id));
 }
 
 // ── Secciones ────────────────────────────────────────────────

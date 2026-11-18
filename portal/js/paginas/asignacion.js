@@ -14,7 +14,7 @@ import {
   lineaDeEstados, capacidades, formaDeEntrega, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial,
 } from "../flujo.js";
 import { requerirSesion, perfiles, puedeRevisar, tieneRol } from "../sesion.js";
-import { sinAcceso } from "../componentes.js";
+import { sinAcceso, tomarAviso } from "../componentes.js";
 import { leerVersion, abrirVersionDeAsignacion } from "../programa/api-programa.js";
 import { avanceDe } from "../programa/secciones.js";
 
@@ -42,6 +42,7 @@ const st = {
   texto: "",                 // mensaje para quien revisa (borrador local)
   motivo: "",                // observación del revisor
   aviso: null,               // {tipo, texto} tras una acción
+  enfocarEntrega: false,     // al volver del programa sin entregar: foco en «Entregar»
   avisoArchivo: null,        // estado de la última subida
   ocupado: false,
   programa: null,            // {version, avance} de la versión ligada (tareas de programa)
@@ -723,5 +724,9 @@ montarBarra(yo, seccionDeOrigen());
 if (!id || !/^\d+$/.test(id)) {
   pintarError("Falta indicar qué tarea abrir.");
 } else {
+  // Aviso que deja programa.html al enviar el programa desde esta tarea (solo si es de esta tarea).
+  const llegado = tomarAviso();
+  if (llegado && String(llegado.asignacion ?? id) === id) { st.aviso = { tipo: llegado.tipo, texto: llegado.texto }; st.enfocarEntrega = !!llegado.enfocarEntrega; }
   await cargar();
+  if (st.enfocarEntrega) document.querySelector(".d-accion__principal")?.focus();
 }
