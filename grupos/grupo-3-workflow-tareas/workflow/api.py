@@ -125,6 +125,12 @@ class TaskTypeIn(BaseModel):
     description: Optional[str] = None
 
 
+class TaskTypePatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+
+
 class TaskIn(BaseModel):
     type_id: int
     title: str
@@ -167,13 +173,21 @@ class CancelIn(BaseModel):
 # ------------------------------------------------------------- task types
 @router.get("/task-types", tags=["task-types"])
 def get_task_types(page: int = Query(1), per_page: int = Query(20),
+                   include_inactive: bool = Query(False),
                    conn=Depends(get_conn), user=Depends(current_user)):
-    return tasks.list_task_types(conn, page, per_page)
+    return tasks.list_task_types(conn, page, per_page, actor=user,
+                                 include_inactive=include_inactive)
 
 
 @router.post("/task-types", status_code=201, tags=["task-types"])
 def post_task_type(body: TaskTypeIn, conn=Depends(get_conn), user=Depends(current_user)):
     return tasks.create_task_type(conn, user, body.model_dump())
+
+
+@router.patch("/task-types/{type_id}", tags=["task-types"])
+def patch_task_type(type_id: int, body: TaskTypePatch, conn=Depends(get_conn),
+                    user=Depends(current_user)):
+    return tasks.update_task_type(conn, user, type_id, body.model_dump(exclude_unset=True))
 
 
 # ------------------------------------------------------------------ tasks
