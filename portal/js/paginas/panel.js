@@ -1,6 +1,6 @@
 // Panel de cumplimiento (coordinación, dirección, administración y auditoría), mockup vinci-panel.
 // Cuatro indicadores; una sola tabla "Requieren atención" (por revisar + vencidas + por vencer, con
-// filtros); y "Por docente". Fuentes: /dashboard, /review-queue, /tasks y /tasks/{id}/assignments.
+// filtros); y "Por docente". Fuentes: /dashboard, /dashboard/teachers, /review-queue y /tasks.
 import { api } from "../api.js";
 import { montarBarra, puedeVerPanel } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
@@ -30,17 +30,16 @@ try {
 // La cola de revisión y las tareas no las pueden leer todos los perfiles del panel: se decide por los
 // roles de /me antes de pedirlas (G4: revisión, coordinación o admin; G3: coordinación, revisión o dirección).
 const puedeListarTareas = tieneRol(yo, "coordinator", "reviewer", "authority");
-const [cola, tareasR, tiposR] = await Promise.all([
+// "Por docente" sale de /dashboard/teachers (mismos roles y criterios que /dashboard: cuadra con las tarjetas).
+// /tasks solo se usa para el tipo y el curso bajo el título de las filas.
+const [cola, tareasR, tiposR, docentesR] = await Promise.all([
   puedeRevisar(yo) ? todasLasPaginas(api, "/review-queue").catch(() => null) : Promise.resolve(null),
   puedeListarTareas ? todasLasPaginas(api, "/tasks?status=published").catch(() => null) : Promise.resolve(null),
   api("/task-types?per_page=100").catch(() => ({ data: [] })),
+  api("/dashboard/teachers").catch(() => null),
 ]);
 const tipos = new Map((tiposR.data || []).map((t) => [t.id, t.name]));
 const tareas = new Map((tareasR?.data || []).map((t) => [t.id, t]));
-// Una llamada por tarea publicada para "Por docente" (NOTAS_BACKEND.md: se ahorra con una ruta agregada).
-const asignaciones = tareasR
-  ? (await Promise.all([...tareas.keys()].map((id) => todasLasPaginas(api, `/tasks/${id}/assignments`).then((r) => r.data || []).catch(() => [])))).flat()
-  : null;
 
 const porEstado = d.assignments?.by_state || {};
 const n = (e) => Number(porEstado[e]) || 0;
@@ -82,24 +81,9 @@ let filtro = FILTROS.find((x) => `#${x.id}` === location.hash)?.id || "todas";
 
 // ── Por docente ─────────────────────────────────────────────
 function porDocente() {
-  const m = new Map();
-  const de = (id, nombre) => {
-    if (!m.has(id)) m.set(id, { nombre, asignadas: asignaciones ? 0 : null, vencidas: 0, porVencer: 0, porRevisar: 0, terminadas: asignaciones ? 0 : null });
-    const x = m.get(id);
-    if (!x.nombre && nombre) x.nombre = nombre;
-    return x;
-  };
-  for (const a of asignaciones || []) {
-    if (a.status === "cancelled") continue;
-    const x = de(a.assignee_id, a.assignee_name);
-    x.asignadas += 1;
-    if (["approved", "closed"].includes(a.status)) x.terminadas += 1;
-    if (!cola && ["submitted", "under_review"].includes(a.status)) x.porRevisar += 1;
-  }
-  for (const it of d.overdue?.items || []) de(it.user_id, it.user_name).vencidas += 1;
-  for (const it of d.due_soon?.items || []) de(it.user_id, it.user_name).porVencer += 1;
-  for (const q of revisar) { const x = (cola?.data || []).find((y) => y.id === q.aid); if (x) de(x.assignee_id, x.teacher).porRevisar += 1; }
-  return [...m.values()].sort((a, b) => b.vencidas - a.vencidas || b.porVencer - a.porVencer || b.porRevisar - a.porRevisar
+  return (docentesR?.data || []).map((x) => ({
+    nombre: x.name || x.user_email, asignadas: x.assigned, vencidas: x.overdue, porVencer: x.due_soon, porRevisar: x.to_review, terminadas: x.finished,
+  })).sort((a, b) => b.vencidas - a.vencidas || b.porVencer - a.porVencer || b.porRevisar - a.porRevisar
     || String(a.nombre).localeCompare(String(b.nombre)));
 }
 
@@ -177,7 +161,7 @@ function seccionDocentes() {
     h("div", {},
       h("h2", { id: "t-docentes", class: "v-h2" }, "Por docente"),
       h("p", { class: "v-nota" }, "Quién tiene qué pendiente. Ordenado por vencidas.")),
-    !asignaciones ? mensaje("info", "Asignadas y terminadas no se muestran: tu perfil no lista las tareas.") : null,
+    !docentesR ? mensaje("error", "No se pudo cargar el resumen por docente.") : null,
     filas.length ? h("table", { class: "pn-tabla pn-tabla--docentes" },
       h("caption", { class: "v-sr" }, "Pendientes por docente"),
       h("thead", {}, h("tr", {}, ["Docente", "Asignadas", "Vencidas", "Por vencer", "Por revisar", "Terminadas", "Avance"].map((t, i) =>

@@ -1,5 +1,5 @@
 // Tareas (coordinación), mockup vinci-tareas: tabla con avance por tarea, filtros y resumen.
-// Para "Asignada a" y los conteos se pide /tasks/{id}/assignments por cada tarea (NOTAS_BACKEND.md).
+// El avance de cada tarea viene en una sola consulta: GET /tasks?include=progress (PR #60).
 import { api } from "../api.js";
 import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
@@ -24,30 +24,29 @@ const DIAS_AVISO = 3;
 let tareas = [];
 const tipos = new Map();
 try {
-  const [t, ty] = await Promise.all([todasLasPaginas(api, "/tasks"), api("/task-types?per_page=100")]);
+  const [t, ty] = await Promise.all([todasLasPaginas(api, "/tasks?include=progress"), api("/task-types?per_page=100")]);
   tareas = t.data || [];
   for (const x of ty?.data || []) tipos.set(x.id, x);
 } catch (e) {
   await sinAcceso(raiz, "Tareas", textoDeError(e, SIN_PERMISO));
 }
-// Una llamada por tarea publicada o cancelada (los borradores no tienen asignaciones).
-await Promise.all(tareas.filter((t) => t.status !== "draft").map(async (t) => {
-  try { t._asig = (await todasLasPaginas(api, `/tasks/${t.id}/assignments`)).data || []; } catch { t._asig = null; }
-}));
 for (const t of tareas) t._av = avance(t);
 
-/** Conteos de una tarea a partir de sus asignaciones. */
+/** Conteos de una tarea a partir de progress: {total, done, to_review, overdue_pending, by_status, assignee_name, assignee_names}.
+ *  nombres (todos los destinatarios, sin cancelados) se usa para buscar por docente. */
 function avance(t) {
-  const asig = (t._asig || []).filter((a) => a.status !== "cancelled");
-  const total = asig.length;
-  const terminadas = asig.filter((a) => ["approved", "closed"].includes(a.status)).length;
-  const porRevisar = asig.filter((a) => ["submitted", "under_review"].includes(a.status)).length;
-  const pendientes = asig.filter((a) => PENDIENTES.includes(a.status)).length;
-  const dias = diasHasta(t.due_date);
-  const vencidas = dias != null && dias < 0 ? pendientes : 0;
-  const entregas = asig.some((a) => !["assigned", "in_progress"].includes(a.status));
-  const nombres = asig.map((a) => a.assignee_name).filter(Boolean);
-  return { total, terminadas, porRevisar, pendientes, vencidas, dias, entregas, nombres, todas: total > 0 && terminadas === total };
+  const p = t.progress || {};
+  const por = p.by_status || {};
+  const n = (e) => Number(por[e]) || 0;
+  const total = Number(p.total) || 0;                      // sin las canceladas
+  const terminadas = Number(p.done) || 0;
+  const pendientes = PENDIENTES.reduce((s, e) => s + n(e), 0);
+  const entregas = Object.keys(por).some((e) => !["assigned", "in_progress", "cancelled"].includes(e) && n(e) > 0);
+  return {
+    total, terminadas, porRevisar: Number(p.to_review) || 0, pendientes, vencidas: Number(p.overdue_pending) || 0,
+    dias: diasHasta(t.due_date), entregas, nombres: Array.isArray(p.assignee_names) ? p.assignee_names : (p.assignee_name ? [p.assignee_name] : []), todas: total > 0 && terminadas === total,
+    leido: !!t.progress,
+  };
 }
 
 /** "María García", "5 docentes" o "Todos los docentes · 12". */
@@ -57,7 +56,7 @@ function asignadaA(t) {
   const n = t.status === "draft" ? (regla.mode === "users" ? (regla.user_ids || []).length : null) : av.total;
   if (regla.mode === "all") return n != null ? `Todos los docentes · ${n}` : "Todos los docentes";
   if (regla.mode === "filter") return `Docentes de ${regla.unit || regla.campus}${n != null ? ` · ${n}` : ""}`;
-  if (n === 1) return av.nombres[0] || "1 docente";
+  if (n === 1) return t.progress?.assignee_name || av.nombres[0] || "1 docente";
   return n != null ? `${n} docentes` : "Sin destinatarios";
 }
 
@@ -176,7 +175,7 @@ function fila(t) {
 function celdaAvance(t) {
   const av = t._av;
   if (t.status === "draft") return h("span", { class: "v-nota" }, "Borrador · sin publicar");
-  if (t._asig == null) return h("span", { class: "v-nota" }, "No se pudo leer el avance.");
+  if (!av.leido) return h("span", { class: "v-nota" }, "No se pudo leer el avance.");
   const notas = [];
   if (av.porRevisar) notas.push(h("span", { class: "tr-n--revisar" }, `${av.porRevisar} por revisar`));
   if (av.vencidas) notas.push(h("span", { class: "tr-n--vencida" }, plural(av.vencidas, "vencida", "vencidas")));

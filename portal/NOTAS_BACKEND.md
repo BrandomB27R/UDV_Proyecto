@@ -4,7 +4,7 @@ Lo que la interfaz de `portal/` todavía necesita de la API y resuelve con rodeo
 Ninguno de estos cambios va en `pm/ui-unificada`: esta rama solo toca `portal/` y
 `grupos/udv-styles/`.
 
-## Ya resuelto con la API nueva (PR #47, #49, #52, #53, #55 y #56)
+## Ya resuelto con la API nueva (PR #47, #49, #52, #53, #55, #56, #60 y #62)
 
 Se quitaron los rodeos que dependían de esto:
 
@@ -30,6 +30,11 @@ Se quitaron los rodeos que dependían de esto:
 - "Quitar" en cada archivo del intento abierto: `DELETE /assignments/{id}/files/{file_id}`
   (PR #56). La lista se repinta con `files` de la respuesta, sin perder el mensaje;
   tras entregar ya no aparece.
+- Panel y Tareas sin una llamada por tarea (PR #60): "Por docente" sale de
+  `GET /dashboard/teachers` (cuadra con las tarjetas y ya lo ven administración y
+  auditoría) y el avance de cada tarea de `GET /tasks?include=progress`.
+- Buscar por docente en Tareas (PR #62): `progress.assignee_names` trae a todos los
+  destinatarios, así que la búsqueda encuentra también las tareas de varios docentes.
 
 ## Pendiente
 
@@ -60,49 +65,28 @@ cambiarla, el docente quita el archivo y lo vuelve a subir. Se resuelve junto co
 `not_accepted` dice el resto; la pantalla lo muestra así. Si el G2 amplía los tipos
 (por ejemplo DOCX o XLSX para "Cargar evidencia"), basta con que `delivery` lo refleje.
 
-### 4. Panel y Tareas: una llamada por cada tarea (G3 y G6)
-
-"Tareas" pide `GET /tasks/{id}/assignments` por cada tarea publicada o cancelada para
-saber "Asignada a" (nombre si es una persona) y los conteos de avance. El "Panel" hace
-lo mismo para "Por docente" (asignadas y terminadas por docente). Con muchas tareas son
-muchas llamadas. Rutas que lo ahorrarían:
-
-- `GET /tasks?include=progress` (o campos nuevos en `GET /tasks`): por tarea
-  `{assignees_total, first_assignee_name, by_status: {...}, overdue_pending, to_review}`,
-  donde `overdue_pending` son las asignaciones pendientes con la fecha vencida y
-  `to_review` las entregadas o en revisión.
-- `GET /dashboard/teachers`: `{data: [{user_id, name, assigned, overdue, due_soon,
-  to_review, finished}]}`, con los mismos criterios que `/dashboard` (asignaciones
-  publicadas, sin canceladas), para que "Por docente" cuadre con las tarjetas.
-
-Además: administración y auditoría ven el panel, pero `GET /tasks` les responde 403 y
-`GET /review-queue` es solo para revisión, coordinación y administración. Para ellas el
-panel muestra las tarjetas y las vencidas/por vencer, y avisa que no puede listar las
-entregas por revisar ni las asignadas/terminadas por docente. Con `/dashboard/teachers`
-(y la lista de por revisar dentro de `/dashboard`) el panel sería completo para todos.
-
 ## Programas de curso (etapa 2)
 
-### 5. Contenidos por unidad y módulo (G5)
+### 4. Contenidos por unidad y módulo (G5)
 
 El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e ignora
 `unidad_padre_id`. La pantalla edita unidades (título y horas) con temas,
 reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
 `unidad_padre_id`.
 
-### 6. "Sin prerrequisitos" no se guarda (G5)
+### 5. "Sin prerrequisitos" no se guarda (G5)
 
 La sección se da por completa con al menos un curso o con la casilla "Sin
 prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
 navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
 
-### 7. `/changes` devuelve identificadores internos (G5)
+### 6. `/changes` devuelve identificadores internos (G5)
 
 Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
 contenido sea el mismo. La pantalla los filtra y muestra etiquetas legibles; lo
 correcto es que `/changes` compare solo el contenido.
 
-### 8. Versión enlazada a la tarea y lectura del docente (G4 y G5)
+### 7. Versión enlazada a la tarea y lectura del docente (G4 y G5)
 
 Si la tarea tiene `programa_version_id` (la de la semilla), el detalle de cada
 asignación trae esa misma versión aunque el docente no sea su responsable; ese
