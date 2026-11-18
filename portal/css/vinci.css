@@ -479,8 +479,8 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-etiqueta { font-size: 12px; font-weight: 700; color: var(--v-navy); background: #E8EEF6; padding: 5px 10px; border-radius: var(--v-pill); white-space: nowrap; }
 .d-cab__meta { font-size: 13px; color: var(--v-muted-2); display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .d-cab__meta strong { color: var(--v-ink); }
-.d-cab__meta--vencida strong:first-child { color: var(--v-danger); }
-.d-cab__meta--por-vencer strong:first-child { color: var(--v-warn-text); }
+.d-cab__meta--vencida .d-dato--fecha strong, .d-cab__meta--vencida .d-dato__rel { color: var(--v-danger); }
+.d-cab__meta--por-vencer .d-dato--fecha strong, .d-cab__meta--por-vencer .d-dato__rel { color: var(--v-warn-text); }
 .d-sep { color: var(--v-track); }
 .vinci a.d-cab__enlace { font-size: 13px; font-weight: 700; align-self: flex-start; }
 
@@ -610,3 +610,121 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-control__aviso .v-msg, .d-archivo__aviso .v-msg { margin-top: 2px; }
 .d-archivo__aviso { flex: 1 1 100%; }
 .p-cabecera__aviso { flex: 1 1 100%; }
+
+/* ── Encabezado del detalle con más aire (ajuste del PM) ─── */
+.d-cab__in { padding: 20px 32px 18px; gap: 16px; }
+.d-cab__fila { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 10px; }
+.d-cab__titulo { align-items: center; gap: 8px 12px; }
+.d-cab__h1 { font-size: 24px; line-height: 1.25; }
+.d-cab__meta { font-size: 14px; gap: 6px 20px; align-items: baseline; }
+.d-dato { white-space: nowrap; }
+.vinci a.d-cab__enlace { font-size: 14px; align-self: auto; }
+.d-tira { gap: 8px; }
+.d-tira__paso { gap: 8px; }
+.d-tira__barra { height: 5px; }
+.d-tira__nombre { font-size: 13px; }
+.d-main { padding-top: 24px; }
+
+@media (max-width: 600px) {
+  .d-cab__in { padding: 16px 16px 16px; gap: 14px; }
+  .d-cab__h1 { font-size: 21px; }
+  .d-cab__meta { gap: 4px 16px; }
+  .d-dato { white-space: normal; }
+  .d-main { padding-top: 20px; }
+}
+
+/* ══ Panel y Tareas: tablas (mockups vinci-panel y vinci-tareas) ══ */
+.pn-cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; }
+.v-indicador--revisar { border-left: 5px solid var(--v-navy); }
+.pn-seccion { padding: 22px 24px; gap: 14px; }
+.pn-seccion__cab { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.pn-seccion__cab .v-nota { margin-top: 3px; }
+.pn-filtros { display: flex; flex-wrap: wrap; gap: 8px; }
+.pn-filtro { font-family: inherit; font-size: 13px; font-weight: 700; color: var(--v-navy); background: var(--v-white); border: 1px solid #C9D1DB; border-radius: var(--v-pill); padding: 8px 14px; min-height: 40px; cursor: pointer; }
+.pn-filtro:hover { border-color: var(--v-navy); }
+.pn-filtro[aria-pressed="true"] { color: var(--v-white); background: var(--v-navy); border-color: var(--v-navy); }
+.pn-filtro__n { font-weight: 800; }
+.pn-filtro__n--vencida { color: #B42318; }
+.pn-filtro__n--por-vencer { color: #B45309; }
+.pn-filtro[aria-pressed="true"] .pn-filtro__n { color: var(--v-white); }
+.pn-vacio { padding: 12px 0; }
+
+.pn-tabla { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pn-tabla thead th { text-align: left; font-size: 12px; font-weight: 700; color: var(--v-muted); padding: 10px 14px; border-bottom: 1px solid var(--v-track); white-space: nowrap; }
+.pn-tabla td, .pn-tabla tbody th { padding: 13px 14px; border-bottom: 1px solid var(--v-line); vertical-align: middle; text-align: left; }
+.pn-tabla tbody th { font-weight: 700; color: var(--v-navy); }
+.pn-fila td:first-child { border-left: 4px solid transparent; }
+.pn-fila--revisar td:first-child { border-left-color: var(--v-navy); }
+.pn-fila--vencida td:first-child { border-left-color: #B42318; }
+.pn-fila--por-vencer td:first-child { border-left-color: #B45309; }
+.pn-plazo { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: var(--v-pill); white-space: nowrap; }
+.pn-plazo--revisar { color: var(--v-navy); background: #E3EAF5; }
+.pn-plazo--vencida { color: #B42318; background: #FDECEA; }
+.pn-plazo--por-vencer { color: #B45309; background: #FDF1E0; }
+.pn-tarea { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vinci .pn-tarea a { font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.vinci .pn-tarea a:hover { text-decoration: underline; }
+.pn-tarea span { font-size: 12px; color: var(--v-muted); }
+.pn-fecha { white-space: nowrap; color: var(--v-muted-2); }
+.pn-accion { text-align: right; white-space: nowrap; }
+.vinci .pn-accion a { font-size: 13px; font-weight: 700; padding: 10px 0; }
+.pn-num { text-align: right; font-weight: 700; }
+.pn-tabla thead th.pn-num, .pn-tabla td.pn-num { text-align: right; }
+.pn-num--cero { color: #A9B4C2; font-weight: 500; }
+.pn-num--vencida { color: #B42318; }
+.pn-num--por-vencer { color: #B45309; }
+.pn-num--revisar { color: var(--v-navy); }
+.pn-num--terminada { color: var(--v-ok); }
+.pn-barra { width: 120px; height: 6px; background: var(--v-line); border-radius: var(--v-pill); overflow: hidden; }
+.pn-barra span { display: block; height: 6px; background: var(--v-ok); }
+
+/* Teléfono: cada fila es un bloque con sus etiquetas; sin scroll horizontal */
+@media (max-width: 720px) {
+  .pn-seccion { padding: 18px 16px; }
+  .pn-tabla thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .pn-tabla, .pn-tabla tbody, .pn-tabla tr { display: block; width: 100%; }
+  .pn-tabla tbody tr { border: 1px solid var(--v-line); border-radius: 12px; padding: 6px 12px; margin-bottom: 10px; }
+  .pn-fila td:first-child { border-left: none; }
+  .pn-fila--revisar, .pn-fila--vencida, .pn-fila--por-vencer { border-left-width: 4px !important; }
+  .pn-fila--revisar { border-left-color: var(--v-navy) !important; }
+  .pn-fila--vencida { border-left-color: #B42318 !important; }
+  .pn-fila--por-vencer { border-left-color: #B45309 !important; }
+  .pn-tabla td, .pn-tabla tbody th { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--v-line); text-align: left; }
+  .pn-tabla tr > :last-child { border-bottom: none; }
+  .pn-tabla td[data-etiqueta]::before, .pn-tabla tbody th[data-etiqueta]::before { content: attr(data-etiqueta); font-size: 12px; font-weight: 700; color: var(--v-muted); }
+  .pn-tabla td.pn-accion { display: block; text-align: left; }
+  .pn-tabla td > *, .pn-tabla tbody th > * { justify-self: start; max-width: 100%; }
+  .pn-tabla td.pn-num { text-align: left; }
+  .pn-barra { width: 100%; }
+}
+
+/* ══ Tareas (mockup vinci-tareas) ══ */
+/* Tareas */
+.tr-card { padding: 22px 24px; gap: 16px; }
+.tr-controles { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.tr-control { flex: 0 1 180px; gap: 4px; }
+.tr-control:first-child { flex: 1 1 230px; max-width: 320px; }
+.tr-control label { font-size: 12px; color: var(--v-muted); }
+.tr-control input, .tr-control select { padding: 10px 12px; font-size: 14px; }
+.tr-resumen { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--v-muted-2); padding: 10px 14px; background: var(--v-bg); border-radius: 10px; }
+.tr-resumen strong { color: var(--v-ink); }
+.tr-n--terminada { color: var(--v-ok) !important; }
+.tr-n--revisar { color: var(--v-navy) !important; font-weight: 700; }
+.tr-n--vencida { color: #B42318 !important; font-weight: 700; }
+.tr-avance { display: flex; flex-direction: column; gap: 6px; min-width: 190px; }
+.tr-avance__fila { display: flex; align-items: center; gap: 10px; }
+.tr-avance__barra { flex: 1; height: 8px; background: var(--v-line); border-radius: var(--v-pill); overflow: hidden; }
+.tr-avance__barra span { display: block; height: 8px; background: var(--v-ok); }
+.tr-avance__n { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.tr-avance__nota { font-size: 12px; color: var(--v-muted); }
+.tr-fecha { display: flex; flex-direction: column; gap: 3px; }
+.tr-fecha strong { white-space: nowrap; }
+.tr-fecha__rel { font-size: 12px; color: var(--v-muted); white-space: nowrap; }
+.tr-fecha__rel--por-vencer { color: #B45309; font-weight: 700; }
+.tr-fecha__rel--vencida { color: #B42318; font-weight: 700; }
+
+@media (max-width: 720px) {
+  .tr-card { padding: 18px 16px; }
+  .tr-avance { min-width: 0; }
+  .tr-control, .tr-control:first-child { flex: 1 1 100%; max-width: none; }
+}

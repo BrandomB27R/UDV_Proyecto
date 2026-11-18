@@ -127,11 +127,17 @@ function cabecera() {
   const curso = a.course_code ? [a.course_code, a.period_code].filter(Boolean).join(" · ") : null;
   const fechaTxt = p.texto.replace(/ de \d{4}/, "");     // "15 de diciembre · faltan 28 días"
   const [fecha, resto] = fechaTxt.split(" · ");
+  // Cada dato es una pieza separada (no una frase corrida). El enlace al seguimiento va como
+  // último dato del renglón, para no sumar una línea al encabezado.
   const meta = [
-    h("span", {}, "Vence el ", h("strong", {}, fecha), resto ? ` · ${resto}` : ""),
-    h("span", {}, "Revisa ", h("strong", {}, quienRevisa())),
-    c.esDestinatario ? null : h("span", {}, "Docente ", h("strong", {}, st.nombres.docente || "—")),
-    curso ? h("span", {}, curso) : null,
+    // Solo la fecha lleva el color del plazo (ámbar o rojo); el resto de los datos, color de texto normal.
+    h("span", { class: "d-dato d-dato--fecha" }, "Vence el ", h("strong", {}, fecha), resto ? h("span", { class: "d-dato__rel" }, ` · ${resto}`) : ""),
+    h("span", { class: "d-dato" }, "Revisa ", h("strong", {}, quienRevisa())),
+    c.esDestinatario ? null : h("span", { class: "d-dato" }, "Docente ", h("strong", {}, st.nombres.docente || "—")),
+    curso ? h("span", { class: "d-dato" }, "Curso ", h("strong", {}, curso)) : null,
+    a.task_id != null && tieneRol(yo, "coordinator")
+      ? h("a", { class: "d-cab__enlace", href: `/app/tarea.html?id=${encodeURIComponent(a.task_id)}` }, "Ver el avance de todos los docentes")
+      : null,
   ].filter(Boolean);
   return h("div", { class: "d-cab" }, h("div", { class: "d-cab__in" },
     h("div", { class: "d-cab__fila" },
@@ -142,11 +148,8 @@ function cabecera() {
         chipPrioridad(a.priority),
         a.status === "cancelled" ? chipEstado(a.status) : null),
       h("p", { class: `d-cab__meta${p.estado ? ` d-cab__meta--${p.estado}` : ""}` },
-        meta.flatMap((m, i) => (i ? [h("span", { class: "d-sep", "aria-hidden": "true" }, "·"), m] : [m])))),
-    tira(),
-    a.task_id != null && tieneRol(yo, "coordinator")
-      ? h("a", { class: "d-cab__enlace", href: `/app/tarea.html?id=${encodeURIComponent(a.task_id)}` }, "Ver la tarea y el avance de todos los docentes")
-      : null));
+        meta)),
+    tira()));
 }
 
 /** La línea de estados como tira delgada: barra de 4 px y etiqueta pequeña. */

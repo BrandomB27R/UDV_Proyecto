@@ -133,3 +133,30 @@ export function tamano(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
 }
+
+/** Días desde hoy (Guatemala) hasta una fecha de calendario: negativo si ya pasó. null si no hay fecha. */
+export function diasHasta(v) {
+  const dia = diaCalendario(v);
+  return dia ? diasEntre(hoyGuatemala(), dia) : null;
+}
+
+/** Días desde un instante (UTC) hasta hoy, en fechas de calendario de Guatemala. */
+export function diasDesde(v) {
+  const d = aInstante(v);
+  if (!d) return null;
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: ZONA, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(d).map((x) => [x.type, x.value]));
+  return diasEntre(`${p.year}-${p.month}-${p.day}`, hoyGuatemala());
+}
+
+/** "28 nov" a partir de una fecha de calendario. */
+export function fechaDia(v) {
+  const dia = diaCalendario(v);
+  if (!dia) return "—";
+  const [y, m, d] = dia.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("es-GT", { timeZone: "UTC", day: "numeric", month: "short" }).replace(".", "");
+}
+
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+/** "hace 3 días", "hoy", "hace 1 día". */
+export const haceDias = (n) => (n <= 0 ? "hoy" : `hace ${plural(n, "día", "días")}`);
