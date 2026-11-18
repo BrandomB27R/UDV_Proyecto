@@ -1,11 +1,12 @@
 // Inicio según el perfil (requisito 4): una frase de qué le toca hoy y solo sus secciones.
-// Versión mínima de la etapa 1: las listas completas viven en Mis tareas y Por revisar.
+// Docente: mockup vinci-inicio-docente (js/inicio/docente.js). Coordinación: versión de la etapa 1.
 import { api, lista } from "../api.js";
 import { montarBarra, puedeVerPanel } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { filaAsignacion, vacio } from "../componentes.js";
 import { requerirSesion, perfiles, puedeRevisar } from "../sesion.js";
+import { inicioDocente } from "../inicio/docente.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -48,14 +49,9 @@ if (yo.roles.includes("coordinator")) {
 
 if (p.docente) {
   try {
-    const [s, r] = await Promise.all([api("/inbox/summary"), api("/inbox?per_page=5")]);
-    const devueltas = Number(s.by_status?.returned) || 0;
-    if (devueltas) frases.push(`Tienes ${plural(devueltas, "tarea devuelta", "tareas devueltas")}`);
-    if (s.overdue) frases.push(plural(Number(s.overdue), "tarea vencida", "tareas vencidas"));
-    const pendientes = Number(s.pending) || 0;
-    if (pendientes && !devueltas) frases.push(`Tienes ${plural(pendientes, "tarea pendiente", "tareas pendientes")}`);
-    bloques.push(seccion("Mis tareas", lista(r).map(filaAsignacion),
-      vacio("No tienes tareas pendientes."), { texto: "Ver todas mis tareas", href: RUTAS.misTareas }));
+    const d = await inicioDocente();
+    frases.push(d.titulo.replace(/\.$/, ""));
+    bloques.push(h("section", { class: "v-indicadores ini-indicadores", "aria-label": "Resumen" }, d.contadores), ...d.bloques);
   } catch (e) { bloques.push(mensaje("error", e.message)); }
 }
 

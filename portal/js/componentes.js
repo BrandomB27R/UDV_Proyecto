@@ -29,6 +29,14 @@ export function filaAsignacion(item) {
       h("span", { class: "v-tarea__dato" }, [...extra, `Fecha límite: ${p.texto}`].join(" · "))));
 }
 
+/** Contador de los paneles (Panel e Inicio). tono: "alerta" (rojo), "aviso" (ámbar), "revisar" (azul). */
+export function indicador(titulo, valor, detalle, tono = "") {
+  return h("div", { class: `v-indicador${tono ? ` v-indicador--${tono}` : ""}` },
+    h("span", { class: "v-indicador__titulo" }, titulo),
+    h("span", { class: "v-indicador__valor" }, String(valor)),
+    h("span", { class: "v-indicador__detalle" }, detalle));
+}
+
 /** Estado vacío: una frase y, si aplica, una acción. */
 export function vacio(frase, accion) {
   return h("div", { class: "v-vacio" },

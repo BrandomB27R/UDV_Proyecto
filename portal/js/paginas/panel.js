@@ -6,7 +6,7 @@ import { montarBarra, puedeVerPanel } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { chipEstado, etiquetaTipo, fechaCorta, fechaHora, fechaDia, diasHasta, diasDesde, haceDias } from "../formato.js";
-import { sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
+import { sinAcceso, textoDeError, todasLasPaginas, indicador } from "../componentes.js";
 import { requerirSesion, puedeRevisar, tieneRol } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
@@ -116,13 +116,6 @@ poner(raiz,
     tablaAtencion),
   seccionDocentes());
 pintarAtencion();
-
-function indicador(titulo, valor, detalle, tono = "") {
-  return h("div", { class: `v-indicador${tono ? ` v-indicador--${tono}` : ""}` },
-    h("span", { class: "v-indicador__titulo" }, titulo),
-    h("span", { class: "v-indicador__valor" }, valor),
-    h("span", { class: "v-indicador__detalle" }, detalle));
-}
 
 /** Cuando el perfil no puede leer la cola o la lista pasa del límite, se dice (los números de arriba no cambian). */
 function avisosDeDatos() {

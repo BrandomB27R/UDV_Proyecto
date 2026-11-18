@@ -160,3 +160,23 @@ export function fechaDia(v) {
 const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 /** "hace 3 días", "hoy", "hace 1 día". */
 export const haceDias = (n) => (n <= 0 ? "hoy" : `hace ${plural(n, "día", "días")}`);
+
+/**
+ * Fecha límite para las tablas (como en Tareas): {dia: "28 nov", rel: "faltan 2 días", estado}.
+ * estado: "vencida" | "por-vencer" | "" ; solo se marca si la asignación sigue pendiente.
+ */
+export function fechaLimiteCorta(due, { pendiente = true, diasAviso = 3 } = {}) {
+  const dias = diasHasta(due);
+  if (dias == null) return { dia: "Sin fecha", rel: "", estado: "" };
+  const rel = dias < 0 ? `venció hace ${plural(-dias, "día", "días")}` : dias === 0 ? "vence hoy" : dias === 1 ? "vence mañana" : `faltan ${dias} días`;
+  const estado = !pendiente ? "" : dias < 0 ? "vencida" : dias <= diasAviso ? "por-vencer" : "";
+  return { dia: fechaDia(due), rel, estado };
+}
+
+/** Cuándo pasó algo, en relativo: "hoy, 10:13 a. m.", "ayer, 4:40 p. m." o "hace 36 días". */
+export function haceCuando(v) {
+  const dias = diasDesde(v);
+  if (dias == null) return "";
+  const hora = aInstante(v).toLocaleString("es-GT", { timeZone: ZONA, hour: "numeric", minute: "2-digit" });
+  return dias <= 0 ? `hoy, ${hora}` : dias === 1 ? `ayer, ${hora}` : haceDias(dias);
+}
