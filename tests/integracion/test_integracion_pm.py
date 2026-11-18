@@ -882,3 +882,38 @@ def test_una_version_nueva_no_hereda_la_tarea_de_su_origen(c, s):
         assert r.json()["assignment_id"] is None
     else:   # ya hay un borrador abierto de ese período: la regla no aplica en esta corrida
         es_error_comun(r, 409)
+
+
+def test_una_tarea_retirada_por_administracion_no_sale_en_ninguna_lista(c, s):
+    import sqlalchemy as sa
+    _, asign = publicar(c, s, para=(DOC1,), tipo=4, revisor=COORD)
+    tarea_id = c.get(f"/api/v1/assignments/{asign[DOC1]}", headers=s["coordinacion"]).json()["task_id"]
+    borrador = _tarea(c, s).json()["id"]
+    assert c.post(f"/api/v1/tasks/{borrador}/cancel", headers=s["coordinacion"], json={}).status_code == 200
+    motor = sa.create_engine(os.environ["UDV_TEST_MYSQL_URL"])
+    with motor.begin() as con:
+        con.execute(sa.text("UPDATE tarea SET eliminado_en = UTC_TIMESTAMP(3), eliminado_por = 1 WHERE id = :i"), {"i": tarea_id})
+    def ids(estado):
+        return {x["id"] for x in c.get(f"/api/v1/tasks?status={estado}&per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert tarea_id not in ids("published") | ids("cancelled") | ids("draft")
+    assert tarea_id not in {x["id"] for x in c.get("/api/v1/tasks?per_page=100", headers=s["coordinacion"]).json()["data"]}
+    assert borrador in ids("cancelled")              # un borrador cancelado desde la aplicación sí sale
+    assert asign[DOC1] not in {x["id"] for x in _items(c.get("/api/v1/inbox", headers=s["docente1"]).json())}
+
+
+def test_la_bandeja_del_docente_dice_quien_revisa_cuando_entrego_y_por_que_se_devolvio(c, s):
+    _, asign = publicar(c, s, para=(DOC1,), tipo=4, revisor=COORD)
+    a = asign[DOC1]
+    fila = lambda: next(x for x in _items(c.get("/api/v1/inbox?per_page=100", headers=s["docente1"]).json()) if x["id"] == a)
+    f = fila()
+    assert f["reviewer_name"] == "Carlos Coordinador" and f["submitted_at"] is None and f["last_return_comment"] is None
+    _accion(c, s["docente1"], a, "start")
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Asistiré."})
+    assert _accion(c, s["docente1"], a, "submit").status_code == 200
+    f = fila()
+    assert f["submitted_at"] and f["submitted_at"].endswith("Z") and f["last_return_comment"] is None
+    assert _accion(c, s["coordinacion"], a, "review").status_code == 200
+    assert c.post(f"/api/v1/assignments/{a}/return", headers=s["coordinacion"], json={"comment": "Falta el horario."}).status_code == 200
+    assert fila()["last_return_comment"] == "Falta el horario."
+    assert _accion(c, s["docente1"], a, "resubmit").status_code == 200
+    assert fila()["last_return_comment"] is None          # ya no está devuelta

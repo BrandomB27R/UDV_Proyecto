@@ -81,11 +81,22 @@ def fetch_asignaciones_inbox(usuario_id: Optional[int] = None) -> List[Asignacio
     sql = """
         SELECT v.asignacion_id, v.usuario_id, v.tarea_id, v.titulo, v.tipo_codigo,
                v.estado_codigo, v.prioridad, v.fecha_limite,
-               cu.codigo AS curso_codigo, cu.nombre AS curso_nombre, pe.codigo AS periodo_codigo
+               cu.codigo AS curso_codigo, cu.nombre AS curso_nombre, pe.codigo AS periodo_codigo,
+               CONCAT(rv.nombres, ' ', rv.apellidos) AS revisor_nombre,
+               env.creado_en AS enviado_en,
+               CASE WHEN v.estado_codigo = 'returned' THEN dev.comentario END AS motivo_devolucion
         FROM v_inbox v
         JOIN tarea t ON t.id = v.tarea_id
+        JOIN tarea_destinatario td ON td.id = v.asignacion_id
         LEFT JOIN curso cu ON cu.id = t.curso_id
         LEFT JOIN periodo pe ON pe.id = t.periodo_id
+        LEFT JOIN usuario rv ON rv.id = COALESCE(td.revisor_id, t.revisor_id)
+        LEFT JOIN tarea_transicion env ON env.id = (
+            SELECT MAX(x.id) FROM tarea_transicion x
+             WHERE x.tarea_destinatario_id = v.asignacion_id AND x.estado_nuevo = 'submitted')
+        LEFT JOIN tarea_transicion dev ON dev.id = (
+            SELECT MAX(x.id) FROM tarea_transicion x
+             WHERE x.tarea_destinatario_id = v.asignacion_id AND x.estado_nuevo = 'returned')
     """
     parametros = {}
     if usuario_id is not None:
@@ -114,6 +125,9 @@ def fetch_asignaciones_inbox(usuario_id: Optional[int] = None) -> List[Asignacio
             course_code=fila["curso_codigo"],
             course_name=fila["curso_nombre"],
             period_code=fila["periodo_codigo"],
+            reviewer_name=fila["revisor_nombre"],
+            submitted_at=(fila["enviado_en"].isoformat(timespec="minutes") + "Z") if fila["enviado_en"] else None,
+            last_return_comment=fila["motivo_devolucion"],
         ))
     return resultado
 
