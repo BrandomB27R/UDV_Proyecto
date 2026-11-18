@@ -479,8 +479,8 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-etiqueta { font-size: 12px; font-weight: 700; color: var(--v-navy); background: #E8EEF6; padding: 5px 10px; border-radius: var(--v-pill); white-space: nowrap; }
 .d-cab__meta { font-size: 13px; color: var(--v-muted-2); display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .d-cab__meta strong { color: var(--v-ink); }
-.d-cab__meta--vencida strong:first-child { color: var(--v-danger); }
-.d-cab__meta--por-vencer strong:first-child { color: var(--v-warn-text); }
+.d-cab__meta--vencida .d-dato--fecha strong, .d-cab__meta--vencida .d-dato__rel { color: var(--v-danger); }
+.d-cab__meta--por-vencer .d-dato--fecha strong, .d-cab__meta--por-vencer .d-dato__rel { color: var(--v-warn-text); }
 .d-sep { color: var(--v-track); }
 .vinci a.d-cab__enlace { font-size: 13px; font-weight: 700; align-self: flex-start; }
 
@@ -610,3 +610,25 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-control__aviso .v-msg, .d-archivo__aviso .v-msg { margin-top: 2px; }
 .d-archivo__aviso { flex: 1 1 100%; }
 .p-cabecera__aviso { flex: 1 1 100%; }
+
+/* ── Encabezado del detalle con más aire (ajuste del PM) ─── */
+.d-cab__in { padding: 20px 32px 18px; gap: 16px; }
+.d-cab__fila { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 10px; }
+.d-cab__titulo { align-items: center; gap: 8px 12px; }
+.d-cab__h1 { font-size: 24px; line-height: 1.25; }
+.d-cab__meta { font-size: 14px; gap: 6px 20px; align-items: baseline; }
+.d-dato { white-space: nowrap; }
+.vinci a.d-cab__enlace { font-size: 14px; align-self: auto; }
+.d-tira { gap: 8px; }
+.d-tira__paso { gap: 8px; }
+.d-tira__barra { height: 5px; }
+.d-tira__nombre { font-size: 13px; }
+.d-main { padding-top: 24px; }
+
+@media (max-width: 600px) {
+  .d-cab__in { padding: 16px 16px 16px; gap: 14px; }
+  .d-cab__h1 { font-size: 21px; }
+  .d-cab__meta { gap: 4px 16px; }
+  .d-dato { white-space: normal; }
+  .d-main { padding-top: 20px; }
+}
