@@ -20,6 +20,8 @@ export function secciones(yo) {
   if (p.docente) s.push({ id: "mis-tareas", texto: "Mis tareas", href: RUTAS.misTareas });
   if (roles.some((r) => ROLES_PANEL.includes(r))) s.push({ id: "panel", texto: "Panel", href: RUTAS.panel });
   if (p.docente || p.coordinacion || p.administracion) s.push({ id: "programas", texto: "Programas de curso", href: RUTAS.programas });
+  // POST y PATCH de los catálogos son solo de administración (G6).
+  if (roles.includes("admin")) s.push({ id: "catalogos", texto: "Catálogos", href: RUTAS.catalogos });
   // GET /audit acepta administración y auditoría (G6).
   if (roles.includes("admin") || roles.includes("auditor")) s.push({ id: "auditoria", texto: "Auditoría", href: RUTAS.auditoria });
   return s;
@@ -32,8 +34,10 @@ export function montarBarra(yo, actual) {
   const raiz = document.getElementById("barra");
   raiz.className = "v-barra";
 
-  const nav = h("nav", { class: "v-nav", "aria-label": "Principal" },
-    secciones(yo).map((s) => h("a", { href: s.href, "aria-current": s.id === actual ? "page" : null }, s.texto)));
+  const lista = secciones(yo);
+  // Con seis secciones o más (administración) los enlaces se compactan para que la barra quepa en una fila.
+  const nav = h("nav", { class: `v-nav${lista.length >= 6 ? " v-nav--compacta" : ""}`, "aria-label": "Principal" },
+    lista.map((s) => h("a", { href: s.href, "aria-current": s.id === actual ? "page" : null }, s.texto)));
   const cuenta = h("div", { class: "v-barra__cuenta" },
     h("div", { class: "v-usuario" },
       h("span", { class: "v-usuario__nombre" }, yo.nombre),

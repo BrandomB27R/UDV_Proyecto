@@ -3,7 +3,7 @@
 // Docente: js/inicio/docente.js. Coordinación, revisión y dirección: js/inicio/coordinacion.js.
 // Con los dos perfiles se muestra primero lo de coordinación y debajo las tareas propias.
 import { montarBarra } from "../barra.js";
-import { RUTAS, tituloPestana } from "../config.js";
+import { tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { requerirSesion, perfiles } from "../sesion.js";
 import { inicioDocente } from "../inicio/docente.js";
@@ -38,10 +38,4 @@ poner(raiz,
   errores,
   contadores.length ? h("section", { class: "v-indicadores ini-indicadores", "aria-label": "Resumen" }, contadores) : null,
   gestion?.bloques || [],
-  docente?.bloques || [],
-  p.administracion ? h("section", { class: "v-card" },
-    h("h2", { class: "v-h2" }, "Administración"),
-    h("p", { class: "v-texto" }, "Panel de cumplimiento y catálogos. La auditoría está en la barra."),
-    h("div", { class: "v-acciones" },
-      h("a", { class: "v-btn v-btn--sec", href: RUTAS.panel }, "Panel"),
-      h("a", { class: "v-btn v-btn--sec", href: RUTAS.catalogos }, "Catálogos"))) : null);
+  docente?.bloques || []);

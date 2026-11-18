@@ -54,6 +54,8 @@ body.vinci--blanco { background: var(--v-white); }
 .vinci .v-nav a { font-size: 14px; font-weight: 600; color: var(--v-white); text-decoration: none; padding: 12px 18px; border-radius: var(--v-pill); }
 .vinci .v-nav a:hover { background: rgba(255,255,255,.1); color: var(--v-white); }
 .vinci .v-nav a[aria-current="page"] { font-weight: 700; color: var(--v-navy); background: var(--v-white); }
+.v-nav--compacta { gap: 4px; }
+.vinci .v-nav--compacta a { padding: 12px 12px; }
 .v-campana { position: relative; width: 44px; height: 44px; background: transparent; border: 1px solid var(--v-navy-line); border-radius: var(--v-pill); color: var(--v-white); cursor: pointer; display: flex; align-items: center; justify-content: center; font: inherit; }
 .v-campana:hover { background: rgba(255,255,255,.08); }
 .v-campana__n { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; background: var(--v-cyan); color: var(--v-navy); font-size: 12px; font-weight: 800; border-radius: var(--v-pill); display: flex; align-items: center; justify-content: center; }
@@ -893,4 +895,29 @@ body.d-pagina { display: flex; flex-direction: column; }
 @media (max-width: 720px) {
   .pn-fila--cerrar { border-left-width: 4px !important; border-left-color: #0B3D91 !important; }
   .pn-fila--terminada { border-left-width: 4px !important; border-left-color: #0E6B3A !important; }
+}
+
+/* ══ Catálogos (solo administración): lista a la izquierda, formulario a la derecha ══ */
+.ct-cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 24px; align-items: start; }
+.ct-lista, .ct-form { padding: 22px 24px; gap: 16px; }
+.ct-form { scroll-margin-top: 96px; }   /* al pulsar «Editar», el título no queda bajo la barra fija */
+.ct-buscar { max-width: 360px; gap: 4px; }
+.ct-buscar label { font-size: 12px; color: var(--v-muted); }
+.ct-buscar input { padding: 10px 12px; font-size: 14px; }
+.ct-campos { display: flex; flex-direction: column; gap: 14px; }
+.ct-campos .v-campo { gap: 4px; }
+.ct-campos input, .ct-campos select { width: 100%; }
+.ct-casilla { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer; }
+.ct-casilla input { width: 20px; height: 20px; accent-color: var(--v-navy); }
+.ct-codigo { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--v-ink); white-space: nowrap; }
+.ct-fila--editando td { background: #EEF3FB; }
+.ct-fila--editando td:first-child { border-left-color: var(--v-navy); }
+.vinci .ct-editar { font-size: 13px; font-weight: 700; padding: 10px 0; }
+@media (max-width: 900px) {
+  .ct-cuerpo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .ct-lista, .ct-form { padding: 18px 16px; }
+  .ct-buscar { max-width: none; }
+  .vinci .ct-form .v-acciones .v-btn { width: 100%; }
 }
