@@ -829,3 +829,42 @@ def test_el_docente_quita_un_archivo_del_intento_sin_enviar(c, s):
     es_error_comun(c.delete(f"/api/v1/assignments/{a}/files/{fid2}", headers=s["docente1"]), 409)
     detalle = c.get(f"/api/v1/assignments/{a}", headers=s["coordinacion"]).json()
     assert [f["name"] for f in detalle["files"]] == ["correcto.pdf"]
+
+
+# ------------------------------------------- 13. resúmenes para Panel y Tareas (G3 y G6)
+def test_la_lista_de_tareas_trae_el_avance_si_se_pide(c, s):
+    _, asign = publicar(c, s, para=(DOC1, DOC2), tipo=4, revisor=COORD)
+    _accion(c, s["docente1"], asign[DOC1], "start")
+    c.put(f"/api/v1/assignments/{asign[DOC1]}/submission-draft", headers=s["docente1"], json={"comment": "Sí asistiré."})
+    assert _accion(c, s["docente1"], asign[DOC1], "submit").status_code == 200
+    _, uno = publicar(c, s, para=(DOC2,), tipo=4, revisor=COORD)
+    lista = c.get("/api/v1/tasks?status=published&per_page=100&include=progress", headers=s["coordinacion"]).json()["data"]
+    assert all("progress" in t for t in lista)
+    por_asignacion = {}
+    for t in lista:
+        ids = {a["id"] for a in _items(c.get(f"/api/v1/tasks/{t['id']}/assignments", headers=s["coordinacion"]).json())}
+        por_asignacion[t["id"]] = ids
+    dos = next(t for t in lista if asign[DOC1] in por_asignacion[t["id"]])["progress"]
+    assert (dos["total"], dos["to_review"], dos["done"], dos["assignee_name"]) == (2, 1, 0, None)
+    assert dos["by_status"] == {"submitted": 1, "assigned": 1}
+    solo = next(t for t in lista if uno[DOC2] in por_asignacion[t["id"]])["progress"]
+    assert solo["total"] == 1 and solo["assignee_name"] == "Daniel López"
+    sin = c.get("/api/v1/tasks?status=published&per_page=5", headers=s["coordinacion"]).json()["data"]
+    assert all("progress" not in t for t in sin)
+
+
+def test_el_resumen_por_docente_cuadra_con_el_panel(c, s):
+    panel = c.get("/api/v1/dashboard?limit=100", headers=s["coordinacion"]).json()
+    r = c.get("/api/v1/dashboard/teachers", headers=s["coordinacion"])
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["total"] == len(cuerpo["data"]) >= 1
+    suma = lambda k: sum(d[k] for d in cuerpo["data"])
+    assert suma("overdue") == panel["overdue"]["total"]
+    assert suma("due_soon") == panel["due_soon"]["total"]
+    estados = panel["assignments"]["by_state"]
+    assert suma("to_review") == estados["submitted"] + estados["under_review"]
+    assert suma("finished") == estados["approved"] + estados["closed"]
+    assert suma("assigned") == panel["compliance"]["expected"]
+    assert c.get("/api/v1/dashboard/teachers", headers=s["auditoria"]).status_code == 200
+    es_error_comun(c.get("/api/v1/dashboard/teachers", headers=s["docente1"]), 403)
