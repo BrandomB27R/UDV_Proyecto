@@ -56,7 +56,11 @@ async function cargar() {
       : e instanceof ApiError && e.status === 403 ? "No tienes acceso a esta tarea." : e.message);
     return;
   }
-  st.texto = st.a.draft_comment || "";
+  // Si había texto escrito sin guardar en esta misma asignación (por ejemplo, se adjuntó un
+  // archivo después de escribir), se conserva: recargar no debe borrar lo que el docente escribió.
+  const sinGuardarTexto = st.previo?.id === st.a.id && (st.texto || "") !== (st.previo.draft || "");
+  if (!sinGuardarTexto) st.texto = st.a.draft_comment || "";
+  st.previo = { id: st.a.id, draft: st.a.draft_comment || "" };
   // Texto con que empezó este intento: en una reentrega es el del intento devuelto.
   if (st.textoInicialDe !== `${st.a.id}:${st.a.last_return?.at || ""}`) {
     st.textoInicialDe = `${st.a.id}:${st.a.last_return?.at || ""}`;
@@ -357,10 +361,10 @@ function instrucciones() {
     st.a.created_by_name ? h("p", { class: "v-nota" }, `Asignada por ${st.a.created_by_name}.`) : null);
 }
 
+/** Antes de entregar se guarda el borrador vigente: el G3 lo copia a la entrega al enviar. */
 async function guardarTextoSiCambio() {
   const a = st.a;
   if (!capacidades(a).editarEntrega) return;
-  if (archivosDelIntentoActual(a).length) return;     // el texto ya quedó con el primer archivo
   if ((st.texto || "") === (a.draft_comment || "")) return;
   await api(`/assignments/${a.id}/submission-draft`, { method: "PUT", body: { comment: st.texto } });
   a.draft_comment = st.texto;
@@ -371,8 +375,6 @@ function entrega(c) {
   const forma = formaDeEntrega(a);
   const propia = c.esDestinatario;
   const editable = c.editarEntrega;
-  const actuales = archivosDelIntentoActual(a);
-  const textoBloqueado = editable && actuales.length > 0;
   const zona = h("div", { "aria-live": "polite" });
 
   const bloques = [];
@@ -387,28 +389,24 @@ function entrega(c) {
   }
   if (editable) {
     const ta = h("textarea", {
-      id: "texto-entrega", rows: 4, maxlength: 5000, value: st.texto, disabled: textoBloqueado,
+      id: "texto-entrega", rows: 4, maxlength: 5000, value: st.texto,
       placeholder: "Por ejemplo: actualicé la bibliografía y reorganicé la unidad 3.",
       oninput: (e) => { st.texto = e.target.value; refrescarPaso(); },
     });
     bloques.push(h("div", { class: "v-campo" },
       h("label", { for: "texto-entrega" }, forma.textoObligatorio ? "Tu respuesta" : "Texto para quien revisa"),
       ta,
-      textoBloqueado
-        ? h("span", { class: "v-campo__ayuda" }, "El texto quedó guardado junto con el primer archivo de este intento.")
-        : h("span", { class: "v-campo__ayuda" }, forma.archivos ? "Se guarda al entregar. Si vas a adjuntar archivos, escríbelo antes." : "Se guarda al entregar.")));
-    if (!textoBloqueado) {
-      bloques.push(h("div", { class: "v-acciones" },
-        h("button", { type: "button", class: "v-btn v-btn--sec", onclick: async (e) => {
-          e.target.disabled = true;
-          try {
-            await api(`/assignments/${a.id}/submission-draft`, { method: "PUT", body: { comment: st.texto } });
-            a.draft_comment = st.texto;
-            poner(zona, mensaje("ok", `Borrador guardado · ${fechaCorta(new Date())}`));
-          } catch (err) { poner(zona, mensaje("error", err.message)); }
-          e.target.disabled = false;
-        } }, "Guardar borrador")));
-    }
+      h("span", { class: "v-campo__ayuda" }, "Puedes corregirlo hasta que entregues; se guarda al entregar.")));
+    bloques.push(h("div", { class: "v-acciones" },
+      h("button", { type: "button", class: "v-btn v-btn--sec", onclick: async (e) => {
+        e.target.disabled = true;
+        try {
+          await api(`/assignments/${a.id}/submission-draft`, { method: "PUT", body: { comment: st.texto } });
+          a.draft_comment = st.texto;
+          poner(zona, mensaje("ok", `Borrador guardado · ${fechaCorta(new Date())}`));
+        } catch (err) { poner(zona, mensaje("error", err.message)); }
+        e.target.disabled = false;
+      } }, "Guardar borrador")));
     if (forma.archivos) bloques.push(formularioAdjuntar(zona, forma));
   }
   bloques.push(zona);
@@ -466,8 +464,6 @@ function formularioAdjuntar(zona, forma) {
     enviar.disabled = true;
     enviar.textContent = "Subiendo…";
     try {
-      // El primer archivo del intento crea la entrega con el texto del borrador: se guarda antes.
-      await guardarTextoSiCambio();
       const fd = new FormData();
       // La descripción todavía no se guarda al vincular: se sube con ella como nombre (NOTAS_BACKEND.md).
       fd.append("file", f, nombreDeArchivo(d, ext));

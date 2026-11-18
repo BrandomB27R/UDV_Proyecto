@@ -3,9 +3,9 @@ import { api } from "../api.js";
 import { montarBarra } from "../barra.js";
 import { RUTAS, tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
-import { chipEstado, etiquetaTipo, plazo, fechaCorta, nombreCompleto } from "../formato.js";
+import { chipEstado, etiquetaTipo, plazo, fechaCorta } from "../formato.js";
 import { vacio, pestanas, todasLasPaginas, sinAcceso, textoDeError } from "../componentes.js";
-import { requerirSesion, tienePermiso } from "../sesion.js";
+import { requerirSesion } from "../sesion.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -22,15 +22,10 @@ const SIN_PERMISO = "«Tareas» es de coordinación: ahí se crean las tareas y 
 if (!(yo.roles || []).includes("coordinator")) await sinAcceso(raiz, "Tareas", SIN_PERMISO);
 let tareas;
 let tipos = new Map();
-const nombres = new Map();
 try {
   const [t, ty] = await Promise.all([todasLasPaginas(api, "/tasks"), api("/task-types?per_page=100")]);
   tareas = t.data || [];
   for (const x of ty?.data || []) tipos.set(x.id, x);
-  if (tienePermiso(yo, "users.read")) {
-    const u = await todasLasPaginas(api, "/users").catch(() => ({ data: [] }));
-    for (const x of u.data || []) nombres.set(x.id, nombreCompleto(x));
-  }
 } catch (e) {
   await sinAcceso(raiz, "Tareas", textoDeError(e, SIN_PERMISO));
 }
@@ -83,7 +78,7 @@ function fila(t) {
     if (espera) datos.push(`${espera} por revisar`);
   }
   datos.push(`Fecha límite: ${plazo(t.due_date, { terminada: t.status !== "published" }).texto}`);
-  datos.push(t.created_by === yo.id ? "Creada por ti" : `Creada por ${nombres.get(t.created_by) || "coordinación"}`);
+  datos.push(t.created_by === yo.id ? "Creada por ti" : `Creada por ${t.created_by_name || "coordinación"}`);
   if (t.status === "draft") datos.push(`Guardada ${fechaCorta(t.updated_at || t.created_at)}`);
   return h("li", { class: "v-tarea" },
     h("a", { class: "v-tarea__enlace", href: `/app/tarea.html?id=${encodeURIComponent(t.id)}` },
