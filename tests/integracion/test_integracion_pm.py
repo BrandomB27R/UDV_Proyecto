@@ -742,3 +742,50 @@ def test_catalogo_de_perfiles_de_egreso(c, s):
     assert cuerpo["total"] == len(cuerpo["data"]) >= 1
     assert all({"id", "codigo", "descripcion"} <= set(p) for p in cuerpo["data"])
     es_error_comun(c.get("/api/v1/graduate-profiles"), 401)
+
+
+# ------------------------------------------- 11. tipos de tarea nuevos (G3, para Vinci)
+def test_coordinacion_crea_un_tipo_de_tarea_y_recorre_su_flujo(c, s):
+    nombre = f"Entregar constancia {uuid.uuid4().hex[:5]}"
+    r = c.post("/api/v1/task-types", headers=s["coordinacion"],
+               json={"name": nombre, "delivery": "archivo", "description": "Constancia en PDF"})
+    assert r.status_code == 201, r.text
+    tipo = r.json()
+    assert tipo["name"] == nombre and tipo["requires_evidence"] == 1 and tipo["delivery_mode"] == "ambos"
+    assert tipo["code"] and len(tipo["code"]) <= 30
+    listados = _items(c.get("/api/v1/task-types?per_page=100", headers=s["docente1"]).json())
+    assert tipo["id"] in {t["id"] for t in listados}
+    assert all("delivery_mode" in t for t in listados)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"], json={"name": nombre}), 409)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["docente1"], json={"name": "Otro tipo"}), 403)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"], json={"name": "  "}), 422)
+    es_error_comun(c.post("/api/v1/task-types", headers=s["coordinacion"],
+                          json={"name": "Tipo raro", "delivery": "paloma"}), 422)
+    # El tipo nuevo recorre el mismo flujo: exige archivo, se revisa, aprueba y cierra.
+    _, asign = publicar(c, s, para=(DOC1,), tipo=tipo["id"], revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    es_error_comun(_accion(c, s["docente1"], a, "submit"), 422)
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "Constancia"}).status_code in (200, 201)
+    for quien, accion in (("docente1", "submit"), ("coordinacion", "review"),
+                          ("coordinacion", "approve"), ("coordinacion", "close")):
+        r = _accion(c, s[quien], a, accion)
+        assert r.status_code == 200, f"{accion}: {r.status_code} {r.text[:200]}"
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert detalle["status"] == "closed" and detalle["task_type"]
+
+
+def test_un_tipo_solo_de_texto_se_entrega_sin_archivo(c, s):
+    r = c.post("/api/v1/task-types", headers=s["coordinacion"],
+               json={"name": f"Responder encuesta {uuid.uuid4().hex[:5]}", "delivery": "texto"})
+    assert r.status_code == 201, r.text
+    assert r.json()["requires_evidence"] == 0 and r.json()["delivery_mode"] == "texto"
+    _, asign = publicar(c, s, para=(DOC1,), tipo=r.json()["id"], revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    assert c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"],
+                 json={"comment": "Encuesta respondida."}).status_code == 200
+    assert _accion(c, s["docente1"], a, "submit").status_code == 200
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["delivery"]["mode"] == "texto"
