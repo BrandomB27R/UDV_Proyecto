@@ -82,7 +82,10 @@ fila de `entrega` (`archivo.entrega_id`). G3 crea esa fila al hacer `submit` o
 `resubmit`, con el texto de `entrega_borrador`, y responde 422 si el tipo de
 tarea tiene `requiere_archivo` y el intento no trae ninguno. G4 solo la crea
 al vincular el primer archivo, si todavía no existe. El intento actual es la
-última fila de `entrega` sin una transición `submitted` posterior.
+última fila de `entrega` sin una transición `submitted` posterior. Mientras el
+intento no se haya enviado, su texto se puede corregir: al hacer `submit` o
+`resubmit`, G3 pone en la entrega el texto vigente del borrador (esquema 1.2.3).
+Un intento ya enviado no se modifica.
 
 **B. Quién revisa (G3 y G4).** El revisor designado de una asignación es
 `COALESCE(tarea_destinatario.revisor_id, tarea.revisor_id)`. Si existe, solo
@@ -141,3 +144,4 @@ Cada CONTRATO.md traduce esta definición a su checklist de PR.
 | 2026-10-13 | §1: identificadores enteros (ya decidido en README §5), base de datos MySQL, actor de auditoría e integración por `APIRouter`; §2: prioridad pendiente; nuevo §2b de dueños de ruta; §5: el trabajo debe correr con `docker compose up` | Se adoptó MySQL; G3 define `/me` (de G2) y `/assignments/inbox` (de G4); G3 y G4 implementan las mismas transiciones; G3 y G4 usan prioridades distintas |
 | 2026-11-17 | §1: autenticación por `Bearer`, códigos de rol, fechas en UTC con `Z`, máximo de `per_page`; nuevo §1b con las reglas de las pantallas; §2: prioridad con `urgent`; §2b: las acciones de asignación son del G3 y `/review-queue` del G4; nuevo §2c con las reglas A, B y D; §3: los eventos viajan por la tabla `evento` | Decisiones tomadas entre el 11 y el 16 de noviembre que solo estaban en el chat y en los CONTRATO.md de grupo |
 | 2026-11-17 (noche) | §2c: regla D como quedó implementada; nueva regla E (perfil de coordinación) | Cierre de entregas; decisión del PM |
+| 2026-11-17 (noche, 2) | §2c A: el texto del intento abierto se actualiza al entregar; un intento enviado sigue inmutable | Decisión del PM; migración 1.2.3 |

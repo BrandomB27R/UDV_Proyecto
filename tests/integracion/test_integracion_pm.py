@@ -585,3 +585,64 @@ def test_el_error_de_un_trigger_llega_como_mensaje_limpio(c, s):
     assert "1644" not in mensaje and "ERROR" not in mensaje and "(" not in mensaje, mensaje
     assert "100" in mensaje
 
+
+# ------------------------------------------------ 11. segunda tanda para Vinci
+def test_el_historial_de_una_asignacion_responde(c, s):
+    """GET /assignments/{id}/history dejó de responder al agregar el curso a la tarea (PR #49)."""
+    _, asign = publicar(c, s)
+    a = asign[DOC1]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    for quien in ("docente1", "coordinacion"):
+        r = c.get(f"/api/v1/assignments/{a}/history", headers=s[quien])
+        assert r.status_code == 200, (quien, r.text)
+        assert [h["action"] for h in _items(r.json())] == ["publish", "start"]
+    assert c.get(f"/api/v1/assignments/{a}/history", headers=s["docente2"]).status_code == 403
+
+
+def test_las_bandejas_y_la_lista_de_tareas_traen_curso_y_nombres(c, s):
+    t = _tarea(c, s, course_id=1, period_id=2, reviewer_id=REVISOR).json()
+    assert t["created_by_name"] and t["reviewer_name"]
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"],
+           json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+    en_lista = next(x for x in c.get("/api/v1/tasks?per_page=100", headers=s["coordinacion"]).json()["data"]
+                    if x["id"] == t["id"])
+    assert en_lista["course_code"] and en_lista["reviewer_name"] and en_lista["created_by_name"]
+    fila = next(x for x in c.get("/api/v1/inbox?per_page=100", headers=s["docente1"]).json()["data"]
+                if x["id"] == a)
+    assert fila["task_id"] == t["id"] and fila["course_code"] and fila["course_name"] and fila["period_code"]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    en_cola = next(x for x in c.get("/api/v1/review-queue?per_page=100", headers=s["revisor"]).json()["data"]
+                   if x["id"] == a)
+    assert en_cola["course_code"] and en_cola["course_name"] and en_cola["period_code"]
+
+
+def test_el_texto_se_puede_corregir_despues_de_adjuntar_y_antes_de_entregar(c, s):
+    """Migración 1.2.3: el intento abierto toma el texto vigente del borrador al entregar;
+    una vez enviado, la entrega no se modifica."""
+    from sqlalchemy import create_engine, text
+    _, asign = publicar(c, s, tipo=2)                 # SUBIR_CV exige archivo
+    a = asign[DOC1]
+    c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"], json={})
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Primera versión"})
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "cv.pdf"}).status_code == 200
+    ver = lambda: c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()
+    assert ver()["attempts"][0]["text"] == "Primera versión"      # así quedó al adjuntar
+    c.put(f"/api/v1/assignments/{a}/submission-draft", headers=s["docente1"], json={"comment": "Texto corregido"})
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+    d = ver()
+    assert [(i["number"], i["text"]) for i in d["attempts"]] == [(1, "Texto corregido")]
+    assert [f["attempt"] for f in d["files"]] == [1]
+    motor = create_engine(URL)
+    try:
+        with pytest.raises(Exception, match="no se modifica"):
+            with motor.begin() as cx:
+                cx.execute(text("UPDATE entrega SET contenido_texto = 'cambiada' "
+                                "WHERE tarea_destinatario_id = :a"), {"a": a})
+    finally:
+        motor.dispose()
+    assert ver()["attempts"][0]["text"] == "Texto corregido"
+
