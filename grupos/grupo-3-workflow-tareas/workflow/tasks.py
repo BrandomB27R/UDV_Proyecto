@@ -189,6 +189,10 @@ def _require_user(conn, user_id, field, role=None):
 
 
 def _workflow_for_type(conn, type_id):
+    tipo = conn.execute("SELECT activo FROM tipo_tarea WHERE id = ?", (type_id,)).fetchone()
+    if tipo is not None and not tipo["activo"]:
+        raise ValidationFailed("Ese tipo de tarea está desactivado",
+                               details={"field": "type_id"})
     row = conn.execute("SELECT id FROM workflow WHERE tipo_tarea_id = ? AND activo = 1"
                        " ORDER BY id LIMIT 1", (type_id,)).fetchone()
     if row is None:
@@ -236,7 +240,8 @@ def create_task_type(conn, actor, data):
 _TYPE_COLS_MYSQL = ("SELECT id, codigo AS code, nombre AS name,"
                     " requiere_archivo AS requires_evidence, extensiones AS evidence_type,"
                     " 'standard' AS flow, creado_en AS created_at,"
-                    " modalidad_entrega AS delivery_mode, descripcion AS description")
+                    " modalidad_entrega AS delivery_mode, descripcion AS description,"
+                    " activo AS active")
 # Formas de entrega que se pueden elegir al crear un tipo: (modalidad de G1, exige archivo, extensiones).
 _DELIVERIES = {"texto": ("texto", 0, None), "ambos": ("ambos", 0, "pdf"), "archivo": ("ambos", 1, "pdf")}
 
@@ -297,14 +302,81 @@ def _create_task_type_mysql(conn, actor, data):
             " JOIN workflow_detalle n ON n.workflow_id = ? AND n.estado_origen <=> o.estado_origen"
             "  AND n.estado_destino = o.estado_destino"
             " WHERE o.workflow_id = ?", (workflow_id, template["id"]))
+        _audit_task_type(conn, actor, type_id, "insert",
+                         {"despues": {"nombre": name, "modalidad_entrega": mode,
+                                      "requiere_archivo": requires_file, "activo": 1}})
         return dict(conn.execute(_TYPE_COLS_MYSQL + " FROM tipo_tarea WHERE id = ?",
                                  (type_id,)).fetchone())
 
 
-def list_task_types(conn, page=1, page_size=20):
+def _audit_task_type(conn, actor, type_id, action, detail):
+    """Deja en la auditoría del G1 quién creó o cambió un tipo de tarea."""
+    conn.execute("INSERT INTO auditoria(tabla, registro_id, accion, actor_id, detalle)"
+                 " VALUES ('tipo_tarea', ?, ?, ?, ?)",
+                 (str(type_id), action, actor["id"], json.dumps(detail, ensure_ascii=False)))
+
+
+def update_task_type(conn, actor, type_id, data):
+    """Renombra, describe, desactiva o reactiva un tipo de tarea.
+
+    No hay borrado: un tipo desactivado deja de ofrecerse al crear tareas y las
+    tareas que ya lo usan siguen su curso. El tipo «Actualizar programa» no se
+    desactiva porque el flujo de programas de curso depende de él.
+    """
+    if not _roles(actor) & {COORDINATOR, AUTHORITY, "admin"}:
+        raise Forbidden("Solo coordinación, autoridad o administración pueden cambiar tipos de tarea")
+    if not _is_mysql(conn):
+        raise ValidationFailed("Los tipos de tarea solo se modifican sobre la base del G1")
+    with transaction(conn):
+        set_actor(conn, actor["id"])
+        row = conn.execute("SELECT id, nombre, descripcion, activo, modalidad_entrega"
+                           " FROM tipo_tarea WHERE id = ? FOR UPDATE", (type_id,)).fetchone()
+        if row is None:
+            raise NotFound("Tipo de tarea no encontrado")
+        before = {"nombre": row["nombre"], "descripcion": row["descripcion"], "activo": int(row["activo"])}
+        after = dict(before)
+        if data.get("name") is not None:
+            name = " ".join(str(data["name"]).split())
+            if not name:
+                raise ValidationFailed("name no puede estar vacío", details={"field": "name"})
+            if len(name) > 100:
+                raise ValidationFailed("name admite hasta 100 caracteres", details={"field": "name"})
+            if conn.execute("SELECT 1 FROM tipo_tarea WHERE LOWER(nombre) = LOWER(?) AND id <> ?",
+                            (name, type_id)).fetchone():
+                raise Conflict(f"Ya existe un tipo de tarea llamado '{name}'")
+            after["nombre"] = name
+        if "description" in data and data["description"] is not None:
+            description = str(data["description"]).strip() or None
+            if description and len(description) > 300:
+                raise ValidationFailed("description admite hasta 300 caracteres",
+                                       details={"field": "description"})
+            after["descripcion"] = description
+        if data.get("active") is not None:
+            active = int(bool(data["active"]))
+            if not active and row["modalidad_entrega"] == "programa":
+                raise Conflict("Este tipo no se puede desactivar: el flujo de programas de curso depende de él")
+            after["activo"] = active
+        changed = {k: v for k, v in after.items() if v != before[k]}
+        if changed:
+            conn.execute("UPDATE tipo_tarea SET nombre = ?, descripcion = ?, activo = ? WHERE id = ?",
+                         (after["nombre"], after["descripcion"], after["activo"], type_id))
+            _audit_task_type(conn, actor, type_id, "update",
+                             {"antes": {k: before[k] for k in changed}, "despues": changed})
+        return dict(conn.execute(_TYPE_COLS_MYSQL + " FROM tipo_tarea WHERE id = ?",
+                                 (type_id,)).fetchone())
+
+
+def list_task_types(conn, page=1, page_size=20, actor=None, include_inactive=False):
+    """Tipos de tarea que se ofrecen al crear una tarea.
+
+    Con include_inactive, quien administra los tipos ve también los desactivados.
+    """
     if _is_mysql(conn):
+        show_all = (include_inactive and actor is not None
+                    and bool(_roles(actor) & {COORDINATOR, AUTHORITY, "admin"}))
         return _paged(conn, _TYPE_COLS_MYSQL,
-                      "FROM tipo_tarea WHERE activo = 1", [], "id", page, page_size)
+                      "FROM tipo_tarea" + ("" if show_all else " WHERE activo = 1"),
+                      [], "id", page, page_size)
     return _paged(conn, "SELECT *", "FROM task_types", [], "id", page, page_size)
 
 
