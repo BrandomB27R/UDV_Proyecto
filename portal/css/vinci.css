@@ -599,3 +599,8 @@ body.d-pagina { display: flex; flex-direction: column; }
   .v-acciones--lista .v-btn { width: 100%; }
   .v-otro-tipo { padding: 14px; }
 }
+
+/* Archivo del intento abierto: Descargar y Quitar */
+.d-archivo__acciones { display: flex; align-items: center; gap: 4px 8px; }
+.d-enlace--quitar { color: #B42318; text-decoration: none; }
+.d-enlace--quitar:hover { text-decoration: underline; }

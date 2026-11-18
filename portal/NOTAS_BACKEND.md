@@ -4,7 +4,7 @@ Lo que la interfaz de `portal/` todavía necesita de la API y resuelve con rodeo
 Ninguno de estos cambios va en `pm/ui-unificada`: esta rama solo toca `portal/` y
 `grupos/udv-styles/`.
 
-## Ya resuelto con la API nueva (PR #47, #49, #52 y #53)
+## Ya resuelto con la API nueva (PR #47, #49, #52, #53, #55 y #56)
 
 Se quitaron los rodeos que dependían de esto:
 
@@ -27,6 +27,9 @@ Se quitaron los rodeos que dependían de esto:
   programa" desde la tarea), `viewer_actions` en la versión (los botones salen solo
   de ahí) y `GET /graduate-profiles` (selector de Perfil de egreso). `/changes`
   compara la primera versión de un período con la versión de la que se copió.
+- "Quitar" en cada archivo del intento abierto: `DELETE /assignments/{id}/files/{file_id}`
+  (PR #56). La lista se repinta con `files` de la respuesta, sin perder el mensaje;
+  tras entregar ya no aparece.
 
 ## Pendiente
 
@@ -43,15 +46,13 @@ la manda en `name`. Al descargar, el archivo se guarda con ese nombre.
 Lo correcto: columna `archivo.descripcion` (migración del G1) y devolverla en
 `files[].description` junto a `name`.
 
-### 2. Quitar un archivo del intento y editar su descripción (G4 y G2)
+### 2. Editar la descripción de un archivo ya subido (G4 y G1)
 
-El diseño compacto del detalle (mockup `vinci-entrega`) pone "Quitar" junto a cada
-archivo del intento en preparación y deja editar su descripción en línea. La API no
-tiene cómo: no hay `DELETE /assignments/{id}/files/{file_id}` (ni `DELETE /files/{id}`),
-y la descripción solo existe como nombre del archivo subido (§1). Hoy la pantalla
-pide la descripción antes de elegir el archivo (opcional; si no se escribe, se usa el
-nombre del archivo) y no ofrece "Quitar". Pedido: desvincular un archivo del intento
-que todavía no se envió, y guardar la descripción aparte para poder editarla.
+"Quitar" ya funciona (ver arriba). Lo que sigue pendiente es editar en línea la
+descripción de un archivo, como en el mockup `vinci-entrega`: la descripción solo
+existe como nombre del archivo subido (§1). Hoy la pantalla la pide antes de elegir
+el archivo (opcional; si no se escribe, se usa el nombre del archivo) y, para
+cambiarla, el docente quita el archivo y lo vuelve a subir. Se resuelve junto con §1.
 
 ### 3. `delivery` según lo que acepta `POST /files` (G4 y G2)
 

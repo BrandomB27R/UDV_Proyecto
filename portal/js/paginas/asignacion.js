@@ -424,12 +424,34 @@ function filaArchivo(f, actual = false) {
       h("span", { class: "d-archivo__dato", title: fechaHora(f.uploaded_at) },
         [tamano(f.size), subido ? `subido ${actual ? "a las" : "el"} ${actual ? hora(subido) : fechaCorta(f.uploaded_at)}` : null].filter(Boolean).join(" · ")),
       zona),
-    h("button", { type: "button", class: "d-enlace", onclick: async (e) => {
-      e.target.disabled = true;
-      zona.textContent = "";
-      try { await descargarArchivo(f.file_id, f.name); } catch (err) { zona.textContent = err.message; }
-      e.target.disabled = false;
-    } }, "Descargar"));
+    h("div", { class: "d-archivo__acciones" },
+      h("button", { type: "button", class: "d-enlace", onclick: async (e) => {
+        e.target.disabled = true;
+        zona.textContent = "";
+        try { await descargarArchivo(f.file_id, f.name); } catch (err) { zona.textContent = err.message; }
+        e.target.disabled = false;
+      } }, "Descargar"),
+      // Solo los archivos del intento que todavía no se envía se pueden quitar.
+      actual && capacidades(st.a).editarEntrega
+        ? h("button", { type: "button", class: "d-enlace d-enlace--quitar", "aria-label": `Quitar ${sinExtension(f.name)}`, onclick: (e) => quitarArchivo(f, e.target, zona) }, "Quitar")
+        : null));
+}
+
+/** DELETE /assignments/{id}/files/{file_id} → {status, files}: la lista se repinta con la respuesta. */
+async function quitarArchivo(f, boton, zona) {
+  boton.disabled = true;
+  zona.textContent = "";
+  try {
+    const r = await api(`/assignments/${st.a.id}/files/${encodeURIComponent(f.file_id)}`, { method: "DELETE" });
+    st.a.files = Array.isArray(r?.files) ? r.files : (st.a.files || []).filter((x) => String(x.file_id) !== String(f.file_id));
+    st.avisoArchivo = { tipo: "ok", texto: `Quitaste «${sinExtension(f.name)}».` };
+    pintar();
+  } catch (e) {
+    zona.textContent = e instanceof ApiError && e.status === 409 ? "Ese archivo ya se envió con la entrega; no se puede quitar."
+      : e instanceof ApiError && e.status === 404 ? "Ese archivo ya no está en la entrega. Recarga la página."
+        : e.message;
+    boton.disabled = false;
+  }
 }
 
 const ESTADOS_PROGRAMA = { draft: "borrador", submitted: "enviada", under_review: "en revisión", returned: "devuelta", approved: "aprobada", authorized: "autorizada", superseded: "reemplazada" };
