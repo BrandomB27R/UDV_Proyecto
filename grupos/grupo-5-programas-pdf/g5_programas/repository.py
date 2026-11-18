@@ -607,7 +607,7 @@ def list_programs(
             conditions.append(f"{column} = :{parameter}")
             params[parameter] = value
     if docente_responsable_id is not None:
-        conditions.append("pv.docente_responsable_id = :docente_responsable_id")
+        conditions.append(TEACHER_VISIBLE_SQL)
         params["docente_responsable_id"] = docente_responsable_id
     where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     from_clause = """
@@ -657,7 +657,7 @@ def get_program(
     if not program:
         raise ApiError(404, "NOT_FOUND", "Programa no encontrado.")
     owner_filter = (
-        " AND pv.docente_responsable_id = :docente_responsable_id"
+        f" AND {TEACHER_VISIBLE_SQL}"
         if docente_responsable_id is not None
         else ""
     )
@@ -694,12 +694,25 @@ def get_program(
     }
 
 
+# Lo que ve un docente (decisión del PM, 17-nov): sus propias versiones en cualquier
+# estado y las versiones autorizadas de cualquier programa, vigentes o anteriores. El
+# historial es del curso, no de la persona: quien recibe el curso el próximo período
+# necesita consultar lo que dejó el docente anterior. Un borrador ajeno sigue oculto.
+PUBLISHED_STATES = ("authorized", "superseded")
+TEACHER_VISIBLE_SQL = (
+    "(pv.docente_responsable_id = :docente_responsable_id"
+    " OR pv.estado_codigo IN ('authorized', 'superseded'))"
+)
+
+
 def _require_version_owner(row: dict, docente_responsable_id: int | None) -> None:
-    if (
-        docente_responsable_id is not None
-        and row.get("docente_responsable_id") != docente_responsable_id
-    ):
-        raise ApiError(404, "NOT_FOUND", "Versión no encontrada.")
+    if docente_responsable_id is None:
+        return
+    if row.get("docente_responsable_id") == docente_responsable_id:
+        return
+    if row.get("estado_codigo") in PUBLISHED_STATES:
+        return
+    raise ApiError(404, "NOT_FOUND", "Versión no encontrada.")
 
 
 def get_version(
@@ -739,7 +752,7 @@ def get_changes(
     current = _require_version(session, version_id)
     _require_version_owner(current, docente_responsable_id)
     owner_filter = (
-        " AND pv.docente_responsable_id = :docente_responsable_id"
+        f" AND {TEACHER_VISIBLE_SQL}"
         if docente_responsable_id is not None
         else ""
     )

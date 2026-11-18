@@ -112,8 +112,17 @@ def translate_database_error(exc: SQLAlchemyError) -> ApiError:
             409: "CONFLICT",
             422: "VALIDATION_ERROR",
         }[status]
-        public_message = re.sub(r"\s*\((?:400|404|409|422)\)", "", message)
-        public_message = re.sub(r"^ERROR:\s*", "", public_message)
+        # El texto del SIGNAL es el segundo argumento del error; str(error) trae además
+        # el número de MySQL y las comillas, que no deben llegar a la pantalla.
+        signal_text = (
+            str(original_args[1]) if len(original_args) > 1 and original_args[1] else message
+        )
+        public_message = re.sub(r"\s*\((?:400|404|409|422)\)", "", signal_text)
+        public_message = re.sub(r"^ERROR:\s*", "", public_message).strip()
+        if public_message:
+            public_message = public_message[0].upper() + public_message[1:]
+            if public_message[-1] not in ".!?":
+                public_message += "."
         return ApiError(status, code, public_message or "La operación no es válida.")
 
     log.exception("Fallo al consultar la base de datos", exc_info=exc)

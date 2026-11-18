@@ -531,3 +531,57 @@ def test_los_avisos_dicen_a_que_asignacion_se_refieren(c, s):
     avisos = c.get("/api/v1/notifications?per_page=100", headers=s["coordinacion"]).json()["data"]
     assert any(n["event"] == "assignment.submitted" and n["assignment_id"] == a for n in avisos)
 
+
+# --------------------------------- 10. programas: lectura de versiones y PDF (G5)
+PUBLICADAS = ("authorized", "superseded")
+
+
+def _versiones(c, s):
+    """Las versiones del programa 1 con su estado actual (otras pruebas las mueven)."""
+    return c.get("/api/v1/course-programs/1", headers=s["coordinacion"]).json()["versiones"]
+
+
+def test_un_docente_lee_las_versiones_autorizadas_de_otro_pero_no_sus_borradores(c, s):
+    """El historial es del curso: una versión autorizada la lee cualquier docente; una que
+    sigue en elaboración o en revisión, solo su responsable y quienes revisan."""
+    versiones = _versiones(c, s)
+    assert any(v["estado"] in PUBLICADAS for v in versiones)
+    for v in versiones:
+        esperado = 200 if v["estado"] in PUBLICADAS else 404
+        r = c.get(f"/api/v1/program-versions/{v['id']}", headers=s["docente2"])
+        assert r.status_code == esperado, (v["id"], v["estado"], r.status_code)
+        assert c.get(f"/api/v1/program-versions/{v['id']}", headers=s["coordinacion"]).status_code == 200
+    visibles = c.get("/api/v1/course-programs/1", headers=s["docente2"]).json()["versiones"]
+    assert {v["id"] for v in visibles} == {v["id"] for v in versiones if v["estado"] in PUBLICADAS}
+    lista = c.get("/api/v1/course-programs", headers=s["docente2"]).json()["data"]
+    assert lista and all(p["estado"] in PUBLICADAS for p in lista)
+    publicada = next(v for v in versiones if v["estado"] in PUBLICADAS)
+    r = c.put(f"/api/v1/program-versions/{publicada['id']}/sections/metodologia",
+              headers=s["docente2"], json={"contenido": {"texto": "x"}})
+    assert r.status_code in (403, 409), r.text       # leer no da permiso de editar
+
+
+def test_el_pdf_de_una_version_autorizada_es_un_documento(c, s):
+    versiones = _versiones(c, s)
+    publicada = next(v for v in versiones if v["estado"] in PUBLICADAS)
+    r = c.get(f"/api/v1/program-versions/{publicada['id']}/pdf", headers=s["docente2"])
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF") and len(r.content) > 5000
+    for v in versiones:
+        if v["estado"] not in PUBLICADAS:
+            es_error_comun(c.get(f"/api/v1/program-versions/{v['id']}/pdf",
+                                 headers=s["coordinacion"]), 409)
+
+
+def test_el_error_de_un_trigger_llega_como_mensaje_limpio(c, s):
+    """Pasar de 100 puntos lo rechaza un trigger del G1: el mensaje no trae el número de MySQL."""
+    borrador = next((v for v in _versiones(c, s) if v["estado"] in ("draft", "returned")), None)
+    if borrador is None:
+        pytest.skip("No queda una versión en borrador para probar")
+    r = c.put(f"/api/v1/program-versions/{borrador['id']}/sections/evaluacion", headers=s["docente1"],
+              json={"contenido": [{"nombre": "A", "ponderacion": 60}, {"nombre": "B", "ponderacion": 60}]})
+    es_error_comun(r, 422)
+    mensaje = r.json()["error"]["message"]
+    assert "1644" not in mensaje and "ERROR" not in mensaje and "(" not in mensaje, mensaje
+    assert "100" in mensaje
+
