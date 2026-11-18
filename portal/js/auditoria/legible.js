@@ -1,6 +1,6 @@
 // Auditoría en palabras: acciones, entidades, "sobre qué" y "qué cambió" sin JSON ni códigos.
 // Sin DOM: devuelve datos que pinta js/paginas/auditoria.js.
-import { ESTADOS, PRIORIDADES, legible, fechaLarga, fechaCorta } from "../formato.js";
+import { ESTADOS, PRIORIDADES, ROLES, legible, fechaLarga, fechaCorta } from "../formato.js";
 import { ESTADOS_PROGRAMA } from "../programa/flujo-programa.js";
 import { RUTAS } from "../config.js";
 
@@ -40,8 +40,10 @@ const CAMPOS = {
   horas_clase_semanal: "Horas por semana", descripcion: "Descripción", prioridad: "Prioridad", resumen_cambios: "Resumen de cambios",
   docente_responsable_id: "Docente responsable", publicada_en: "Fecha de publicación", periodo_id: "Período",
   curso_id: "Curso", sede_id: "Sede", codigo: "Código",
-  modalidad_entrega: "Cómo se entrega", requiere_archivo: "Archivo obligatorio",
+  modalidad_entrega: "Cómo se entrega", requiere_archivo: "Archivo obligatorio", roles: "Roles",
 };
+// Orden de los roles al mostrarlos (el mismo de la pestaña Usuarios).
+const ORDEN_ROLES = ["teacher", "coordinator", "reviewer", "authority", "auditor", "admin"];
 // Modalidad de entrega de un tipo de tarea (G1). Si exige archivo lo dice «Archivo obligatorio».
 const MODALIDAD_ENTREGA = { texto: "Solo texto", ambos: "Texto y archivo", archivo: "Archivo", formulario: "Formulario", programa: "Programa de curso" };
 // Nunca se muestran (valores enmascarados, hashes, contraseñas, tokens).
@@ -65,6 +67,12 @@ export function valorLegible(entidad, campo, v, ctx = {}) {
   if (campo === "prioridad") return PRIORIDADES[v] || legible(v);
   if (typeof v === "boolean" || ((campo === "activo" || campo === "requiere_archivo") && (v === 0 || v === 1))) return v ? "Sí" : "No";
   if (campo === "modalidad_entrega") return MODALIDAD_ENTREGA[v] || legible(v);
+  // Roles de un usuario (vinci-17): lista de códigos → «Docente · Revisión».
+  if (campo === "roles" && Array.isArray(v)) {
+    if (!v.length) return "Ninguno";
+    const orden = (c) => { const i = ORDEN_ROLES.indexOf(c); return i < 0 ? 99 : i; };
+    return [...v].sort((a, b) => orden(a) - orden(b)).map((c) => ROLES[c] || legible(c)).join(" · ");
+  }
   if (CAMPOS_USUARIO.has(campo)) { const u = ctx.usuarios?.get(Number(v)); return u?.name || u?.email || `usuario n.º ${v}`; }
   if (campo === "fecha_limite") return fechaLarga(v);
   if (typeof v === "string" && FECHA_HORA.test(v)) return fechaCorta(v.replace(" ", "T"));
@@ -92,6 +100,10 @@ export function cambiosDe(r, ctx = {}) {
     if (antes && JSON.stringify(a ?? null) === JSON.stringify(d ?? null)) continue;
     if (!antes && (d === null || d === undefined || d === "")) continue;
     out.push({ campo: etiquetaCampo(k), clave: k, antes: antes ? valorLegible(r.entity, k, a, ctx) : null, despues: valorLegible(r.entity, k, d, ctx) });
+  }
+  // La clave nunca se muestra: el G1 solo anota si cambió (cambio_contrasena, fuera de antes/después).
+  if (r.entity === "usuario" && (ch.cambio_contrasena === true || ch.cambio_contrasena === 1)) {
+    out.push({ campo: "Clave", clave: "cambio_contrasena", antes: null, despues: "Cambió la clave" });
   }
   return out;
 }

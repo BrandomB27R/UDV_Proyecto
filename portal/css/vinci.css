@@ -925,3 +925,18 @@ body.d-pagina { display: flex; flex-direction: column; }
 .vinci .v-volver__btn { min-height: 44px; padding: 10px 18px; }
 .vinci .v-volver .v-volver__btn { width: auto; flex: 0 0 auto; }   /* también en el teléfono: a la izquierda, no a todo el ancho */
 
+/* Catálogos · Usuarios: roles en casillas, clave con «Mostrar» y «Restablecer clave» aparte */
+.ct-roles__lista { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.ct-roles__lista .v-check { align-items: center; min-height: 44px; }
+.ct-campos .v-check input { width: 18px; margin-top: 0; }   /* no heredar el 100% de los campos de texto */
+.ct-roles__lista .v-check span { min-width: 0; }
+.ct-tabla .pn-tarea span { overflow-wrap: anywhere; }   /* correos largos en el teléfono */
+.ct-roles[aria-invalid="true"] .ct-roles__lista .v-check { border-color: var(--v-danger); }
+.ct-clave { display: flex; gap: 8px; align-items: stretch; }
+.ct-clave input { flex: 1 1 auto; min-width: 0; }
+.vinci .ct-clave .ct-ver { min-height: 44px; flex: 0 0 auto; width: auto; }
+.ct-nota-activo { margin-top: -8px; }
+.ct-reset { border-top: 1px solid var(--v-line); padding-top: 16px; }
+.ct-reset summary { cursor: pointer; font-size: 15px; font-weight: 800; color: var(--v-navy); min-height: 44px; display: flex; align-items: center; }
+.ct-reset__cuerpo { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+

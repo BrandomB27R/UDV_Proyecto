@@ -184,3 +184,18 @@ Propuesta: mensajes para quien usa la pantalla («El nombre es obligatorio.»,
 «Usa hasta 100 caracteres.»), como los del G6. `details.field` sigue diciendo
 qué campo es.
 
+## Usuarios en Catálogos (18-nov)
+
+### 15. Usuarios: mensajes de validación en inglés y un 409 que no se alcanza (G2)
+
+- Los 422 de `POST` y `PATCH /users` llegan con el texto de pydantic, en inglés:
+  «String should have at least 8 characters» (clave corta) y «value is not a valid
+  email address: An email address must have an @-sign.» (correo). La pantalla los
+  muestra tal cual junto al campo. Propuesta: «La clave debe tener al menos 8
+  caracteres.», «El correo no es válido.».
+- «No puedes desactivar tu propia cuenta.» no se puede producir hoy: solo un
+  administrador edita usuarios, y la regla «No se puede desactivar a un
+  administrador.» se revisa antes. Quien intenta desactivarse recibe esa. No es un
+  problema de seguridad (en los dos casos se rechaza), solo de mensaje. Si el PM
+  quiere el mensaje propio, el G2 puede revisar primero `u.id == actual.id`.
+
