@@ -789,3 +789,29 @@ def test_un_tipo_solo_de_texto_se_entrega_sin_archivo(c, s):
                  json={"comment": "Encuesta respondida."}).status_code == 200
     assert _accion(c, s["docente1"], a, "submit").status_code == 200
     assert c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["delivery"]["mode"] == "texto"
+
+
+# ------------------------------------------- 12. quitar un archivo antes de entregar (G4)
+def test_el_docente_quita_un_archivo_del_intento_sin_enviar(c, s):
+    _, asign = publicar(c, s, para=(DOC1,), tipo=5, revisor=COORD)
+    a = asign[DOC1]
+    assert _accion(c, s["docente1"], a, "start").status_code == 200
+    fid = _subir(c, s["docente1"])
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid), "name": "El que no era"}).status_code in (200, 201)
+    ruta = f"/api/v1/assignments/{a}/files/{fid}"
+    es_error_comun(c.delete(ruta, headers=s["docente2"]), 403)
+    es_error_comun(c.delete(f"/api/v1/assignments/{a}/files/999999", headers=s["docente1"]), 404)
+    r = c.delete(ruta, headers=s["docente1"])
+    assert r.status_code == 200 and r.json()["files"] == [], r.text
+    assert c.get(f"/api/v1/assignments/{a}", headers=s["docente1"]).json()["files"] == []
+    es_error_comun(c.delete(ruta, headers=s["docente1"]), 404)          # ya no está
+    es_error_comun(_accion(c, s["docente1"], a, "submit"), 422)         # sin archivo no se entrega
+    # Con otro archivo se entrega; lo ya enviado no se puede quitar.
+    fid2 = _subir(c, s["docente1"], "correcto.pdf")
+    assert c.post(f"/api/v1/assignments/{a}/files", headers=s["docente1"],
+                  json={"file_id": str(fid2), "name": "El correcto"}).status_code in (200, 201)
+    assert _accion(c, s["docente1"], a, "submit").status_code == 200
+    es_error_comun(c.delete(f"/api/v1/assignments/{a}/files/{fid2}", headers=s["docente1"]), 409)
+    detalle = c.get(f"/api/v1/assignments/{a}", headers=s["coordinacion"]).json()
+    assert [f["name"] for f in detalle["files"]] == ["correcto.pdf"]
