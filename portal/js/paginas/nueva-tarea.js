@@ -24,16 +24,25 @@ const PASOS = [
 // ── Estado del formulario ──
 const f = {
   type_id: null, title: "", description: "", due_date: "", priority: "medium",
+  // modo: "users" (los elijo), "curso" (los que dan un curso; se guarda como "users"), "filter" o "all".
   modo: "users", user_ids: new Set(), filtro: "",          // filtro: "campus:<nombre>" | "unit:<nombre>"
+  curso: { course_id: null, period_id: null },             // curso y período de «Por curso»
   // Por defecto revisa quien crea la tarea, si tiene el rol de revisión; si no, sin revisor designado.
   reviewer_id: (yo.roles || []).includes("reviewer") ? yo.id : null,
   course_id: null, period_id: null,                         // obligatorios si el tipo es "Actualizar programa"
 };
-// Docentes que dan el curso en el período (GET /tasks/eligible-teachers), por "curso:período".
-const sugeridos = { clave: null, ids: new Set(), aplicadosA: null, error: null };
+// Docentes que dan un curso en un período (GET /tasks/eligible-teachers), por "curso:período":
+// {filas: [{id, name, email, campus}], error}. aplicadosA: la última clave cuyos docentes se marcaron.
+const delCurso = new Map();
+let aplicadosA = null;
+let cargandoCurso = null;
+let errorCurso = null;
 let paso = 0;
 let tareaId = idBorrador && /^\d+$/.test(idBorrador) ? Number(idBorrador) : null;
 let buscarDocente = "";
+let paginaDocentes = 1;
+const POR_PAGINA_DOCENTES = 10;
+const MAX_CHIPS = 12;
 
 // ── Catálogos ──
 const SIN_PERMISO = "Crear tareas es de coordinación.";
@@ -64,27 +73,50 @@ const esPrograma = () => tipoActual()?.code === "ACTUALIZAR_PROGRAMA";
 const nombreCurso = (id) => { const c = cursos.find((x) => x.id === id); return c ? `${c.code} · ${c.name}` : ""; };
 const nombrePeriodo = (id) => { const x = periodos.find((y) => y.id === id); return x ? `${x.code}${x.name ? ` (${x.name})` : ""}` : ""; };
 
-/** Pide los docentes del curso en el período y, la primera vez, los propone como destinatarios. */
-async function cargarSugeridos() {
-  if (!esPrograma() || !f.course_id) return;
-  const clave = `${f.course_id}:${f.period_id ?? ""}`;
-  if (sugeridos.clave !== clave) {
+const claveCurso = () => (f.curso.course_id && f.curso.period_id ? `${f.curso.course_id}:${f.curso.period_id}` : null);
+
+/**
+ * Pide los docentes del curso en el período de «Por curso» y, la primera vez para esa clave, los deja
+ * marcados (reemplazan a los elegidos). Devuelve la entrada de delCurso o null si falta curso o período.
+ */
+async function cargarCurso() {
+  const clave = claveCurso();
+  if (!clave) return null;
+  if (!delCurso.has(clave)) {
     try {
-      const q = `course_id=${encodeURIComponent(f.course_id)}${f.period_id ? `&period_id=${encodeURIComponent(f.period_id)}` : ""}`;
-      const r = await api(`/tasks/eligible-teachers?${q}`);
-      sugeridos.ids = new Set((r.data || []).map((x) => x.id));
-      sugeridos.error = null;
+      const r = await api(`/tasks/eligible-teachers?course_id=${encodeURIComponent(f.curso.course_id)}&period_id=${encodeURIComponent(f.curso.period_id)}`);
+      // Un docente puede dar el curso en varias sedes: una fila por docente, con sus sedes juntas.
+      const porId = new Map();
+      for (const x of r.data || []) {
+        const y = porId.get(x.id) || { id: x.id, name: x.name, email: x.email, sedes: [] };
+        if (x.campus && !y.sedes.includes(x.campus)) y.sedes.push(x.campus);
+        porId.set(x.id, y);
+      }
+      delCurso.set(clave, { filas: [...porId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), "es")), error: null });
+      errorCurso = null;
     } catch (e) {
-      sugeridos.ids = new Set();
-      sugeridos.error = e.message;
+      // No se guarda en caché: al volver a elegir se intenta otra vez.
+      errorCurso = e.message;
+      return { filas: [], error: e.message };
     }
-    sugeridos.clave = clave;
   }
-  if (sugeridos.aplicadosA !== clave && sugeridos.ids.size) {
-    f.modo = "users";
-    f.user_ids = new Set(sugeridos.ids);
-    sugeridos.aplicadosA = clave;
+  const d = delCurso.get(clave);
+  if (aplicadosA !== clave) {
+    f.user_ids = new Set(d.filas.map((x) => x.id));
+    aplicadosA = clave;
+    paginaDocentes = 1;
   }
+  return d;
+}
+
+/** Al pasar del paso 1: en «Actualizar programa» con curso y período, «Por curso» viene preseleccionado. */
+async function proponerPorCurso() {
+  if (!esPrograma() || !f.course_id || !f.period_id) return;
+  const clave = `${f.course_id}:${f.period_id}`;
+  if (aplicadosA === clave) return;                 // ya se propusieron (o el borrador ya tenía los suyos)
+  f.modo = "curso";
+  f.curso = { course_id: f.course_id, period_id: f.period_id };
+  await cargarCurso();
 }
 
 const docentes = usuarios.filter((u) => (u.roles || []).includes("teacher"))
@@ -102,8 +134,8 @@ async function cargarBorrador(id) {
     due_date: (t.due_date || "").slice(0, 10), priority: t.priority || "medium", reviewer_id: t.reviewer_id ?? null,
     course_id: t.course_id ?? null, period_id: t.period_id ?? null,
   });
-  // Los destinatarios guardados del borrador mandan: no se reemplazan por los sugeridos.
-  if (t.course_id) sugeridos.aplicadosA = `${t.course_id}:${t.period_id ?? ""}`;
+  // Los destinatarios guardados del borrador mandan: no se reemplazan por los del curso.
+  if (t.course_id && t.period_id) aplicadosA = `${t.course_id}:${t.period_id}`;
   const r = t.recipient_rule;
   if (r?.mode === "all") f.modo = "all";
   else if (r?.mode === "filter") { f.modo = "filter"; f.filtro = r.unit ? `unit:${r.unit}` : `campus:${r.campus}`; }
@@ -168,7 +200,7 @@ function error(texto, campo) {
 async function siguiente() {
   const fallo = validar(paso);
   if (fallo) { error(fallo.texto, fallo.campo); return; }
-  if (paso === 0) await cargarSugeridos();
+  if (paso === 0) await proponerPorCurso();
   paso++;
   pintar(true);
 }
@@ -184,7 +216,14 @@ function validar(i) {
     if (esPrograma() && !f.period_id) return { texto: "Elige el período.", campo: "periodo" };
   }
   if (i === 1) {
-    if (f.modo === "users" && !f.user_ids.size) return { texto: "Elige al menos un docente.", campo: "buscar-docente" };
+    if (f.modo === "curso") {
+      if (!f.curso.course_id) return { texto: "Elige el curso.", campo: "curso-dest" };
+      if (!f.curso.period_id) return { texto: "Elige el período.", campo: "periodo-dest" };
+      const d = delCurso.get(claveCurso());
+      if (!d) return { texto: errorCurso ? "No se pudieron consultar los docentes del curso. Vuelve a elegir el curso para intentarlo otra vez." : "Espera a que se carguen los docentes del curso.", campo: "curso-dest" };
+      if (!d.filas.length) return { texto: "Nadie tiene asignado este curso en ese período. Elige otro curso o período, o elige a los docentes de otra forma.", campo: "curso-dest" };
+    }
+    if ((f.modo === "users" || f.modo === "curso") && !f.user_ids.size) return { texto: "Elige al menos un docente.", campo: "buscar-docente" };
     if (f.modo === "filter" && !f.filtro) return { texto: "Elige la sede o la unidad.", campo: "filtro" };
   }
   return null;
@@ -278,74 +317,181 @@ function formularioOtroTipo() {
 
 // ── Paso 2: destinatarios ──
 function pasoDestinatarios() {
-  const lista = h("div");
+  const zonaModo = h("div");
   const modo = (valor, titulo, detalle) => h("label", { class: "v-opcion" },
-    h("input", { type: "radio", name: "modo", value: valor, checked: f.modo === valor,
-      onchange: () => { f.modo = valor; pintarModo(); } }),
+    h("input", { type: "radio", name: "modo", value: valor, id: `modo-${valor}`, checked: f.modo === valor,
+      onchange: () => { f.modo = valor; paginaDocentes = 1; pintarModo(); } }),
     h("span", { class: "v-opcion__txt" }, h("strong", {}, titulo), h("span", {}, detalle)));
 
   function pintarModo() {
     if (f.modo === "all") {
-      poner(lista, h("p", { class: "v-nota" }, `La recibirán los ${docentes.length} docentes activos.`));
+      poner(zonaModo, h("p", { class: "v-nota" }, `La recibirán los ${docentes.length} docentes activos.`));
     } else if (f.modo === "filter") {
-      poner(lista, h("div", { class: "v-campo" },
+      poner(zonaModo, h("div", { class: "v-campo" },
         h("label", { for: "filtro" }, "Sede o unidad académica"),
         h("select", { id: "filtro", onchange: (e) => { f.filtro = e.target.value; e.target.removeAttribute("aria-invalid"); } },
           h("option", { value: "" }, "Elige una opción"),
-          h("optgroup", { label: "Sedes" }, sedes.map((s) => h("option", { value: `campus:${s.name}`, selected: f.filtro === `campus:${s.name}` }, s.name))),
+          h("optgroup", { label: "Sedes" }, sedes.map((x) => h("option", { value: `campus:${x.name}`, selected: f.filtro === `campus:${x.name}` }, x.name))),
           h("optgroup", { label: "Unidades académicas" }, unidades.map((u) => h("option", { value: `unit:${u.name}`, selected: f.filtro === `unit:${u.name}` }, u.name)))),
         h("span", { class: "v-campo__ayuda" }, "La reciben los docentes activos de esa sede o unidad al momento de publicar.")));
     } else {
-      pintarDocentes();
+      poner(zonaModo, f.modo === "curso" ? elegirCurso() : null, tablaDocentes());
     }
   }
 
-  function pintarDocentes() {
-    const contador = h("p", { class: "v-nota", "aria-live": "polite" });
-    const casillas = h("div");
-    const actualizar = () => { contador.textContent = `${f.user_ids.size} ${f.user_ids.size === 1 ? "docente elegido" : "docentes elegidos"}`; };
-    const visibles = () => docentes.filter((u) => !buscarDocente || `${nombreCompleto(u)} ${u.correo}`.toLowerCase().includes(buscarDocente));
-    const pintarCasillas = () => {
-      const v = visibles();
-      poner(casillas, v.length ? h("div", { class: "v-checks" }, v.map((u) => h("label", { class: "v-check" },
-        h("input", { type: "checkbox", value: String(u.id), checked: f.user_ids.has(u.id), onchange: (e) => {
-          if (e.target.checked) f.user_ids.add(u.id); else f.user_ids.delete(u.id);
-          actualizar();
-        } }),
-        h("span", {}, h("strong", {}, nombreCompleto(u)), h("small", {}, u.correo),
-          sugeridos.ids.has(u.id) && esPrograma() ? h("em", { class: "v-check__marca" }, "Da el curso") : null))))
-        : h("p", { class: "v-nota" }, "Ningún docente coincide con la búsqueda."));
-      actualizar();
+  // «Por curso»: curso y período; al tener los dos se piden sus docentes y quedan marcados.
+  function elegirCurso() {
+    if (!f.curso.course_id && !f.curso.period_id && f.course_id) f.curso = { course_id: f.course_id, period_id: f.period_id };
+    const estado = h("p", { class: "nt-curso__estado", id: "estado-curso", "aria-live": "polite" });
+    const pintarEstado = () => {
+      const clave = claveCurso();
+      const d = clave ? delCurso.get(clave) : null;
+      if (!clave) { poner(estado, "Elige el curso y el período."); return; }
+      if (cargandoCurso === clave) { poner(estado, "Buscando a los docentes de ese curso…"); return; }
+      if (!d) { poner(estado); return; }
+      const periodo = periodos.find((x) => x.id === f.curso.period_id)?.code || "";
+      poner(estado, d.filas.length
+        ? [h("strong", {}, `${d.filas.length} ${d.filas.length === 1 ? "docente da" : "docentes dan"}`),
+          ` este curso en ${periodo}. ${d.filas.length === 1 ? "Quedó marcado; puedes quitarlo." : "Quedaron marcados; puedes quitar alguno."}`]
+        : "Nadie tiene asignado este curso en ese período.");
     };
-    const buscar = h("input", { id: "buscar-docente", type: "search", placeholder: "Buscar por nombre o correo", value: buscarDocente, autocomplete: "off",
-      oninput: (e) => { buscarDocente = e.target.value.trim().toLowerCase(); e.target.removeAttribute("aria-invalid"); pintarCasillas(); } });
-    poner(lista, h("div", { class: "v-destinatarios" },
-      h("div", { class: "v-campo" }, h("label", { for: "buscar-docente" }, "Docentes"), buscar),
-      h("div", { class: "v-acciones v-acciones--lista" },
-        h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { visibles().forEach((u) => f.user_ids.add(u.id)); pintarCasillas(); } }, "Elegir todos los de la lista"),
-        h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { f.user_ids.clear(); pintarCasillas(); } }, "Quitar todos"),
-        contador),
-      casillas));
-    pintarCasillas();
+    const cambiar = async () => {
+      poner(zonaError);
+      const clave = claveCurso();
+      if (!clave) { pintarEstado(); return; }
+      cargandoCurso = clave;
+      pintarEstado();
+      const d = await cargarCurso();
+      cargandoCurso = null;
+      if (claveCurso() !== clave) return;            // cambió mientras se pedía
+      if (d?.error) { poner(estado, mensaje("error", `No se pudieron consultar los docentes del curso: ${d.error}`)); return; }
+      pintarEstado();
+      pintarElegidos();
+      pintarTabla();
+    };
+    const sel = (id, etiqueta, valor, opciones, al) => h("div", { class: "v-campo" },
+      h("label", { for: id }, etiqueta),
+      h("select", { id, "aria-describedby": "estado-curso", onchange: (e) => { e.target.removeAttribute("aria-invalid"); al(e.target.value ? Number(e.target.value) : null); cambiar(); } },
+        h("option", { value: "" }, etiqueta === "Curso" ? "Elige el curso" : "Elige el período"),
+        opciones.map(([v, t]) => h("option", { value: String(v), selected: valor === v }, t))));
+    const nodo = h("div", { class: "nt-curso" },
+      sel("curso-dest", "Curso", f.curso.course_id, cursos.map((c) => [c.id, `${c.code} · ${c.name}`]), (v) => { f.curso.course_id = v; }),
+      sel("periodo-dest", "Período", f.curso.period_id, periodos.map((x) => [x.id, x.code]), (v) => { f.curso.period_id = v; }),
+      estado);
+    // Si ya hay curso y período (vienen del paso 1 o se eligieron antes), se piden o se muestran.
+    if (claveCurso() && !delCurso.has(claveCurso())) cambiar(); else pintarEstado();
+    return nodo;
+  }
+
+  // ── Elegidos y tabla de docentes (para «Docentes que elijo» y «Por curso») ──
+  let zonaElegidos, zonaTabla, botonMarcar;
+  const nombreDe = new Map(docentes.map((u) => [u.id, nombreCompleto(u)]));
+
+  /** Filas de la tabla: todos los docentes o, en «Por curso», los que dan el curso (con su sede). */
+  function filasBase() {
+    if (f.modo === "curso") {
+      const d = delCurso.get(claveCurso());
+      return (d?.filas || []).map((x) => ({ id: x.id, nombre: x.name, correo: x.email, sede: x.sedes.join(" · ") }));
+    }
+    return docentes.map((u) => ({ id: u.id, nombre: nombreCompleto(u), correo: u.correo }));
+  }
+  const sinTildes = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const filtradas = () => {
+    const q = sinTildes(buscarDocente);
+    return filasBase().filter((x) => !q || sinTildes(`${x.nombre} ${x.correo}`).includes(q));
+  };
+
+  function pintarElegidos() {
+    if (!zonaElegidos) return;
+    const ids = [...f.user_ids];
+    const n = ids.length;
+    const nombre = (id) => nombreDe.get(id) || delCurso.get(claveCurso())?.filas.find((x) => x.id === id)?.name || `Docente ${id}`;
+    poner(zonaElegidos,
+      h("div", { class: "nt-elegidos__cab" },
+        h("strong", { id: "t-elegidos" }, n ? `${n} ${n === 1 ? "docente elegido" : "docentes elegidos"}` : "Todavía no eliges a ningún docente"),
+        n ? h("button", { type: "button", class: "v-enlace", onclick: () => { f.user_ids.clear(); pintarElegidos(); pintarTabla(); document.getElementById("buscar-docente")?.focus(); } }, "Quitar todos") : null),
+      n ? h("ul", { class: "nt-chips", "aria-labelledby": "t-elegidos" },
+        ids.slice(0, MAX_CHIPS).map((id, i) => h("li", { class: "nt-chip" },
+          h("span", {}, nombre(id)),
+          h("button", { type: "button", class: "nt-chip__x", "data-chip": id, "aria-label": `Quitar a ${nombre(id)}`, onclick: () => {
+            f.user_ids.delete(id);
+            pintarElegidos();
+            pintarTabla();
+            // El foco pasa a la etiqueta que quedó en su lugar (o al buscador si no queda ninguna).
+            const sig = [...f.user_ids][Math.min(i, f.user_ids.size - 1)];
+            (sig != null && zonaElegidos.querySelector(`[data-chip="${sig}"]`) || document.getElementById("buscar-docente"))?.focus();
+          } }, h("span", { "aria-hidden": "true" }, "×")))),
+        n > MAX_CHIPS ? h("li", { class: "nt-chips__mas" }, `y ${n - MAX_CHIPS} más`) : null) : null);
+  }
+
+  function pintarTabla() {
+    if (!zonaTabla) return;
+    const v = filtradas();
+    const paginas = Math.max(1, Math.ceil(v.length / POR_PAGINA_DOCENTES));
+    paginaDocentes = Math.min(Math.max(1, paginaDocentes), paginas);
+    const desde = (paginaDocentes - 1) * POR_PAGINA_DOCENTES;
+    const filas = v.slice(desde, desde + POR_PAGINA_DOCENTES);
+    const conSede = filas.some((x) => x.sede);
+    const faltan = v.filter((x) => !f.user_ids.has(x.id)).length;
+    botonMarcar.textContent = v.length ? `Marcar ${v.length === 1 ? "al 1" : `los ${v.length}`} de esta lista` : "Marcar los de esta lista";
+    botonMarcar.disabled = !v.length || !faltan;
+    if (f.modo === "curso" && !claveCurso()) { poner(zonaTabla); return; }
+    poner(zonaTabla,
+      filas.length ? h("table", { class: "nt-docentes" },
+        h("caption", { class: "v-sr" }, "Docentes que puedes elegir"),
+        h("thead", {}, h("tr", {},
+          h("th", { scope: "col" }, h("span", { class: "v-sr" }, "Elegir")),
+          h("th", { scope: "col" }, "Docente"),
+          conSede ? h("th", { scope: "col" }, "Sede") : null)),
+        h("tbody", {}, filas.map((x) => h("tr", {},
+          h("td", { class: "nt-docentes__casilla" }, h("input", { type: "checkbox", id: `doc-${x.id}`, value: String(x.id), checked: f.user_ids.has(x.id),
+            onchange: (e) => { if (e.target.checked) f.user_ids.add(x.id); else f.user_ids.delete(x.id); poner(zonaError); pintarElegidos(); pintarTabla(); document.getElementById(`doc-${x.id}`)?.focus(); } })),
+          h("td", { "data-etiqueta": "Docente" }, h("label", { for: `doc-${x.id}`, class: "nt-docentes__nombre" }, h("strong", {}, x.nombre), h("span", {}, x.correo))),
+          conSede ? h("td", { "data-etiqueta": "Sede" }, x.sede || "—") : null))))
+        : h("p", { class: "v-nota" }, buscarDocente ? "Ningún docente coincide con la búsqueda." : f.modo === "curso" ? "Nadie tiene asignado este curso en ese período." : "No hay docentes activos."),
+      v.length ? h("nav", { class: "au-paginas", "aria-label": "Páginas de docentes" },
+        h("span", {}, `${v.length} ${v.length === 1 ? "docente" : "docentes"} · mostrando del ${desde + 1} al ${desde + filas.length} · ${POR_PAGINA_DOCENTES} por página`),
+        h("div", { class: "au-paginas__botones" },
+          h("button", { type: "button", class: "v-enlace", disabled: paginaDocentes <= 1, onclick: () => { paginaDocentes--; pintarTabla(); } }, "← Anterior"),
+          h("span", {}, `Página ${paginaDocentes} de ${paginas}`),
+          h("button", { type: "button", class: "v-enlace", disabled: paginaDocentes >= paginas, onclick: () => { paginaDocentes++; pintarTabla(); } }, "Siguiente →"))) : null);
+  }
+
+  function tablaDocentes() {
+    zonaElegidos = h("div", { class: "nt-elegidos", "aria-live": "polite" });
+    zonaTabla = h("div", { class: "nt-tabla" });
+    botonMarcar = h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico nt-marcar", onclick: () => {
+      filtradas().forEach((x) => f.user_ids.add(x.id));
+      poner(zonaError); pintarElegidos(); pintarTabla();
+    } }, "Marcar los de esta lista");
+    let espera = null;
+    const buscar = h("input", { id: "buscar-docente", type: "search", placeholder: "Nombre o correo", value: buscarDocente, autocomplete: "off",
+      oninput: (e) => {
+        e.target.removeAttribute("aria-invalid");
+        clearTimeout(espera);
+        espera = setTimeout(() => { buscarDocente = e.target.value.trim(); paginaDocentes = 1; pintarTabla(); }, 200);
+      } });
+    const nodo = h("div", { class: "v-destinatarios" },
+      zonaElegidos,
+      h("div", { class: "nt-buscar" },
+        h("div", { class: "v-campo" }, h("label", { for: "buscar-docente" }, "Buscar en la lista"), buscar),
+        botonMarcar),
+      zonaTabla);
+    pintarElegidos();
+    pintarTabla();
+    return nodo;
   }
 
   pintarModo();
-  let avisoSugeridos = null;
-  if (esPrograma() && f.course_id) {
-    const donde = `${nombreCurso(f.course_id)}${f.period_id ? ` en ${nombrePeriodo(f.period_id)}` : ""}`;
-    avisoSugeridos = sugeridos.error ? mensaje("aviso", `No se pudieron consultar los docentes del curso: ${sugeridos.error}`)
-      : sugeridos.ids.size ? mensaje("info", `Propuestos: ${sugeridos.ids.size} ${sugeridos.ids.size === 1 ? "docente que da" : "docentes que dan"} ${donde}. Están marcados con «Da el curso»; puedes cambiarlos.`)
-      : mensaje("aviso", `Nadie tiene asignado ${donde}. Elige a los docentes a mano.`);
-  }
   return [
-    avisoSugeridos,
     h("fieldset", { class: "v-grupo" },
       h("legend", { class: "v-campo__etq" }, "¿A quién va dirigida?"),
-      h("div", { class: "v-opciones" },
-        modo("users", "Docentes que elijo", "Marca uno o varios docentes."),
-        modo("all", "Todos los docentes", "Todos los docentes activos."),
-        modo("filter", "Por sede o unidad", "Los docentes de una sede o unidad académica."))),
-    lista,
+      h("div", { class: "v-opciones nt-modos" },
+        modo("users", "Docentes que elijo", "Busca y marca uno o varios."),
+        modo("curso", "Por curso", "Los docentes que dan un curso en un período."),
+        modo("filter", "Por sede o unidad", "Los de una sede o unidad académica."),
+        modo("all", "Todos los docentes", "Todos los docentes activos."))),
+    zonaModo,
   ];
 }
 
@@ -371,7 +517,12 @@ function describirDestinatarios() {
   if (f.modo === "all") return `Todos los docentes activos (${docentes.length})`;
   if (f.modo === "filter") return f.filtro ? `Docentes de ${f.filtro.split(":").slice(1).join(":")}` : "Sin elegir";
   const n = docentes.filter((u) => f.user_ids.has(u.id)).map(nombreCompleto);
-  return n.length ? n.join(", ") : "Sin elegir";
+  const nombres = n.length ? n.join(", ") : "Sin elegir";
+  if (f.modo === "curso" && claveCurso()) {
+    const periodo = periodos.find((x) => x.id === f.curso.period_id)?.code || "";
+    return `Por curso (${nombreCurso(f.curso.course_id)} en ${periodo}): ${nombres}`;
+  }
+  return nombres;
 }
 
 function pasoConfirmar() {
@@ -437,7 +588,7 @@ async function guardar(publicar) {
   };
   const regla = f.modo === "all" ? { mode: "all" }
     : f.modo === "filter" ? { mode: "filter", [f.filtro.startsWith("unit:") ? "unit" : "campus"]: f.filtro.split(":").slice(1).join(":") }
-    : { mode: "users", user_ids: [...f.user_ids] };
+    : { mode: "users", user_ids: [...f.user_ids] };        // «Por curso» también se guarda así
   try {
     if (tareaId) await api(`/tasks/${tareaId}`, { method: "PATCH", body: datos });
     else tareaId = (await api("/tasks", { method: "POST", body: datos })).id;
