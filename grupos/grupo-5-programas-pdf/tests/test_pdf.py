@@ -116,3 +116,34 @@ class PdfTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SinPrerrequisitosTests(unittest.TestCase):
+    """La declaración «sin prerrequisitos» se imprime; una lista vacía sin declarar, no."""
+
+    def _parrafos(self, seccion):
+        from unittest import mock
+        version = {**VERSION, "secciones": {**VERSION["secciones"], "prerrequisitos": seccion}}
+        vistos, original = [], pdf_service.Paragraph
+
+        def espia(texto, *a, **k):
+            vistos.append(str(texto))
+            return original(texto, *a, **k)
+
+        with mock.patch.object(pdf_service, "Paragraph", espia):
+            self.assertTrue(build_pdf({"id": 1}, version).startswith(b"%PDF"))
+        return " | ".join(vistos)
+
+    def test_declarado_sale_en_el_documento(self):
+        texto = self._parrafos({"contenido": [], "sin_prerrequisitos": True})
+        self.assertIn("Prerrequisitos", texto)
+        self.assertIn("Este curso no tiene prerrequisitos.", texto)
+
+    def test_lista_vacia_sin_declarar_no_imprime_la_seccion(self):
+        texto = self._parrafos({"contenido": [], "sin_prerrequisitos": False})
+        self.assertNotIn("Prerrequisitos", texto)
+
+    def test_con_cursos_no_se_imprime_la_declaracion(self):
+        texto = self._parrafos(VERSION["secciones"]["prerrequisitos"])
+        self.assertIn("Prerrequisitos", texto)
+        self.assertNotIn("no tiene prerrequisitos", texto)
