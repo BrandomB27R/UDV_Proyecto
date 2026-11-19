@@ -352,6 +352,7 @@ CREATE TABLE programa_version (
     area_id                 INT           NULL,
     pensum                  VARCHAR(50)   NULL,
     horas_clase_semanal     DECIMAL(4,1)  NULL,
+    sin_prerrequisitos      TINYINT(1)    NOT NULL DEFAULT 0,
     docente_responsable_id  INT           NULL,
     revisor_id              INT           NULL,
     tarea_destinatario_origen_id INT      NULL,
@@ -835,7 +836,8 @@ INSERT INTO schema_migracion (version, descripcion) VALUES
 ('1.2.1', 'Fechas en UTC; @actor_id = 0 se trata como NULL en auditoria y eventos; actor de task.published desde sp_publicar_tarea'),
 ('1.2.2', 'Permisos de programas para docente y coordinacion (decision C); el usuario de coordinacion ejerce tambien revision y autoridad'),
 ('1.2.3', 'El texto de una entrega se puede corregir mientras el intento no se haya enviado'),
-('1.2.4', 'users.read solo para administracion y coordinacion');
+('1.2.4', 'users.read solo para administracion y coordinacion'),
+('1.2.5', 'programa_version.sin_prerrequisitos: el curso declara que no tiene prerrequisitos');
 -- ==================== TRIGGERS Y PROCEDIMIENTOS ====================
 
 DELIMITER $$
@@ -1023,6 +1025,7 @@ BEGIN
               AND NEW.nivel <=> OLD.nivel
               AND NEW.area_id <=> OLD.area_id
               AND NEW.pensum <=> OLD.pensum
+              AND NEW.sin_prerrequisitos <=> OLD.sin_prerrequisitos
               AND NEW.horas_clase_semanal <=> OLD.horas_clase_semanal
               AND NEW.docente_responsable_id <=> OLD.docente_responsable_id
               AND NEW.revisor_id <=> OLD.revisor_id

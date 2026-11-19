@@ -493,6 +493,8 @@ def build_pdf(program, version, approval=None):
             bloques = [_p(texto, estilos["texto"])] if texto else []
         else:
             bloques = armar(contenido, estilos)
+        if not bloques and clave == "prerrequisitos" and (version.get("secciones", {}).get(clave) or {}).get("sin_prerrequisitos"):
+            bloques = [_p("Este curso no tiene prerrequisitos.", estilos["texto"])]
         if not bloques:
             continue
         numero += 1
