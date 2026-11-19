@@ -1,11 +1,12 @@
 // Notificaciones: sin leer y todas, marcar como leída (una o todas), con enlace a la sección que corresponde.
 import { api } from "../api.js";
 import { montarBarra } from "../barra.js";
-import { RUTAS, tituloPestana } from "../config.js";
+import { tituloPestana } from "../config.js";
 import { h, poner, mensaje } from "../dom.js";
 import { fechaCorta, fechaHora } from "../formato.js";
-import { pestanas, vacio, sinAcceso, textoDeError, todasLasPaginas } from "../componentes.js";
-import { requerirSesion, perfiles } from "../sesion.js";
+import { pestanas, vacio, sinAcceso, textoDeError } from "../componentes.js";
+import { requerirSesion } from "../sesion.js";
+import { destinoDeAviso, marcarAvisoLeido, marcarTodosLeidos } from "../avisos.js";
 
 const raiz = document.getElementById("contenido");
 const yo = await requerirSesion();
@@ -13,38 +14,30 @@ montarBarra(yo, "notificaciones");
 tituloPestana("Notificaciones");
 
 const POR_PAGINA = 20;
-const p = perfiles(yo.roles);
 // Desde la campana (#aviso-N) se abre "Todas": el aviso puede estar ya leído.
-const st = { filtro: location.hash.startsWith("#aviso-") ? "todas" : "sin-leer", items: [], total: 0, pagina: 0, noLeidas: 0 };
+const st = { filtro: location.hash.startsWith("#aviso-") ? "todas" : "sin-leer", items: [], total: 0, pagina: 0, noLeidas: 0, turno: 0 };
 
 const zona = h("div", { "aria-live": "polite" });
 const listaEl = h("div", { role: "tabpanel" });
 const marcarTodas = h("button", { type: "button", class: "v-btn v-btn--sec", onclick: marcarTodasLeidas }, "Marcar todas como leídas");
 const pest = h("div");
 
-// Cada aviso enlaza a su tarea (assignment_id) o a su programa (program_version_id).
-// Sin ninguno de los dos, a la sección que corresponde por el tipo de evento.
-function destino(n) {
-  if (n.assignment_id != null) return { texto: "Ver la tarea", href: RUTAS.asignacion(n.assignment_id) };
-  if (n.program_version_id != null) return { texto: "Ver el programa", href: RUTAS.programa(n.program_version_id) };
-  const e = String(n.event || "");
-  if (e.startsWith("task.") && (yo.roles || []).includes("coordinator")) return { texto: "Ir a Tareas", href: RUTAS.tareas };
-  if (e.startsWith("task.") && p.docente) return { texto: "Ir a Mis tareas", href: RUTAS.misTareas };
-  return null;
-}
-
 async function cargar(reiniciar = true) {
-  if (reiniciar) { st.items = []; st.pagina = 0; }
+  // La campana, el cambio de #aviso-N y los botones pueden pedir cargas a la vez: vale solo la última.
+  const turno = ++st.turno;
+  const pagina = reiniciar ? 0 : st.pagina;
   try {
     const [r, nl] = await Promise.all([
-      api(`/notifications?page=${st.pagina + 1}&per_page=${POR_PAGINA}${st.filtro === "sin-leer" ? "&unread=true" : ""}`),
+      api(`/notifications?page=${pagina + 1}&per_page=${POR_PAGINA}${st.filtro === "sin-leer" ? "&unread=true" : ""}`),
       api("/notifications?unread=true&per_page=1"),
     ]);
-    st.pagina += 1;
-    st.items = st.items.concat(r.data || []);
+    if (turno !== st.turno) return;
+    st.pagina = pagina + 1;
+    st.items = (reiniciar ? [] : st.items).concat(r.data || []);
     st.total = Number(r.total) || 0;
     st.noLeidas = Number(nl.total) || 0;
   } catch (e) {
+    if (turno !== st.turno) return;
     await sinAcceso(raiz, "Notificaciones", textoDeError(e, "No se pudieron cargar tus notificaciones."));
   }
   pintar();
@@ -70,7 +63,7 @@ function pintar() {
 }
 
 function fila(n) {
-  const ir = destino(n);
+  const ir = destinoDeAviso(n, yo);
   const boton = n.is_read ? null : h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: async (e) => {
     e.target.disabled = true;
     try {
@@ -96,7 +89,7 @@ function fila(n) {
 }
 
 async function marcarLeida(n) {
-  await api(`/notifications/${n.id}/read`, { method: "PATCH" });
+  await marcarAvisoLeido(n.id);
   n.is_read = true;
   st.noLeidas = Math.max(0, st.noLeidas - 1);
   window.dispatchEvent(new Event("vinci:avisos"));     // la campana vuelve a contar
@@ -105,15 +98,21 @@ async function marcarLeida(n) {
 async function marcarTodasLeidas() {
   marcarTodas.disabled = true;
   try {
-    const todas = (await todasLasPaginas(api, "/notifications?unread=true")).data || [];
-    const r = await Promise.allSettled(todas.map((n) => api(`/notifications/${n.id}/read`, { method: "PATCH" })));
-    const fallos = r.filter((x) => x.status === "rejected").length;
+    const { fallos } = await marcarTodosLeidos();
     poner(zona, fallos ? mensaje("error", `No se pudieron marcar ${fallos} notificaciones. Intenta de nuevo.`)
       : mensaje("ok", "Todas tus notificaciones quedaron como leídas."));
     window.dispatchEvent(new Event("vinci:avisos"));
     await cargar();
   } finally { marcarTodas.disabled = false; }
 }
+
+// Si se marca algo desde la campana estando en esta página, la lista se pone al día.
+window.addEventListener("vinci:avisos-panel", () => cargar());
+// Un aviso sin destino lleva aquí (#aviso-N); si ya se está en esta página no hay recarga.
+window.addEventListener("hashchange", () => {
+  if (location.hash.startsWith("#aviso-") && st.filtro !== "todas") { st.filtro = "todas"; poner(zona); cargar(); }
+  else pintar();
+});
 
 poner(raiz,
   h("div", { class: "v-cabecera v-cabecera--accion" },

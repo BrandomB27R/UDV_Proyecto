@@ -417,7 +417,7 @@ body.vinci--blanco { background: var(--v-white); }
 .v-avisos { z-index: 30; }
 .vinci a.v-aviso-item { text-decoration: none; color: inherit; }
 .vinci a.v-aviso-item:hover { background: var(--v-bg); }
-.v-avisos__todas { font-size: 14px; font-weight: 700; padding: 10px 0 0; border-top: 1px solid var(--v-line); }
+.v-avisos__todas { font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; min-height: 44px; }
 
 @media (max-width: 599px) {
   .v-barra__in { padding: 10px 16px; gap: 10px; }
@@ -939,4 +939,13 @@ body.d-pagina { display: flex; flex-direction: column; }
 .ct-reset { border-top: 1px solid var(--v-line); padding-top: 16px; }
 .ct-reset summary { cursor: pointer; font-size: 15px; font-weight: 800; color: var(--v-navy); min-height: 44px; display: flex; align-items: center; }
 .ct-reset__cuerpo { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+
+/* Campana: cada aviso abre su destino; «Marcar como leída» va aparte del enlace */
+.v-aviso { display: flex; flex-direction: column; border-radius: var(--v-radius-sm); }
+.v-aviso--nuevo { background: #EAF7FD; }
+.vinci .v-aviso .v-aviso-item:hover { background: rgba(0,29,74,.05); }
+.vinci .v-avisos .v-aviso__marcar { align-self: flex-start; margin: 0 12px 10px; min-height: 44px; width: auto; }
+.v-avisos__pie { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding-top: 10px; border-top: 1px solid var(--v-line); }
+.vinci .v-avisos__pie .v-avisos__marcar-todas { min-height: 44px; width: auto; }
+.v-avisos__estado:empty { display: none; }
 

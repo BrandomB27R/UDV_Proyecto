@@ -2,9 +2,10 @@
 // Bajo 600 px: escudo, nombre, campana y un botón de menú con secciones, usuario y salir.
 import { api, lista } from "./api.js";
 import { APP_NAME, RUTAS, INTERVALO_AVISOS_MS } from "./config.js";
-import { h, poner, icono } from "./dom.js";
+import { h, poner, icono, mensaje } from "./dom.js";
 import { fechaCorta } from "./formato.js";
 import { perfiles, nombrePerfil, cerrarSesion, puedeRevisar } from "./sesion.js";
+import { destinoDeAviso, marcarAvisoLeido, marcarTodosLeidos } from "./avisos.js";
 
 // Roles que ven el panel de /dashboard (los mismos que acepta el G6).
 const ROLES_PANEL = ["coordinator", "authority", "admin", "auditor"];
@@ -81,22 +82,114 @@ export function montarBarra(yo, actual) {
     } catch { /* la campana no debe romper la página */ }
   };
 
-  const verTodas = () => h("a", { class: "v-avisos__todas", href: RUTAS.notificaciones }, "Ver todas las notificaciones");
+  // Los cinco avisos más recientes que muestra el panel, y una zona para los errores al marcar.
+  let avisos = [];
+  const estado = h("div", { class: "v-avisos__estado", "aria-live": "polite" });
+  const bajarContador = (n = 1) => { noLeidas = Math.max(0, noLeidas - n); pintarContador(); };
+  // La página de Notificaciones (si está abierta) vuelve a cargar cuando el panel marca algo.
+  const avisarCambio = () => window.dispatchEvent(new Event("vinci:avisos-panel"));
+
+  // Un aviso lleva a su destino (avisos.js); sin destino, a la página de Notificaciones en ese aviso.
+  const hrefDe = (n) => destinoDeAviso(n, yo)?.href || `${RUTAS.notificaciones}#aviso-${n.id}`;
+
+  const irAlAviso = async (e, n) => {
+    if (n.is_read) return;                       // ya leído: el enlace navega solo
+    const enOtraPestana = e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0;
+    if (enOtraPestana) {                         // se abre aparte: se marca sin cortar el clic
+      poner(estado);
+      marcarAvisoLeido(n.id).then(() => {
+        n.is_read = true; bajarContador(); pintarAvisos(); avisarCambio();
+        panel.querySelector(`[data-aviso="${n.id}"]`)?.focus();   // el panel se re-pinta: el foco vuelve a su aviso
+      }).catch((err) => {
+        // El aviso se abrió en otra pestaña, pero aquí sigue sin leer: se dice en el panel.
+        poner(estado, mensaje("error", `No se pudo marcar «${n.title || "Aviso"}» como leída. ${err.message || ""}`.trim()));
+      });
+      return;
+    }
+    e.preventDefault();
+    const destino = e.currentTarget.href;       // antes del await: después currentTarget ya es null
+    // Abrir el aviso cuenta como leerlo. Si marcar falla, se navega igual.
+    try { await marcarAvisoLeido(n.id); n.is_read = true; bajarContador(); avisarCambio(); } catch { /* se navega igual */ }
+    cerrarPanel();
+    location.assign(destino);
+  };
+
+  const marcarUno = async (boton, n) => {
+    boton.disabled = true;
+    poner(estado);
+    try {
+      await marcarAvisoLeido(n.id);
+      n.is_read = true;
+      bajarContador();
+      pintarAvisos();
+      avisarCambio();
+      panel.querySelector(`[data-aviso="${n.id}"]`)?.focus();   // el botón desaparece: el foco pasa a su aviso
+    } catch (err) {
+      boton.disabled = false;
+      poner(estado, mensaje("error", `No se pudo marcar «${n.title || "Aviso"}» como leída. ${err.message || ""}`.trim()));
+      boton.focus();
+    }
+  };
+
+  const marcarTodas = async (boton) => {
+    boton.disabled = true;
+    poner(estado);
+    try {
+      const { total, fallos } = await marcarTodosLeidos();
+      if (!fallos) avisos.forEach((n) => { n.is_read = true; });
+      noLeidas = fallos; pintarContador();
+      if (fallos) {
+        poner(estado, mensaje("error", `No se pudieron marcar ${fallos} de ${total} notificaciones. Intenta de nuevo.`));
+        await recargarAvisos();                  // la lista muestra cuáles quedaron sin leer
+        consultar();
+      } else {
+        pintarAvisos();
+      }
+      avisarCambio();
+      // Si quedaron sin marcar, el foco vuelve al botón para reintentar; si no, al enlace del pie.
+      (panel.querySelector(".v-avisos__marcar-todas") || panel.querySelector(".v-avisos__todas"))?.focus();
+    } catch (err) {
+      boton.disabled = false;
+      poner(estado, mensaje("error", `No se pudieron marcar las notificaciones. ${err.message || ""}`.trim()));
+      boton.focus();
+    }
+  };
+
+  function pintarAvisos() {
+    const hayNuevas = avisos.some((n) => !n.is_read) || noLeidas > 0;
+    poner(panel, h("h2", {}, "Notificaciones"), estado,
+      avisos.length
+        ? h("ul", {}, avisos.map((n) => {
+          const titulo = n.title || "Aviso";
+          return h("li", { class: `v-aviso${n.is_read ? "" : " v-aviso--nuevo"}` },
+            h("a", { class: "v-aviso-item", href: hrefDe(n), "data-aviso": n.id, onclick: (e) => irAlAviso(e, n), onauxclick: (e) => { if (e.button === 1) irAlAviso(e, n); } },
+              h("strong", {}, n.is_read ? "" : h("span", { class: "v-sr" }, "Sin leer: "), titulo),
+              h("span", {}, n.message || ""),
+              h("small", {}, fechaCorta(n.created_at))),
+            // Botón aparte del enlace (no dentro del <a>): marca sin navegar.
+            n.is_read ? null : h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico v-aviso__marcar",
+              "aria-label": `Marcar como leída: ${titulo}`, onclick: (e) => marcarUno(e.currentTarget, n) }, "Marcar como leída"));
+        }))
+        : h("p", { class: "v-nota" }, "No tienes notificaciones."),
+      h("div", { class: "v-avisos__pie" },
+        h("a", { class: "v-avisos__todas", href: RUTAS.notificaciones }, "Ver todas las notificaciones"),
+        hayNuevas ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico v-avisos__marcar-todas",
+          onclick: (e) => marcarTodas(e.currentTarget) }, "Marcar todas como leídas") : null));
+  }
+
+  async function recargarAvisos() {
+    avisos = lista(await api("/notifications?per_page=5"));
+    pintarAvisos();
+  }
+
   const abrirPanel = async () => {
+    poner(estado);
     poner(panel, h("h2", {}, "Notificaciones"), h("p", { class: "v-nota" }, "Cargando…"));
     try {
-      const avisos = lista(await api("/notifications?per_page=5"));
-      poner(panel, h("h2", {}, "Notificaciones"),
-        avisos.length
-          ? h("ul", {}, avisos.map((n) => h("li", {},
-            h("a", { class: `v-aviso-item${n.is_read ? "" : " v-aviso-item--nuevo"}`, href: `${RUTAS.notificaciones}#aviso-${n.id}` },
-              h("strong", {}, n.is_read ? "" : h("span", { class: "v-sr" }, "Sin leer: "), n.title || "Aviso"),
-              h("span", {}, n.message || ""),
-              h("small", {}, fechaCorta(n.created_at))))))
-          : h("p", { class: "v-nota" }, "No tienes notificaciones."),
-        verTodas());
+      await recargarAvisos();
     } catch (e) {
-      poner(panel, h("h2", {}, "Notificaciones"), h("p", { class: "v-msg v-msg--error" }, e.message), verTodas());
+      poner(panel, h("h2", {}, "Notificaciones"), mensaje("error", e.message),
+        h("div", { class: "v-avisos__pie" }, h("a", { class: "v-avisos__todas", href: RUTAS.notificaciones }, "Ver todas las notificaciones")));
     }
   };
   function cerrarPanel() { panel.hidden = true; campana.setAttribute("aria-expanded", "false"); }
@@ -111,7 +204,8 @@ export function montarBarra(yo, actual) {
     if (e.key === "Escape" && !panel.hidden) { cerrarPanel(); campana.focus(); }
   });
   document.addEventListener("click", (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && !campana.contains(e.target)) cerrarPanel();
+    const ruta = e.composedPath();
+    if (!panel.hidden && !ruta.includes(panel) && !ruta.includes(campana)) cerrarPanel();
   });
 
   consultar();
