@@ -1324,3 +1324,47 @@ def test_sin_prerrequisitos_se_guarda_en_el_servidor_y_se_copia_a_la_version_sig
     assert nueva != vid
     assert c.get(f"/api/v1/program-versions/{nueva}", headers=d).json()["secciones"]["prerrequisitos"] == \
         {"contenido": [], "sin_prerrequisitos": True}
+
+
+# ---------------------------------------------- dirección real detrás del proxy
+def _fallar(c, ip, n, cabecera="X-Real-IP"):
+    ultimo = None
+    for i in range(n):
+        ultimo = c.post("/api/v1/auth/login", headers={cabecera: ip},
+                        json={"correo": f"nadie{i}-{ip.replace('.', '-')}@prueba.udv.edu.gt", "password": "no-es-la-clave"})
+    return ultimo
+
+
+def test_el_limite_por_direccion_cuenta_a_cada_quien_por_separado(c, monkeypatch):
+    """Detrás del proxy todos llegan con la misma conexión: se cuenta por la cabecera del proxy."""
+    from g2_api import config
+    monkeypatch.setattr(config, "LOGIN_MAX_INTENTOS_IP", 4)
+    monkeypatch.setenv("CABECERA_IP_CLIENTE", "X-Real-IP")
+    atacante, otra = "203.0.113.41", "203.0.113.42"
+    assert _fallar(c, atacante, 4).status_code == 401
+    # La dirección que falló queda bloqueada, incluso con la clave correcta...
+    buena = {"correo": "docente2@demo.udv.edu.gt", "password": CLAVE_DEMO}
+    r = c.post("/api/v1/auth/login", headers={"X-Real-IP": atacante}, json=buena)
+    es_error_comun(r, 429)
+    # ...y otra persona, desde otra dirección, entra sin problema.
+    assert c.post("/api/v1/auth/login", headers={"X-Real-IP": otra}, json=buena).status_code == 200
+
+
+def test_sin_la_variable_no_se_confia_en_la_cabecera(c, monkeypatch):
+    """Sin proxy delante cualquiera podría escribir la cabecera: se ignora."""
+    from g2_api import config
+    monkeypatch.setattr(config, "LOGIN_MAX_INTENTOS_IP", 4)
+    monkeypatch.delenv("CABECERA_IP_CLIENTE", raising=False)
+    inventada = "203.0.113.43"
+    _fallar(c, inventada, 3)
+    # Con la variable puesta, esos 3 fallos NO quedaron a nombre de la dirección inventada:
+    monkeypatch.setenv("CABECERA_IP_CLIENTE", "X-Real-IP")
+    assert _fallar(c, inventada, 1).status_code == 401          # sería 429 si ya llevara 4
+
+
+@pytest.mark.parametrize("valor", ["no-es-una-ip", "203.0.113.44, 10.0.0.1", "", "' OR 1=1 --"])
+def test_una_cabecera_que_no_es_una_direccion_se_ignora(c, monkeypatch, valor):
+    monkeypatch.setenv("CABECERA_IP_CLIENTE", "X-Real-IP")
+    r = c.post("/api/v1/auth/login", headers={"X-Real-IP": valor},
+               json={"correo": "docente2@demo.udv.edu.gt", "password": CLAVE_DEMO})
+    assert r.status_code == 200

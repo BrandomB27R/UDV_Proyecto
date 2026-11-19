@@ -6,4 +6,4 @@ fastapi==0.142.1
 uvicorn[standard]==0.54.0
 SQLAlchemy==2.1.1
 PyMySQL==1.1.1
-cryptography==44.0.2  # PyMySQL la necesita para el login por defecto de MySQL 8 (caching_sha2_password)
+cryptography==50.0.2  # PyMySQL la necesita para el login por defecto de MySQL 8 (caching_sha2_password)
