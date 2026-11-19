@@ -96,11 +96,11 @@ def test_archivo_muy_grande_se_corta_por_bloques(client, headers_admin, tmp_path
 # ---------- 5. contador de intentos ----------
 
 def test_el_contador_usa_el_valor_de_la_base(client, db, sembrado):
-    # otra peticion ya dejo 4 fallos en la base: el siguiente fallo debe bloquear
-    db.query(Usuario).filter_by(correo=ADMIN_CORREO).update({"intentos_fallidos": config.LOGIN_MAX_INTENTOS - 1})
-    db.commit()
-    r = client.post(LOGIN, json={"correo": ADMIN_CORREO, "password": "Clave-Mala-1!"})
-    assert r.status_code == 429
+    # otras peticiones ya dejaron 4 fallos en la base: el siguiente fallo debe bloquear
+    mala = {"correo": ADMIN_CORREO, "password": "Clave-Mala-1!"}
+    for _ in range(config.LOGIN_MAX_INTENTOS - 1):
+        assert client.post(LOGIN, json=mala).status_code == 401
+    assert client.post(LOGIN, json=mala).status_code == 429
 
 # ---------- 6. Swagger no se cae ----------
 

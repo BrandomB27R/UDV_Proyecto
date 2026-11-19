@@ -17,7 +17,7 @@ from g2_api import config
 from g2_api.database import fijar_actor, get_db
 from g2_api.models import Auditoria, SesionToken, Usuario
 from g2_api.seguridad import crear_token, hash_token, hashear_contrasena, verificar_contrasena, verificar_token
-from g2_api.utils.registro import LOGIN_FALLIDO, LOGIN_OK, LOGOUT, registrar_accion, registrar_login_fallido
+from g2_api.utils.registro import LOGIN_BLOQUEADO, LOGIN_FALLIDO, LOGIN_OK, LOGOUT, registrar_accion, registrar_login_fallido
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Autenticacion"])
 me_router = APIRouter(prefix="/api/v1", tags=["Autenticacion"])
@@ -55,6 +55,36 @@ def _ip_bloqueada(db: Session, ip: str | None, ahora: datetime) -> bool:
         .scalar()
     )
     return fallos >= config.LOGIN_MAX_INTENTOS_IP
+
+# Hasta cuándo esta dirección no puede entrar a esta cuenta, o None si puede.
+#
+# El bloqueo es por cuenta Y dirección: quien falla la clave se bloquea a sí mismo, no al dueño de
+# la cuenta. Con el bloqueo por cuenta sola, cualquiera que conociera un correo dejaba fuera a esa
+# persona con cinco intentos (revisión de seguridad del 19 de noviembre, hallazgo 15).
+# Cuenta los LOGIN_FALLIDO de la cuenta desde esa dirección en la ventana, a partir de su último
+# ingreso correcto desde ahí. Los intentos hechos durante el bloqueo se anotan como LOGIN_BLOQUEADO
+# y no cuentan, así que el bloqueo dura lo que dice y no se alarga por insistir.
+def _par_bloqueado_hasta(db: Session, usuario_id: int, ip: str, ahora: datetime) -> datetime | None:
+    desde = ahora - timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS)
+    # Por id y no por hora: un fallo y un ingreso correcto pueden caer en el mismo segundo.
+    ultimo_ok = (
+        db.query(func.max(Auditoria.id))
+        .filter(Auditoria.tabla == "usuario", Auditoria.registro_id == usuario_id,
+                Auditoria.accion == LOGIN_OK, Auditoria.ip_origen == ip)
+        .scalar()
+    ) or 0
+    fallos = (
+        db.query(Auditoria.creado_en)
+        .filter(Auditoria.tabla == "auth", Auditoria.registro_id == usuario_id, Auditoria.creado_en >= desde,
+                Auditoria.accion == LOGIN_FALLIDO, Auditoria.ip_origen == ip, Auditoria.id > ultimo_ok)
+        .order_by(Auditoria.id.desc())
+        .limit(config.LOGIN_MAX_INTENTOS)
+        .all()
+    )
+    if len(fallos) < config.LOGIN_MAX_INTENTOS:
+        return None
+    hasta = fallos[0][0] + timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS)
+    return hasta if hasta > ahora else None
 
 # arma el error 429 con los minutos que faltan
 def _cuenta_bloqueada(bloqueado_hasta: datetime, ahora: datetime):
@@ -97,13 +127,28 @@ def login(datos: LoginRequest, request: Request, db: Session = Depends(get_db)):
         registrar_login_fallido(db, datos.correo, ip_origen=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=CREDENCIALES_INVALIDAS)
 
+    # Con dirección conocida, el bloqueo es de esta dirección para esta cuenta (ver _par_bloqueado_hasta).
+    if ip:
+        hasta = _par_bloqueado_hasta(db, usuario.id, ip, ahora)
+        if hasta is not None:          # 429 aunque la contraseña esté bien
+            registrar_accion(db, LOGIN_BLOQUEADO, tabla="auth", registro_id=usuario.id, actor_id=usuario.id,
+                             detalle={"correo": usuario.correo, "ip": ip}, ip_origen=ip)
+            raise _cuenta_bloqueada(hasta, ahora)
+        if not verificar_contrasena(datos.password, usuario.hash_contrasena):
+            registrar_login_fallido(db, datos.correo, ip_origen=ip)
+            hasta = _par_bloqueado_hasta(db, usuario.id, ip, _ahora_utc())
+            if hasta is not None:      # este fue el intento que llegó al límite
+                raise _cuenta_bloqueada(hasta, ahora)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=CREDENCIALES_INVALIDAS)
+
+    # Sin dirección (no debería pasar detrás del servidor web) queda el bloqueo por cuenta de siempre.
     # si esta bloqueado: da 429 aunque la contraseña este bien
-    if usuario.bloqueado_hasta and usuario.bloqueado_hasta > ahora:
+    elif usuario.bloqueado_hasta and usuario.bloqueado_hasta > ahora:
         registrar_login_fallido(db, datos.correo, ip_origen=ip)
         raise _cuenta_bloqueada(usuario.bloqueado_hasta, ahora)
 
     # si la contraseña esta mal: suma un intento y, al llegar al limite, bloquea
-    if not verificar_contrasena(datos.password, usuario.hash_contrasena):
+    elif not verificar_contrasena(datos.password, usuario.hash_contrasena):
         fijar_actor(db, usuario.id, ip)
         # la base suma el intento en una sola sentencia: con peticiones al mismo tiempo no se pierde ninguno
         db.execute(

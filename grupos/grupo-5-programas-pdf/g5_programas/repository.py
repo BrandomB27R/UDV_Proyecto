@@ -1013,6 +1013,35 @@ def _validate_sections(sections: dict):
             raise ApiError(422, "VALIDATION_ERROR", "El contenido de sección no es válido.", {name: "contenido debe ser un objeto o una lista."})
 
 
+def _validar_prerrequisitos(row: dict, content) -> None:
+    """422 si la lista trae el curso del propio programa o un curso repetido.
+
+    Solo se aplica a lo que guarda una persona. La copia de una versión anterior no pasa por
+    aquí: si un programa viejo trae el dato, se copia tal cual y se corrige al editarlo.
+    """
+    lista = content.get("asignaturas", []) if isinstance(content, dict) else content
+    if not isinstance(lista, list):
+        return
+    vistos = set()
+    for index, item in enumerate(lista):
+        if not isinstance(item, dict):
+            continue
+        curso_id, codigo = item.get("curso_id"), item.get("codigo")
+        try:
+            curso_id = int(curso_id) if curso_id not in (None, "") else None
+        except (TypeError, ValueError):
+            curso_id = None
+        if (curso_id is not None and curso_id == row.get("curso_id")) or (
+                curso_id is None and codigo and codigo == row.get("curso_codigo")):
+            raise ApiError(422, "VALIDATION_ERROR", "Un curso no puede ser prerrequisito de sí mismo.",
+                           {f"prerrequisitos[{index}].curso_id": "Es el curso de este programa."})
+        clave = curso_id if curso_id is not None else codigo
+        if clave is not None and clave in vistos:
+            raise ApiError(422, "VALIDATION_ERROR", "Un curso está más de una vez en los prerrequisitos.",
+                           {f"prerrequisitos[{index}].curso_id": "Curso repetido."})
+        vistos.add(clave)
+
+
 def _merge_section_content(existing, updates):
     """Aplica cambios parciales sin perder campos omitidos en filas existentes."""
     if isinstance(existing, dict) and isinstance(updates, dict):
@@ -1111,6 +1140,8 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
                 current_sections[section]["contenido"],
                 content,
             )
+            if section == "prerrequisitos":
+                _validar_prerrequisitos(row, content)
             _save_section(
                 session,
                 version_id,
@@ -1132,6 +1163,8 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
                         current_sections[name]["contenido"],
                         value["contenido"],
                     )
+                    if name == "prerrequisitos":
+                        _validar_prerrequisitos(row, content)
                     if name == "responsables":
                         _require_manager_for_responsible_change(
                             actor,

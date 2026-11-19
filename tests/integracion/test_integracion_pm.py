@@ -1368,3 +1368,43 @@ def test_una_cabecera_que_no_es_una_direccion_se_ignora(c, monkeypatch, valor):
     r = c.post("/api/v1/auth/login", headers={"X-Real-IP": valor},
                json={"correo": "docente2@demo.udv.edu.gt", "password": CLAVE_DEMO})
     assert r.status_code == 200
+
+
+# ---------------------------------------------- prerrequisitos coherentes y bloqueo por cuenta y dirección
+def test_un_curso_no_es_prerrequisito_de_si_mismo_ni_va_repetido(c, s):
+    d, co = s["docente1"], s["coordinacion"]
+    t = _tarea(c, s, reviewer_id=COORD, course_id=1, period_id=2).json()
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=co, json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=co).json()["assignment_ids"][0]
+    c.post(f"/api/v1/assignments/{a}/start", headers=d)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=d).json()["id"]
+    P = f"/api/v1/program-versions/{vid}/sections/prerrequisitos"
+    antes = c.get(f"/api/v1/program-versions/{vid}", headers=d).json()["secciones"]["prerrequisitos"]["contenido"]
+
+    r = c.put(P, headers=d, json={"contenido": [{"curso_id": 1, "tipo": "obligatorio"}]})      # el curso del programa
+    es_error_comun(r, 422)
+    assert "sí mismo" in r.json()["error"]["message"]
+    es_error_comun(c.put(P, headers=d, json={"contenido": {"asignaturas": [{"curso_id": 4}, {"curso_id": 1}],
+                                                            "sin_prerrequisitos": False}}), 422)
+    r = c.put(P, headers=d, json={"contenido": [{"curso_id": 4}, {"curso_id": 4, "tipo": "recomendado"}]})
+    es_error_comun(r, 422)
+    assert "más de una vez" in r.json()["error"]["message"]
+    # un 422 no borra lo que había
+    assert c.get(f"/api/v1/program-versions/{vid}", headers=d).json()["secciones"]["prerrequisitos"]["contenido"] == antes
+    # y una lista correcta se guarda
+    assert c.put(P, headers=d, json={"contenido": [{"curso_id": 4}, {"curso_id": 3, "tipo": "recomendado"}]}).status_code == 200
+
+
+def test_fallar_la_clave_de_otro_no_lo_deja_fuera(c, monkeypatch):
+    monkeypatch.setenv("CABECERA_IP_CLIENTE", "X-Real-IP")
+    atacante, dueno = {"X-Real-IP": "203.0.113.61"}, {"X-Real-IP": "203.0.113.62"}
+    mala = {"correo": "docente3@demo.udv.edu.gt", "password": "no-es-la-clave"}
+    buena = {"correo": "docente3@demo.udv.edu.gt", "password": CLAVE_DEMO}
+    codigos = [c.post("/api/v1/auth/login", headers=atacante, json=mala).status_code for _ in range(6)]
+    assert codigos == [401, 401, 401, 401, 429, 429]
+    es_error_comun(c.post("/api/v1/auth/login", headers=atacante, json=buena), 429)      # ni con la clave correcta
+    assert c.post("/api/v1/auth/login", headers=dueno, json=buena).status_code == 200    # el dueño entra desde la suya
+    es_error_comun(c.post("/api/v1/auth/login", headers=atacante, json=buena), 429)      # y eso no desbloquea al otro
+    # la dirección bloqueada para esa cuenta sigue entrando a otras
+    assert c.post("/api/v1/auth/login", headers=atacante,
+                  json={"correo": "docente2@demo.udv.edu.gt", "password": CLAVE_DEMO}).status_code == 200
