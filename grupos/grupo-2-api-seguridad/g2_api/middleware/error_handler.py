@@ -171,7 +171,28 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
     )
 
 
+# MySQL: 1406 valor más largo que la columna, 1264 número fuera de rango,
+# 1265 dato truncado, 1366 texto que no cabe en el tipo de la columna.
+_DATO_QUE_NO_CABE = {1406, 1264, 1265, 1366}
+
+
+def _es_dato_que_no_cabe(exc: Exception) -> bool:
+    """True si la base rechazó un valor por su tamaño o formato, venga envuelto o no."""
+    original = getattr(exc, "orig", None) or exc
+    args = getattr(original, "args", ()) or ()
+    return bool(args) and args[0] in _DATO_QUE_NO_CABE and type(original).__name__ in {
+        "DataError", "OperationalError", "InternalError"}
+
+
 async def _unhandled_exception_handler(request: Request, exc: Exception):
+    if _es_dato_que_no_cabe(exc):
+        # Es un error de quien envía los datos, no del servidor: 422 y sin detalles de la base.
+        logger.warning("Dato que no cabe en %s %s: %s", request.method, request.url.path,
+                       type(exc).__name__)
+        return error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            message="Algún valor es más largo de lo permitido o no tiene el formato esperado.",
+        )
     logger.exception("Error no controlado en %s %s", request.method, request.url.path)
     return error_response(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

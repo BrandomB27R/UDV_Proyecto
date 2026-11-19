@@ -16,6 +16,7 @@ Escribe datos: usar SOLO con una base de pruebas desechable, nunca la de Railway
 import importlib
 import re
 import os
+import subprocess
 import sys
 import json
 import uuid
@@ -1066,3 +1067,99 @@ def test_administracion_crea_un_usuario_con_varios_roles_y_lo_gestiona(c, s):
                  if d["entity_id"] == u["id"]]
     con_roles = [d for d in registros if "roles" in (d["changes"].get("despues") or {})]
     assert len(con_roles) == 3 and clave not in json.dumps(registros)
+
+
+# ------------------------------------------------------------ seguridad
+def test_todas_las_respuestas_llevan_cabeceras_de_seguridad(c, s):
+    casos = {
+        "/app/": "script-src 'self'",                       # Vinci: sin scripts en línea
+        "/app/js/api.js": "script-src 'self'",
+        "/api/v1/tasks": "default-src 'none'",              # la API no sirve páginas
+        "/app/g6/": "frame-ancestors 'none'",               # pantallas de grupo: política mínima
+    }
+    for ruta, parte in casos.items():
+        r = c.get(ruta, headers={"x-forwarded-proto": "https"})
+        assert r.headers["x-content-type-options"] == "nosniff", ruta
+        assert r.headers["x-frame-options"] == "DENY", ruta
+        assert r.headers["referrer-policy"] == "same-origin", ruta
+        assert parte in r.headers["content-security-policy"], (ruta, r.headers["content-security-policy"])
+        assert "max-age=" in r.headers["strict-transport-security"], ruta
+    assert "strict-transport-security" not in c.get("/app/").headers      # sin HTTPS no se promete HTTPS
+    assert "script-src" not in c.get("/app/g6/").headers["content-security-policy"]
+
+
+def test_la_matriz_del_flujo_pide_sesion(c, s):
+    es_error_comun(c.get("/api/v1/workflow/matrix"), 401)
+    assert c.get("/api/v1/workflow/matrix", headers=s["docente1"]).status_code == 200
+
+
+def test_fuera_de_desarrollo_la_app_no_cuenta_nada_sin_sesion():
+    """Con APP_ENV=demostracion: sin documentación pública y salud sin detalles."""
+    codigo = r"""
+import importlib, json, os, sys
+sys.path.insert(0, os.getcwd())
+from fastapi.testclient import TestClient
+app = importlib.import_module("main").app
+with TestClient(app, raise_server_exceptions=False) as c:
+    tok = c.post("/api/v1/auth/login", json={"correo": "docente1@demo.udv.edu.gt", "password": "Demo2026!"}).json()["access_token"]
+    con = c.get("/api/v1/openapi.json", headers={"Authorization": "Bearer " + tok})
+    print(json.dumps({
+        "docs": c.get("/api/v1/docs").status_code,
+        "esquema_sin_sesion": c.get("/api/v1/openapi.json").status_code,
+        "esquema_con_sesion": con.status_code,
+        "rutas": len(con.json().get("paths", {})) if con.status_code == 200 else 0,
+        "health": c.get("/health").json(),
+        "health_db": c.get("/health/db").json(),
+        "app": c.get("/app/").status_code,
+    }))
+"""
+    entorno = {**os.environ, "APP_ENV": "demostracion", "DATABASE_URL": URL,
+               "SECRET_KEY": os.environ.get("SECRET_KEY", "clave-solo-para-pruebas-de-integracion-pm-32+")}
+    entorno.pop("API_DOCS_PUBLICA", None)
+    salida = subprocess.run([sys.executable, "-c", codigo], cwd=str(RAIZ.resolve()), env=entorno,
+                            capture_output=True, text=True, timeout=120)
+    assert salida.returncode == 0, salida.stderr[-800:]
+    r = json.loads(salida.stdout.strip().splitlines()[-1])
+    assert r["docs"] == 404 and r["esquema_sin_sesion"] == 401
+    assert r["esquema_con_sesion"] == 200 and r["rutas"] > 50
+    assert r["health"] == {"status": "ok"} and r["health_db"] == {"status": "ok"}
+    assert r["app"] == 200
+def test_texto_mas_largo_que_la_columna_da_422_y_no_error_interno(c, s):
+    """Antes, un título de 201 caracteres daba 500 y un «Nivel» largo en el programa, 503."""
+    largo = "Ñ" * 5000
+    fecha = (date.today() + timedelta(days=10)).isoformat()
+    r = c.post("/api/v1/tasks", headers=s["coordinacion"], json={"type_id": 4, "title": "T" * 201, "due_date": fecha})
+    es_error_comun(r, 422)
+    assert r.json()["error"]["details"]["field"] == "title"
+    assert c.post("/api/v1/tasks", headers=s["coordinacion"],
+                  json={"type_id": 4, "title": "T" * 200, "due_date": fecha}).status_code == 201
+    es_error_comun(c.post("/api/v1/tasks", headers=s["coordinacion"],
+                          json={"type_id": 4, "title": "x", "description": "d" * 10001, "due_date": fecha}), 422)
+
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    seccion = f"/api/v1/program-versions/{vid}/sections"
+    r = c.put(f"{seccion}/general", headers=s["docente1"], json={"contenido": {"nivel": "N" * 16, "pensum": "P" * 51}})
+    es_error_comun(r, 422)
+    assert set(r.json()["error"]["details"]) == {"nivel", "pensum"}
+    # «Nivel» solo admite los cuatro del esquema del G1; se acepta con mayúsculas y tildes.
+    r = c.put(f"{seccion}/general", headers=s["docente1"], json={"contenido": {"nivel": "Posgrado"}})
+    es_error_comun(r, 422)
+    assert "licenciatura" in r.json()["error"]["details"]["nivel"]
+    assert c.put(f"{seccion}/general", headers=s["docente1"],
+                 json={"contenido": {"nivel": " Maestría ", "pensum": "P" * 50}}).status_code == 200
+    assert c.get(f"/api/v1/program-versions/{vid}", headers=s["docente1"]).json()["secciones"]["general"]["contenido"]["nivel"] == "maestria"
+    # Lo que no tiene una regla propia cae en la red común: 422, nunca 5xx ni detalles de la base.
+    casos = [
+        ("general", {"horas": 99999999999}), ("general", {"horas": "muchas"}),
+        ("competencias", [{"descripcion": largo, "tipo": largo}]),
+        ("contenidos", [{"titulo": largo, "temas": [largo]}]),
+        ("bibliografia", [{"referencia": largo, "autor": largo}]),
+        ("descripcion", {"texto": "x" * 70000}),
+        ("competencias", [{}]), ("contenidos", [{}]), ("bibliografia", [{}]), ("evaluacion", [{}]),
+        ("bibliografia", ["texto"]), ("contenidos", [1]), ("competencias", "x"),
+    ]
+    for nombre, contenido in casos:
+        r = c.put(f"{seccion}/{nombre}", headers=s["docente1"], json={"contenido": contenido})
+        assert r.status_code < 500, (nombre, r.status_code, r.text[:200])
+        assert "pymysql" not in r.text and "sqlalchemy" not in r.text.lower(), nombre

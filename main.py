@@ -16,8 +16,8 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 RAIZ = Path(__file__).resolve().parent
@@ -43,13 +43,55 @@ ROUTERS = [
     ("g6_admin.api", "router"),             # G6
 ]
 
+# Fuera de desarrollo la aplicación no cuenta nada de sí misma sin sesión: ni la
+# documentación de la API, ni la versión de la base, ni qué módulos tiene montados.
+# API_DOCS_PUBLICA=1 vuelve a publicar la documentación si alguna vez hace falta.
+ES_DESARROLLO = os.getenv("APP_ENV", "desarrollo") == "desarrollo"
+DOCS_PUBLICAS = ES_DESARROLLO or os.getenv("API_DOCS_PUBLICA", "") == "1"
+
 app = FastAPI(
     title="UDV · Workflow docente",
     version="0.1.0",
-    docs_url="/api/v1/docs",
-    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/docs" if DOCS_PUBLICAS else None,
+    openapi_url="/api/v1/openapi.json" if DOCS_PUBLICAS else None,
     redoc_url=None,
 )
+
+# Cabeceras de seguridad en todas las respuestas.
+_CSP_VINCI = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+              "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
+              "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+_CSP_API = "default-src 'none'; frame-ancestors 'none'"
+_CSP_MINIMA = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+_PANTALLAS_DE_GRUPO = tuple(f"/app/g{n}" for n in range(2, 7))
+
+
+def _csp_para(ruta: str) -> str:
+    """Política de contenido según qué se sirve.
+
+    Vinci y los estilos: solo recursos propios, sin scripts en línea. La API:
+    nada (devuelve JSON y archivos). Las pantallas de cada grupo y Swagger usan
+    scripts en línea, así que reciben solo la parte que no los rompe.
+    """
+    if ruta.startswith(_PANTALLAS_DE_GRUPO) or ruta.startswith("/api/v1/docs"):
+        return _CSP_MINIMA
+    if ruta.startswith("/api/") or ruta.startswith("/health"):
+        return _CSP_API
+    return _CSP_VINCI
+
+
+@app.middleware("http")
+async def cabeceras_de_seguridad(request, call_next):
+    respuesta = await call_next(request)
+    c = respuesta.headers
+    c.setdefault("X-Content-Type-Options", "nosniff")
+    c.setdefault("X-Frame-Options", "DENY")
+    c.setdefault("Referrer-Policy", "same-origin")
+    c.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    c.setdefault("Content-Security-Policy", _csp_para(request.url.path))
+    if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
+        c.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return respuesta
 
 # Formato de error común: servicio compartido del G2 (CONTRATO_COMUN §1).
 try:
@@ -123,9 +165,27 @@ def inicio():
     return RedirectResponse("/app/")
 
 
+if not DOCS_PUBLICAS:
+    # El esquema sigue disponible para quien tiene sesión (herramientas y pruebas).
+    try:
+        from g2_api.routers.auth import obtener_usuario_actual
+
+        @app.get("/api/v1/openapi.json", include_in_schema=False)
+        def esquema_con_sesion(_usuario=Depends(obtener_usuario_actual)):
+            return JSONResponse(app.openapi())
+    except ImportError as exc:
+        log.warning("Esquema con sesión no disponible: %s", exc)
+
+
 @app.get("/health", tags=["Sistema"])
 def health():
-    """Estado de la app y de los routers. No requiere base de datos."""
+    """Estado de la app. No requiere base de datos.
+
+    Es la ruta que consulta Railway para saber si el servicio vive. Fuera de
+    desarrollo responde solo el estado: la lista de módulos no es pública.
+    """
+    if not ES_DESARROLLO:
+        return {"status": "ok" if not pendientes else "degradado"}
     return {"status": "ok", "routers": montados, "pendientes": pendientes, "pantallas": pantallas_montadas}
 
 
@@ -145,6 +205,11 @@ def health_db():
                 "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
             )).scalar()
         engine.dispose()
+        if not ES_DESARROLLO:
+            return {"status": "ok"}
         return {"status": "ok", "version": version, "tablas": tablas}
     except Exception as exc:
+        log.warning("health/db falló: %s", exc)
+        if not ES_DESARROLLO:
+            return {"status": "error"}
         return {"status": "error", "detalle": f"{type(exc).__name__}: {exc}"}

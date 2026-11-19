@@ -103,6 +103,10 @@ def translate_database_error(exc: SQLAlchemyError) -> ApiError:
         return ApiError(409, "CONFLICT", "El registro ya existe.")
     if original_args and original_args[0] in {1048, 1452, 3819}:
         return ApiError(422, "VALIDATION_ERROR", "Los datos no cumplen el esquema de G1.")
+    if original_args and original_args[0] in {1406, 1264, 1265, 1366}:
+        # Valor más largo que la columna, número fuera de rango o texto que no cabe en el tipo.
+        return ApiError(422, "VALIDATION_ERROR",
+                        "Algún valor es más largo de lo permitido o no tiene el formato esperado.")
     if is_signal:
         match = re.search(r"\((400|404|409|422)\)", message)
         status = int(match.group(1)) if match else 409

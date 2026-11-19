@@ -293,7 +293,7 @@ def get_events(after_id: int = Query(0), limit: int = Query(100, ge=1, le=500),
 
 
 @router.get("/workflow/matrix", tags=["workflow"])
-def get_matrix():
+def get_matrix(user=Depends(current_user)):
     def dump(rules):
         return [{"from": r.from_state, "action": r.action, "to": r.to_state,
                  "roles": sorted(r.roles), "scope": r.scope,
