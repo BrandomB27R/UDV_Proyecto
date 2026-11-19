@@ -191,6 +191,7 @@ BEGIN
               AND NEW.nivel <=> OLD.nivel
               AND NEW.area_id <=> OLD.area_id
               AND NEW.pensum <=> OLD.pensum
+              AND NEW.sin_prerrequisitos <=> OLD.sin_prerrequisitos
               AND NEW.horas_clase_semanal <=> OLD.horas_clase_semanal
               AND NEW.docente_responsable_id <=> OLD.docente_responsable_id
               AND NEW.revisor_id <=> OLD.revisor_id

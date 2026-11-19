@@ -63,17 +63,16 @@ _CSP_VINCI = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
               "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 _CSP_API = "default-src 'none'; frame-ancestors 'none'"
 _CSP_MINIMA = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-_PANTALLAS_DE_GRUPO = tuple(f"/app/g{n}" for n in range(2, 7))
 
 
 def _csp_para(ruta: str) -> str:
     """Política de contenido según qué se sirve.
 
     Vinci y los estilos: solo recursos propios, sin scripts en línea. La API:
-    nada (devuelve JSON y archivos). Las pantallas de cada grupo y Swagger usan
-    scripts en línea, así que reciben solo la parte que no los rompe.
+    nada (devuelve JSON y archivos). Swagger (solo en desarrollo) usa scripts
+    en línea, así que recibe solo la parte que no lo rompe.
     """
-    if ruta.startswith(_PANTALLAS_DE_GRUPO) or ruta.startswith("/api/v1/docs"):
+    if ruta.startswith("/api/v1/docs"):
         return _CSP_MINIMA
     if ruta.startswith("/api/") or ruta.startswith("/health"):
         return _CSP_API
@@ -121,16 +120,13 @@ for modulo, nombre in [
 
 
 # Interfaz (README §4: los estáticos y estilos compartidos los sirve main.py).
-# Cada pantalla vive en la carpeta de su grupo; aquí solo se publica.
-# El login es el de G2; el token se guarda en la pestaña como "udv_token".
+# La única interfaz publicada es Vinci (portal/). Las pantallas que cada grupo
+# entregó siguen en su carpeta como parte de su entrega, pero ya no se publican:
+# nadie las usa ni las mantiene, y cada una era superficie expuesta de más
+# (revisión de seguridad del 18 de noviembre, hallazgo 12).
 PANTALLAS = [
     ("/udv-styles", "grupos/udv-styles"),                               # estilos compartidos (PM)
-    ("/app/g2",     "grupos/grupo-2-api-seguridad/frontend-login"),     # G2: pantalla de login
-    ("/app/g3",     "grupos/grupo-3-workflow-tareas/frontend"),         # G3: tareas
-    ("/app/g4",     "grupos/grupo-4-inbox-entregas/g4_inbox/static"),   # G4: bandeja y entregas
-    ("/app/g5",     "grupos/grupo-5-programas-pdf/frontend"),           # G5: programas y PDF
-    ("/app/g6",     "grupos/grupo-6-administracion/g6_admin/pantallas"),# G6: panel, catálogos, auditoría
-    ("/app",        "portal"),                                          # inicio y login (PM)
+    ("/app",        "portal"),                                          # Vinci (PM)
 ]
 
 

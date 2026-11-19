@@ -1075,7 +1075,6 @@ def test_todas_las_respuestas_llevan_cabeceras_de_seguridad(c, s):
         "/app/": "script-src 'self'",                       # Vinci: sin scripts en línea
         "/app/js/api.js": "script-src 'self'",
         "/api/v1/tasks": "default-src 'none'",              # la API no sirve páginas
-        "/app/g6/": "frame-ancestors 'none'",               # pantallas de grupo: política mínima
     }
     for ruta, parte in casos.items():
         r = c.get(ruta, headers={"x-forwarded-proto": "https"})
@@ -1085,7 +1084,13 @@ def test_todas_las_respuestas_llevan_cabeceras_de_seguridad(c, s):
         assert parte in r.headers["content-security-policy"], (ruta, r.headers["content-security-policy"])
         assert "max-age=" in r.headers["strict-transport-security"], ruta
     assert "strict-transport-security" not in c.get("/app/").headers      # sin HTTPS no se promete HTTPS
-    assert "script-src" not in c.get("/app/g6/").headers["content-security-policy"]
+
+
+@pytest.mark.parametrize("ruta", ["/app/g2/", "/app/g2/index.html", "/app/g3/", "/app/g4/inbox.html",
+                                  "/app/g5/Programa.html", "/app/g6/panel.html", "/app/g6/comun.js"])
+def test_las_pantallas_de_los_grupos_ya_no_se_publican(c, ruta):
+    assert c.get(ruta).status_code == 404, ruta
+    assert c.get("/health").json()["pantallas"] == ["/udv-styles", "/app"]
 
 
 def test_la_matriz_del_flujo_pide_sesion(c, s):
@@ -1260,3 +1265,62 @@ def test_el_nombre_del_archivo_se_guarda_limpio(c, s, enviado, guardado):
     cabecera = unquote(r.headers["content-disposition"])
     assert guardado in cabecera, cabecera
     assert ".." not in cabecera and "/" not in cabecera.split("filename")[1] and "\\" not in cabecera
+
+
+# ---------------------------------------------- hallazgos 10 y 12
+def test_sin_prerrequisitos_se_guarda_en_el_servidor_y_se_copia_a_la_version_siguiente(c, s):
+    """Antes vivía en el navegador del docente: nadie más lo veía."""
+    d, co, di = s["docente1"], s["coordinacion"], s["direccion"]
+
+    def abrir(periodo):
+        t = _tarea(c, s, reviewer_id=COORD, course_id=1, period_id=periodo).json()
+        c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=co, json={"mode": "users", "user_ids": [DOC1]})
+        a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=co).json()["assignment_ids"][0]
+        assert c.post(f"/api/v1/assignments/{a}/start", headers=d).status_code == 200
+        return a, c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=d).json()["id"]
+
+    a, vid = abrir(2)
+    V = f"/api/v1/program-versions/{vid}"
+    P = f"{V}/sections/prerrequisitos"
+
+    def seccion(quien=d):
+        return c.get(V, headers=quien).json()["secciones"]["prerrequisitos"]
+
+    # Lista con cursos: no hay declaración.
+    assert c.put(P, headers=d, json={"contenido": [{"curso_id": 4, "tipo": "obligatorio"}]}).status_code == 200
+    assert len(seccion()["contenido"]) == 1 and seccion()["sin_prerrequisitos"] is False
+    # No se puede declarar y listar a la vez, ni mandar otra cosa que verdadero o falso.
+    es_error_comun(c.put(P, headers=d, json={"contenido": {"asignaturas": [{"curso_id": 4}], "sin_prerrequisitos": True}}), 422)
+    es_error_comun(c.put(P, headers=d, json={"contenido": {"asignaturas": [], "sin_prerrequisitos": "si"}}), 422)
+    assert len(seccion()["contenido"]) == 1                       # un 422 no borra lo guardado
+    # Lista vacía sin declarar: sigue pendiente.
+    assert c.put(P, headers=d, json={"contenido": []}).status_code == 200
+    assert seccion() == {"contenido": [], "sin_prerrequisitos": False}
+    # Declarado: lo ven el docente y quien revisa.
+    assert c.put(P, headers=d, json={"contenido": {"asignaturas": [], "sin_prerrequisitos": True}}).status_code == 200
+    assert seccion()["sin_prerrequisitos"] is True and seccion(co)["sin_prerrequisitos"] is True
+    # Otro docente no lo cambia.
+    assert c.put(P, headers=s["docente2"], json={"contenido": {"asignaturas": [], "sin_prerrequisitos": False}}).status_code in (403, 404)
+    # Agregar un curso anula la declaración; quitarlo no la devuelve sola.
+    assert c.put(P, headers=d, json={"contenido": [{"curso_id": 4, "tipo": "obligatorio"}]}).status_code == 200
+    assert seccion()["sin_prerrequisitos"] is False
+    assert c.put(P, headers=d, json={"contenido": []}).status_code == 200
+    assert seccion()["sin_prerrequisitos"] is False
+    assert c.put(P, headers=d, json={"contenido": {"asignaturas": [], "sin_prerrequisitos": True}}).status_code == 200
+
+    # Hasta autorizado; la versión autorizada ya no cambia.
+    A = f"/api/v1/assignments/{a}"
+    for ruta, quien in ((f"{V}/submit", d), (f"{A}/submit", d), (f"{V}/review", co), (f"{A}/review", co),
+                        (f"{V}/approve", co), (f"{V}/authorize", di)):
+        r = c.post(ruta, headers=quien, json={})
+        assert r.status_code == 200, (ruta, r.text)
+    assert c.put(P, headers=d, json={"contenido": {"asignaturas": [], "sin_prerrequisitos": False}}).status_code in (403, 409)
+    assert seccion()["sin_prerrequisitos"] is True
+    pdf = c.get(f"{V}/pdf", headers=d)
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+
+    # La versión siguiente del curso parte de la autorizada y conserva la declaración.
+    _, nueva = abrir(3)
+    assert nueva != vid
+    assert c.get(f"/api/v1/program-versions/{nueva}", headers=d).json()["secciones"]["prerrequisitos"] == \
+        {"contenido": [], "sin_prerrequisitos": True}

@@ -212,6 +212,9 @@ def _load_sections(session: Session, version: dict) -> dict:
         {"id": version_id},
     )
     sections["prerrequisitos"] = _section(prerequisites)
+    # "Sin prerrequisitos" es una declaración del docente, no una lista vacía: sin ella la
+    # sección está pendiente. Solo vale mientras la lista esté vacía.
+    sections["prerrequisitos"]["sin_prerrequisitos"] = bool(version.get("sin_prerrequisitos")) and not prerequisites
     sections["competencias"] = _section(_all(
         session,
         """SELECT orden, tipo, descripcion FROM programa_competencia
@@ -536,8 +539,26 @@ def _save_section_sin_red(
                 },
             )
     elif section == "prerrequisitos":
+        # Dos formas: la lista de cursos, o {"asignaturas": [...], "sin_prerrequisitos": true|false}.
+        declarado = None
         if isinstance(content, dict):
+            declarado = content.get("sin_prerrequisitos")
+            if declarado is not None and not isinstance(declarado, bool):
+                raise ApiError(422, "VALIDATION_ERROR", "«Sin prerrequisitos» se indica con verdadero o falso.",
+                               {"prerrequisitos.sin_prerrequisitos": "Debe ser true o false."})
             content = content.get("asignaturas", [])
+            if not isinstance(content, list):
+                raise ApiError(422, "VALIDATION_ERROR", "Los prerrequisitos deben ser una lista de cursos.",
+                               {"prerrequisitos.asignaturas": "Se requiere una lista."})
+        if content and declarado:
+            raise ApiError(422, "VALIDATION_ERROR",
+                           "No se puede marcar «sin prerrequisitos» y a la vez listar cursos.",
+                           {"prerrequisitos.sin_prerrequisitos": "Quita los cursos o desmarca la casilla."})
+        if content:
+            declarado = False          # una lista con cursos anula la declaración
+        if declarado is not None:
+            session.execute(text("UPDATE programa_version SET sin_prerrequisitos = :valor WHERE id = :id"),
+                            {"valor": 1 if declarado else 0, "id": version_id})
         session.execute(text("DELETE FROM programa_prerrequisito WHERE programa_version_id = :id"), {"id": version_id})
         for index, item in enumerate(content, 1):
             course_id = item.get("curso_id")
@@ -1639,6 +1660,9 @@ def _insert_version_from(
                 content = {**content, "periodo_id": period_id}
                 if not keep_summary:
                     content.pop("resumen_cambios", None)
+            if section_name == "prerrequisitos":
+                # La declaración «sin prerrequisitos» se copia con la sección.
+                content = {"asignaturas": content, "sin_prerrequisitos": bool(value.get("sin_prerrequisitos"))}
             if section_name == "responsables":
                 content = {
                     key: item

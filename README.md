@@ -125,18 +125,17 @@ estáticos y estilos compartidos los sirve `main.py`, no los grupos.
 La aplicación que usa la gente es **Vinci** ("Gestión docente · Universidad
 Da Vinci de Guatemala"): una sola interfaz organizada por perfil y por estado,
 construida por el PM en `portal/` sobre la API de los seis grupos. Es HTML, CSS
-y JavaScript sin paso de compilación, y `main.py` la publica junto con las
-pantallas de cada grupo (lista `PANTALLAS`):
+y JavaScript sin paso de compilación, y es la única interfaz que `main.py`
+publica (lista `PANTALLAS`):
 
 | Ruta | Qué es | Carpeta |
 |---|---|---|
 | `/app/` | **Vinci**: presentación, acceso y toda la aplicación (PM) | `portal/` |
-| `/app/g2/` | Pantalla de login del G2 | `grupos/grupo-2-api-seguridad/frontend-login/` |
-| `/app/g3/` | Tareas: crear, publicar y dar seguimiento | `grupos/grupo-3-workflow-tareas/frontend/` |
-| `/app/g4/inbox.html`, `detalle.html`, `revision.html` | Bandeja del docente, entrega y bandeja de revisión | `grupos/grupo-4-inbox-entregas/g4_inbox/static/` |
-| `/app/g5/Programa.html` | Programas de curso y PDF | `grupos/grupo-5-programas-pdf/frontend/` |
-| `/app/g6/panel.html`, `catalogos.html`, `auditoria.html` | Panel, catálogos y auditoría | `grupos/grupo-6-administracion/g6_admin/pantallas/` |
 | `/udv-styles/udv.css` | Estilos compartidos (PM) | `grupos/udv-styles/` |
+
+Las pantallas que entregó cada grupo siguen en su carpeta (`frontend/`,
+`frontend-login/`, `g4_inbox/static/`, `g6_admin/pantallas/`) como parte de su
+entrega, pero desde el 18 de noviembre ya no se publican en `/app/g2/` … `/app/g6/`.
 
 `GET /` redirige a `/app/`. Las reglas que cumple toda pantalla (sesión,
 estilos, fechas) están en `CONTRATO_COMUN.md` §1b.
@@ -235,7 +234,7 @@ Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 ### Base de datos, entorno local y despliegue
 
 - **Una sola base:** `db_udv` en MySQL 8.4, con el esquema del G1 (versión
-  1.2.4). Ningún grupo crea, borra ni altera tablas desde su código (nada de
+  1.2.5). Ningún grupo crea, borra ni altera tablas desde su código (nada de
   `Base.metadata.create_all`); un cambio de esquema se le pide al G1, que lo
   entrega como migración numerada.
 - **Conexión:** siempre por la variable `DATABASE_URL`

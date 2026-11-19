@@ -169,7 +169,7 @@ COLUMNAS = {
                       "descripcion": "Descripción del curso.", "resumen_cambios": "Qué cambió respecto a la anterior.",
                       "unidad_academica_id": "Unidad académica del encabezado.", "programa_academico": "Carrera, ej. Ingeniería en Sistemas.", "departamento": "Departamento del encabezado.",
                       "nivel": "tecnico, licenciatura, maestria o doctorado.", "area_id": "Área de conocimiento.", "pensum": "Pensum o plan de estudios.",
-                      "horas_clase_semanal": "Horas de clase por semana.", "docente_responsable_id": "Docente responsable del curso.", "revisor_id": "Revisor asignado.",
+                      "horas_clase_semanal": "Horas de clase por semana.", "sin_prerrequisitos": "1 si el curso declara que no tiene prerrequisitos.", "docente_responsable_id": "Docente responsable del curso.", "revisor_id": "Revisor asignado.",
                       "tarea_destinatario_origen_id": "Asignación Actualizar programa que produjo esta versión.", "creado_por": "Usuario que la creó.",
                       "autorizado_por": "Autoridad que la autorizó.", "autorizado_en": "Fecha de autorización.", "observaciones_autorizacion": "Comentario de la autorización.",
                       "pdf_archivo_id": "PDF institucional oficial.", "pdf_hash": "SHA-256 del PDF; se registra una sola vez.", "pdf_generado_en": "Cuándo se generó el PDF.",
