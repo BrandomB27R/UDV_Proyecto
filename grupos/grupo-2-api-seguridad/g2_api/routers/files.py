@@ -22,6 +22,22 @@ router = APIRouter(
 
 MAX_SIZE = 5 * 1024 * 1024  # 5 MB
 
+
+def nombre_limpio(nombre, extension: str) -> str:
+    """El nombre que mandó el navegador, reducido a un nombre de archivo simple.
+
+    Se guarda y se devuelve tal cual en las descargas y en las pantallas, así que
+    no debe traer carpetas (`../../etc/passwd`, `C:\\x\\y`), caracteres de control
+    ni comillas, ni pasar del largo de la columna. La extensión es la del tipo
+    real del archivo, no la que diga el nombre.
+    """
+    base = str(nombre or "").replace("\\", "/").split("/")[-1]
+    base = "".join(c for c in base if c.isprintable() and c not in '<>:"|?*;').strip().lstrip(".").strip()
+    if "." in base:
+        base = base[: base.rindex(".")].rstrip(" .")
+    base = base[:200] or "archivo"
+    return base + extension
+
 # Definir los tipos de archivos permitidos y sus extensiones correspondientes
 MIMETYPES_PERMITIDOS = {
     "application/pdf": ".pdf",
@@ -91,7 +107,7 @@ async def verificar_archivo(file: UploadFile = File(...),
     hash_sha256 = hashlib.sha256(contenido).hexdigest()
 
     nuevo_archivo = Archivo(
-        nombre_original=file.filename,
+        nombre_original=nombre_limpio(file.filename, MIMETYPES_PERMITIDOS[tipo_real]),
         nombre_interno=nombre_interno,
         tipo_mime=tipo_real,
         tamano_bytes=len(contenido),
