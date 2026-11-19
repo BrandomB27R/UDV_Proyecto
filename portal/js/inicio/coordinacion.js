@@ -7,16 +7,19 @@
 //   /review-queue?status=approved + /assignments/{id}  coordinación (lo que puede cerrar; ver porCerrar)
 import { api } from "../api.js";
 import { RUTAS } from "../config.js";
-import { h } from "../dom.js";
+import { h, mensaje } from "../dom.js";
 import { chipEstado, etiquetaTipo, fechaLimiteCorta, haceCuando, diasDesde, diasHasta } from "../formato.js";
 import { etiquetaEstadoPrograma, claseEstadoPrograma } from "../programa/flujo-programa.js";
 import { indicador, vacio, todasLasPaginas } from "../componentes.js";
+import { TOPE, cabResumen, pieResumen, verLasN } from "./resumen.js";
 import { tieneRol, puedeRevisar } from "../sesion.js";
 import { puedeVerPanel } from "../barra.js";
 
 const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 const PENDIENTES_REVISION = ["submitted", "under_review"];
-const MAX_SEGUIMIENTO = 5;
+const MAX_SEGUIMIENTO = TOPE;
+/** Pestaña «Por cerrar» de Por revisar. */
+export const RUTA_POR_CERRAR = `${RUTAS.porRevisar}?ver=cerrar`;
 const DIAS_ENTREGA_VIEJA = 7;
 
 /** Qué puede leer quien mira (por roles, antes de pedir nada). */
@@ -36,7 +39,8 @@ export async function inicioCoordinacion(yo) {
     lee.tareas ? todasLasPaginas(api, "/tasks?include=progress") : null,
     lee.panel ? api("/task-types?per_page=100").catch(() => ({ data: [] })) : null,
     lee.autoriza ? programasPorAutorizar() : null,
-    lee.cierra ? porCerrar(yo) : null,
+    // Si falla, el inicio lo dice en su lugar (no se confunde con «nada por cerrar»).
+    lee.cierra ? porCerrar(yo).catch((e) => ({ error: e })) : null,
   ]);
 
   // Solo lo que le toca a quien mira (mine): primero las que ya tomó, luego la entrega más antigua.
@@ -48,7 +52,8 @@ export async function inicioCoordinacion(yo) {
   const porVencer = Number(panel?.due_soon?.total) || 0;
 
   const nAutorizar = porAutorizar?.length || 0;
-  const nCerrar = listas?.length || 0;
+  const errorCerrar = listas?.error || null;
+  const nCerrar = errorCerrar ? 0 : listas?.length || 0;
   let titulo;
   if (soloDireccion && nAutorizar) titulo = `Tienes ${plural(nAutorizar, "programa por autorizar", "programas por autorizar")}.`;
   // Lo de revisar manda; si no hay nada por revisar pero sí por cerrar, el título habla de eso.
@@ -62,7 +67,8 @@ export async function inicioCoordinacion(yo) {
   if (soloDireccion) contadores.push(indicador("Por autorizar", nAutorizar, "Programas ya aprobados", "autorizar"));
   if (lee.cola) contadores.push(indicador("Por revisar", mias.length,
     tomadas ? `${tomadas} ${tomadas === 1 ? "ya la tomaste" : "ya las tomaste"}` : "Ninguna tomada todavía", "revisar"));
-  if (listas) contadores.push(indicador("Por cerrar", nCerrar, nCerrar === 1 ? "Aprobada, falta cerrarla" : nCerrar ? "Aprobadas, falta cerrarlas" : "Nada por cerrar", "cerrar"));
+  if (errorCerrar) contadores.push(indicador("Por cerrar", "—", "No se pudo consultar", "cerrar", RUTA_POR_CERRAR));
+  else if (listas) contadores.push(indicador("Por cerrar", nCerrar, nCerrar === 1 ? "Aprobada, falta cerrarla" : nCerrar ? "Aprobadas, falta cerrarlas" : "Nada por cerrar", "cerrar", RUTA_POR_CERRAR));
   if (lee.panel) {
     contadores.push(indicador("Vencidas", vencidas, "Docentes con la fecha pasada", "alerta"));
     contadores.push(indicador("Por vencer", porVencer, `En los próximos ${panel.due_soon_days ?? 3} días`, "aviso"));
@@ -88,8 +94,10 @@ export async function inicioCoordinacion(yo) {
   const tareasPorId = new Map((tareas?.data || []).map((t) => [t.id, t]));
   // «Te toca autorizar» va antes del seguimiento; con coordinación, debajo de «Te toca revisar» y solo si hay.
   const bloques = [
-    lee.cola ? tablaPorRevisar(mias, (cola?.data || []).length) : null,
-    nCerrar ? tablaPorCerrar(listas) : null,
+    lee.cola ? tablaPorRevisar(mias) : null,
+    errorCerrar ? mensaje("error", `No se pudieron consultar las tareas listas para cerrar: ${errorCerrar.message}`)
+      : nCerrar ? tablaPorCerrar(listas) : null,
+    !errorCerrar && listas?.sinConsultar ? avisoSinConsultar(listas.sinConsultar) : null,
     porAutorizar && (soloDireccion || nAutorizar) ? tablaPorAutorizar(porAutorizar) : null,
     lee.panel ? tablaSeguimiento(panel, tareasPorId, nombresTipo) : null,
   ];
@@ -103,12 +111,12 @@ function celdaFecha(f) {
     f.rel ? h("span", { class: `tr-fecha__rel${f.estado ? ` tr-fecha__rel--${f.estado}` : ""}` }, f.rel) : null);
 }
 
-function tablaPorRevisar(filas, totalCola) {
-  const otras = totalCola - filas.length;
+function tablaPorRevisar(todas) {
+  const filas = todas.slice(0, TOPE);
   return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-revisar" },
-    h("div", { class: "ini-cab" },
-      h("h2", { id: "t-revisar", class: "v-h2" }, "Te toca revisar"),
-      h("p", { class: "v-nota" }, "Primero las que ya tomaste; luego las más antiguas.")),
+    cabResumen("t-revisar", "Te toca revisar", todas.length > TOPE
+      ? `Las ${TOPE} más urgentes: primero las que ya tomaste, luego las más antiguas.`
+      : "Primero las que ya tomaste; luego las más antiguas."),
     filas.length ? h("table", { class: "pn-tabla ini-tabla" },
       h("caption", { class: "v-sr" }, "Entregas que te toca revisar"),
       h("thead", {}, h("tr", {}, ["Tarea", "Docente", "Estado", "Entregada", "Fecha límite"].map((t) => h("th", { scope: "col" }, t)),
@@ -127,8 +135,8 @@ function tablaPorRevisar(filas, totalCola) {
           h("td", { class: "pn-accion ini-accion" }, h("a", { class: "v-btn v-btn--chico", href: RUTAS.asignacion(x.id), "aria-label": `${boton}: ${x.title} de ${x.teacher}` }, boton)));
       })))
       : vacio("No tienes entregas por revisar. Las nuevas aparecerán aquí."),
-    otras > 0 ? h("p", { class: "ini-pie" }, h("a", { href: RUTAS.porRevisar }, "Ver todo lo pendiente de revisar"),
-      ` · incluye ${plural(otras, "entrega de otros revisores", "entregas de otros revisores")}`) : null);
+    todas.length ? pieResumen(filas.length, todas.length, "entregas por revisar",
+      { texto: verLasN(todas.length, "Por revisar"), href: RUTAS.porRevisar }) : null);
 }
 
 /**
@@ -136,23 +144,41 @@ function tablaPorRevisar(filas, totalCola) {
  * (G4: coordinación que creó la tarea). La cola no trae quién aprobó ni cuándo: sale de last_approval
  * del detalle, una consulta por entrega aprobada de sus tareas (NOTAS_BACKEND §12).
  */
-async function porCerrar(yo) {
-  const r = await todasLasPaginas(api, "/review-queue?status=approved").catch(() => null);
+export async function porCerrar(yo) {
+  // Si la cola no responde, el error sube: quien llama dice «no se pudo consultar», no «nada por cerrar».
+  const r = await todasLasPaginas(api, "/review-queue?status=approved");
   const candidatas = (r?.data || []).filter((x) => x.status === "approved" && (x.created_by == null || Number(x.created_by) === Number(yo.id)));
+  let sinConsultar = 0;
   const filas = await Promise.all(candidatas.map(async (x) => {
-    const d = await api(`/assignments/${encodeURIComponent(x.id)}`).catch(() => null);
-    if (!d || d.status !== "approved" || !(d.viewer_actions || []).includes("close")) return null;
-    return { ...x, aprobo: d.last_approval?.actor || null, aprobadoEn: d.last_approval?.at || null };
+    let d;
+    try { d = await api(`/assignments/${encodeURIComponent(x.id)}`); } catch { sinConsultar++; return null; }
+    if (d.status !== "approved" || !(d.viewer_actions || []).includes("close")) return null;
+    return { ...x, viewer_actions: d.viewer_actions, aprobo: d.last_approval?.actor || null, aprobadoEn: d.last_approval?.at || null };
   }));
-  // La aprobada más reciente arriba.
-  return filas.filter(Boolean).sort((a, b) => String(b.aprobadoEn || "").localeCompare(String(a.aprobadoEn || "")) || b.id - a.id);
+  // La aprobada hace más tiempo arriba (sin fecha de aprobación, al final).
+  const cerrables = filas.filter(Boolean).sort(ordenAprobadas);
+  // Entregas aprobadas cuyo detalle no se pudo pedir: no se sabe si se pueden cerrar; se avisa aparte.
+  cerrables.sinConsultar = sinConsultar;
+  return cerrables;
 }
 
-function tablaPorCerrar(filas) {
+/** Aviso cuando algunas entregas aprobadas no se pudieron consultar (la lista puede estar incompleta). */
+export function avisoSinConsultar(n) {
+  return mensaje("aviso", `${n === 1 ? "No se pudo consultar 1 entrega aprobada" : `No se pudieron consultar ${n} entregas aprobadas`}; la lista de tareas por cerrar puede estar incompleta. Recarga para intentarlo otra vez.`);
+}
+
+/** La aprobada hace más tiempo primero; sin fecha, al final. */
+export function ordenAprobadas(a, b) {
+  if (!a.aprobadoEn !== !b.aprobadoEn) return a.aprobadoEn ? -1 : 1;
+  return String(a.aprobadoEn || "").localeCompare(String(b.aprobadoEn || "")) || a.id - b.id;
+}
+
+function tablaPorCerrar(todas) {
+  const filas = todas.slice(0, TOPE);
   return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-cerrar" },
-    h("div", { class: "ini-cab" },
-      h("h2", { id: "t-cerrar", class: "v-h2" }, "Listas para cerrar"),
-      h("p", { class: "v-nota" }, "Ya están aprobadas. Al cerrarlas quedan terminadas con su historial completo.")),
+    cabResumen("t-cerrar", "Listas para cerrar", todas.length > TOPE
+      ? `Las ${TOPE} aprobadas hace más tiempo.`
+      : "Ya están aprobadas. Al cerrarlas quedan terminadas con su historial completo."),
     h("table", { class: "pn-tabla ini-tabla" },
       h("caption", { class: "v-sr" }, "Entregas aprobadas que falta cerrar"),
       h("thead", {}, h("tr", {}, ["Tarea", "Docente", "Estado", "Aprobó"].map((t) => h("th", { scope: "col" }, t)),
@@ -167,7 +193,8 @@ function tablaPorCerrar(filas) {
           h("td", { "data-etiqueta": "Aprobó" }, h("div", { class: "pn-tarea" },
             h("strong", {}, x.aprobo || "—"), x.aprobadoEn ? h("span", {}, haceCuando(x.aprobadoEn)) : null)),
           h("td", { class: "pn-accion ini-accion" }, h("a", { class: "v-btn v-btn--chico", href: RUTAS.asignacion(x.id), "aria-label": `Cerrar la tarea: ${x.title} de ${x.teacher}` }, "Cerrar la tarea")));
-      }))));
+      }))),
+    pieResumen(filas.length, todas.length, "tareas por cerrar", { texto: verLasN(todas.length, "Por revisar"), href: RUTA_POR_CERRAR }));
 }
 
 /**
@@ -181,12 +208,13 @@ async function programasPorAutorizar() {
   }));
 }
 
-function tablaPorAutorizar(filas) {
+function tablaPorAutorizar(todas) {
+  const filas = todas.slice(0, TOPE);
   const conAprobo = filas.some((x) => x.aprobo);
   return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-autorizar" },
-    h("div", { class: "ini-cab" },
-      h("h2", { id: "t-autorizar", class: "v-h2" }, "Te toca autorizar"),
-      filas.length ? h("p", { class: "v-nota" }, "Programas aprobados por revisión. Al autorizarlos quedan como la versión vigente.") : null),
+    cabResumen("t-autorizar", "Te toca autorizar", !todas.length ? null : todas.length > TOPE
+      ? `Los ${TOPE} primeros de los programas aprobados por revisión.`
+      : "Programas aprobados por revisión. Al autorizarlos quedan como la versión vigente."),
     filas.length ? h("table", { class: "pn-tabla ini-tabla" },
       h("caption", { class: "v-sr" }, "Programas aprobados por autorizar"),
       h("thead", {}, h("tr", {}, ["Programa", "Elaboró", ...(conAprobo ? ["Aprobó"] : []), "Estado"].map((t) => h("th", { scope: "col" }, t)),
@@ -203,7 +231,9 @@ function tablaPorAutorizar(filas) {
           h("td", { "data-etiqueta": "Estado" }, h("span", { class: `v-chip v-chip--${claseEstadoPrograma(x.estado)}` }, etiquetaEstadoPrograma(x.estado))),
           h("td", { class: "pn-accion ini-accion" }, h("a", { class: "v-btn v-btn--chico", href: RUTAS.programa(x.programa_version_id), "aria-label": `Revisar y autorizar: ${titulo}, versión ${x.numero_version}` }, "Revisar y autorizar")));
       })))
-      : vacio("No hay programas por autorizar. Cuando revisión apruebe uno, aparecerá aquí."));
+      : vacio("No hay programas por autorizar. Cuando revisión apruebe uno, aparecerá aquí."),
+    todas.length ? pieResumen(filas.length, todas.length, "programas por autorizar",
+      { texto: verLasN(todas.length, "Programas de curso", true), href: `${RUTAS.programas}#revision` }) : null);
 }
 
 /** Vencidas (la más atrasada arriba) y por vencer del panel, hasta cinco. */
@@ -213,16 +243,15 @@ function tablaSeguimiento(d, tareasPorId, nombresTipo) {
     ...(d.overdue?.items || []).map((x) => fila(x, "vencida")).sort((a, b) => a.dias - b.dias),
     ...(d.due_soon?.items || []).map((x) => fila(x, "por-vencer")).sort((a, b) => a.dias - b.dias),
   ].slice(0, MAX_SEGUIMIENTO);
+  const total = (Number(d.overdue?.total) || 0) + (Number(d.due_soon?.total) || 0);
   const subtitulo = (x) => {
     const t = tareasPorId.get(x.task_id);
     return [t ? nombresTipo.get(t.type_id) : null, t?.course_code, t?.period_code].filter(Boolean).join(" · ");
   };
   return h("section", { class: "v-card pn-seccion", "aria-labelledby": "t-seguimiento" },
-    h("div", { class: "ini-cab ini-cab--enlace" },
-      h("div", { class: "ini-cab" },
-        h("h2", { id: "t-seguimiento", class: "v-h2" }, "Para dar seguimiento"),
-        h("p", { class: "v-nota" }, "Docentes con tareas vencidas o por vencer.")),
-      h("a", { class: "ini-enlace", href: RUTAS.panel }, "Ver el panel completo")),
+    cabResumen("t-seguimiento", "Para dar seguimiento", total > MAX_SEGUIMIENTO
+      ? `Los ${MAX_SEGUIMIENTO} docentes con tareas vencidas o por vencer más urgentes.`
+      : "Docentes con tareas vencidas o por vencer."),
     filas.length ? h("table", { class: "pn-tabla ini-tabla" },
       h("caption", { class: "v-sr" }, "Tareas vencidas o por vencer"),
       h("thead", {}, h("tr", {}, ["Tarea", "Docente", "Estado", "Fecha límite"].map((t) => h("th", { scope: "col" }, t)),
@@ -236,5 +265,6 @@ function tablaSeguimiento(d, tareasPorId, nombresTipo) {
           h("td", { "data-etiqueta": "Fecha límite" }, celdaFecha(fechaLimiteCorta(x.due_date))),
           h("td", { class: "pn-accion" }, h("a", { href: RUTAS.asignacion(x.assignment_id), "aria-label": `Abrir: ${x.task_title} de ${x.user_name || ""}` }, "Abrir")));
       })))
-      : vacio("Nada que seguir: no hay tareas vencidas ni por vencer."));
+      : vacio("Nada que seguir: no hay tareas vencidas ni por vencer."),
+    pieResumen(filas.length, Math.max(total, filas.length), "tareas vencidas o por vencer", { texto: "Ver el panel completo", href: RUTAS.panel }));
 }

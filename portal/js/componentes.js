@@ -29,9 +29,12 @@ export function filaAsignacion(item) {
         p.rel ? [" · ", h("span", { class: estadoPlazo ? `v-plazo--${estadoPlazo}` : "" }, p.rel)] : null)));
 }
 
-/** Contador de los paneles (Panel e Inicio). tono: "alerta" (rojo), "aviso" (ámbar), "revisar" (azul). */
-export function indicador(titulo, valor, detalle, tono = "") {
-  return h("div", { class: `v-indicador${tono ? ` v-indicador--${tono}` : ""}` },
+/**
+ * Contador de los paneles (Panel e Inicio). tono: "alerta" (rojo), "aviso" (ámbar), "revisar" (azul).
+ * Con href, el contador entero es un enlace a donde está el detalle.
+ */
+export function indicador(titulo, valor, detalle, tono = "", href = null) {
+  return h(href ? "a" : "div", { class: `v-indicador${tono ? ` v-indicador--${tono}` : ""}`, href },
     h("span", { class: "v-indicador__titulo" }, titulo),
     h("span", { class: "v-indicador__valor" }, String(valor)),
     h("span", { class: "v-indicador__detalle" }, detalle));
