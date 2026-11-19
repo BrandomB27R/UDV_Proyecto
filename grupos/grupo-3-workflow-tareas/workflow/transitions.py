@@ -183,7 +183,8 @@ _SELECT_MYSQL = (
     "       td.estado_codigo AS status, COALESCE(td.fecha_limite, t.fecha_limite) AS due_date,"
     "       t.titulo AS title, t.creado_por AS created_by, NULL AS responsible_id,"
     "       COALESCE(td.revisor_id, t.revisor_id) AS reviewer_id,"
-    "       'standard' AS flow, t.id AS tid, COALESCE(tt.requiere_archivo, 0) AS requires_file"
+    "       'standard' AS flow, t.id AS tid, COALESCE(tt.requiere_archivo, 0) AS requires_file,"
+    "       tt.modalidad_entrega AS delivery_mode, t.programa_version_id AS task_program_id"
     " FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id"
     " LEFT JOIN workflow w ON w.id = t.workflow_id"
     " LEFT JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id"
@@ -288,6 +289,63 @@ def _sync_entrega_with_draft(conn, entrega_id, assignment_id):
             raise
 
 
+# ---------------------------------------------------------------------------
+# Tarea de programa: la tarea no se adelanta ni contradice a su programa.
+#
+# Cuando el docente abre el programa desde su tarea (G5 lo deja ligado en
+# programa_version.tarea_destinatario_origen_id), el programa manda: se envía,
+# se devuelve y se autoriza en su página, y la tarea lo sigue. Antes esa regla
+# vivía solo en la pantalla, y el servidor aceptaba, por ejemplo, entregar la
+# tarea con el programa todavía en borrador, o aprobarla sin que dirección lo
+# hubiera autorizado. Aquí se exige en el servidor.
+#
+# Para cada acción de la tarea, los estados del programa que la permiten:
+_PROGRAMA_PERMITE = {
+    "submit":   {"submitted", "under_review", "approved", "authorized", "superseded"},
+    "resubmit": {"submitted", "under_review", "approved", "authorized", "superseded"},
+    "return":   {"returned"},
+    "approve":  {"authorized", "superseded"},
+}
+_PROGRAMA_EXPLICA = {
+    "submit":   "Primero envía el programa a revisión desde su página; la tarea se entrega con él.",
+    "resubmit": "Primero vuelve a enviar el programa a revisión desde su página; la tarea se entrega con él.",
+    "return":   "Devuelve el programa desde su página; la tarea se devuelve con él.",
+    "approve":  "La tarea se aprueba cuando dirección autoriza el programa.",
+}
+
+
+_SIN_PROGRAMA = ("Esta tarea se entrega con el programa del curso: ábrelo desde la tarea,"
+                 " complétalo y envíalo a revisión.")
+
+
+def _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row=None):
+    """409 si la acción sobre la tarea contradice el estado de su programa.
+
+    Aplica a las tareas cuyo programa nació de la propia tarea. Además, una
+    tarea cuyo tipo se entrega con el programa de curso no se entrega si el
+    docente todavía no abrió ninguno (PROGRAM_REQUIRED): no hay nada que
+    revisar. La única excepción es la tarea a la que coordinación le enlazó a
+    mano una versión para todos sus docentes, que sigue las reglas de siempre.
+    """
+    permitidos = _PROGRAMA_PERMITE.get(action)
+    if permitidos is None:
+        return
+    programa = conn.execute(
+        "SELECT id, estado_codigo FROM programa_version"
+        " WHERE tarea_destinatario_origen_id = ? ORDER BY numero_version DESC, id DESC LIMIT 1",
+        (assignment_id,)).fetchone()
+    if programa is None:
+        if (action in ("submit", "resubmit") and row is not None
+                and row["delivery_mode"] == "programa" and row["task_program_id"] is None):
+            raise Conflict(_SIN_PROGRAMA, code="PROGRAM_REQUIRED")
+        return
+    if programa["estado_codigo"] in permitidos:
+        return
+    raise Conflict(_PROGRAMA_EXPLICA[action], code="PROGRAM_STATE",
+                   details={"program_version_id": programa["id"],
+                            "program_status": programa["estado_codigo"]})
+
+
 def perform(conn, assignment_id, action, actor, comment=None):
     """Ejecuta una acción sobre una asignación. Devuelve la asignación actualizada."""
     if action not in ACTIONS:
@@ -324,6 +382,8 @@ def perform(conn, assignment_id, action, actor, comment=None):
         if rule.comment_required and not comment:                               # 422
             raise ValidationFailed(f"La acción '{action}' requiere un comentario",
                                    details={"field": "comment"})
+        if mysql:
+            _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row)   # 409
 
         entrega_id = None
         if mysql and action in ENTREGA_ACTIONS:
