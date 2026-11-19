@@ -409,10 +409,21 @@ def list_task_types(conn, page=1, page_size=20, actor=None, include_inactive=Fal
 
 
 # --------------------------------------------------------------------- tasks
+MAX_TITLE = 200            # tarea.titulo VARCHAR(200)
+MAX_DESCRIPTION = 10000    # tarea.descripcion es TEXT; se acota para que una tarea siga siendo legible
+
+
 def _validate_fields(conn, data):
     mysql = _is_mysql(conn)
     if "title" in data and not (data["title"] or "").strip():
         raise ValidationFailed("title no puede estar vacío", details={"field": "title"})
+    # Largos de la tabla tarea del G1: sin esta revisión MySQL rechaza el INSERT y sale un 500.
+    if len((data.get("title") or "").strip()) > MAX_TITLE:
+        raise ValidationFailed(f"El título admite hasta {MAX_TITLE} caracteres",
+                               details={"field": "title", "max": MAX_TITLE})
+    if len(data.get("description") or "") > MAX_DESCRIPTION:
+        raise ValidationFailed(f"Las instrucciones admiten hasta {MAX_DESCRIPTION} caracteres",
+                               details={"field": "description", "max": MAX_DESCRIPTION})
     if "priority" in data:
         if mysql:
             rows = conn.execute("SELECT codigo FROM prioridad_tarea").fetchall()

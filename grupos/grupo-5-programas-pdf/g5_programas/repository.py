@@ -5,6 +5,7 @@ revisan las reglas del flujo, se guarda el historial y se preparan los datos
 que necesita el PDF.
 """
 
+import unicodedata
 import hashlib
 import json
 from datetime import date, datetime, timezone
@@ -324,7 +325,41 @@ def _require_version(session: Session, version_id: int, lock=False):
     return row
 
 
+LEVELS = ("tecnico", "licenciatura", "maestria", "doctorado")   # ck_pv_nivel del G1
+GENERAL_MAX_LENGTHS = {
+    "nombre": 200, "programa_academico": 150, "departamento": 150,
+    "nivel": 15, "pensum": 50, "resumen_cambios": 1000,
+}
+
+
 def _save_section(
+    session: Session,
+    version_id: int,
+    section: str,
+    content: dict | list,
+    actor_id: int | None = None,
+    responsible_context: dict | None = None,
+):
+    """Guarda una sección y convierte un contenido mal formado en un 422.
+
+    Las secciones con listas (competencias, contenidos, bibliografía) leen claves
+    de cada elemento. Si faltaba una clave o el tipo no era el esperado salía un
+    error interno; ahora se responde qué falta.
+    """
+    try:
+        _save_section_sin_red(session, version_id, section, content, actor_id, responsible_context)
+    except KeyError as exc:
+        campo = str(exc.args[0]) if exc.args else "?"
+        raise ApiError(422, "VALIDATION_ERROR",
+                       f"A un elemento de la sección le falta «{campo}».",
+                       {"contenido": f"Falta «{campo}»."}) from exc
+    except (TypeError, AttributeError, IndexError) as exc:
+        raise ApiError(422, "VALIDATION_ERROR",
+                       "El contenido de la sección no tiene la forma esperada.",
+                       {"contenido": "Revisa que cada elemento sea un objeto con sus campos."}) from exc
+
+
+def _save_section_sin_red(
     session: Session,
     version_id: int,
     section: str,
@@ -354,6 +389,31 @@ def _save_section(
             "periodo_id": "periodo_id",
         }
         fields = {column: content[key] for key, column in aliases.items() if key in content}
+        # Largos de programa_version en el esquema del G1. Sin esta revisión MySQL rechaza
+        # el UPDATE y la respuesta era un 503 que no decía qué campo corregir.
+        too_long = {
+            key: f"Admite hasta {GENERAL_MAX_LENGTHS[column]} caracteres."
+            for key, column in aliases.items()
+            if key in content and column in GENERAL_MAX_LENGTHS
+            and isinstance(content[key], str) and len(content[key]) > GENERAL_MAX_LENGTHS[column]
+        }
+        if too_long:
+            raise ApiError(422, "VALIDATION_ERROR",
+                           "Hay campos con más texto del permitido.", too_long)
+        if isinstance(fields.get("nivel"), str):
+            # El esquema del G1 solo admite cuatro niveles. Se acepta con mayúsculas o tildes
+            # («Maestría») y se guarda en la forma del catálogo.
+            nivel = "".join(
+                ch for ch in unicodedata.normalize("NFD", fields["nivel"].strip().lower())
+                if unicodedata.category(ch) != "Mn"
+            )
+            if not nivel:
+                fields["nivel"] = None
+            elif nivel in LEVELS:
+                fields["nivel"] = nivel
+            else:
+                raise ApiError(422, "VALIDATION_ERROR", "El nivel no es válido.",
+                               {"nivel": "Debe ser uno de: " + ", ".join(LEVELS) + "."})
         if fields:
             assignments = ", ".join(f"{column} = :{column}" for column in fields)
             session.execute(

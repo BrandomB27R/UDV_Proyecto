@@ -1124,3 +1124,42 @@ with TestClient(app, raise_server_exceptions=False) as c:
     assert r["esquema_con_sesion"] == 200 and r["rutas"] > 50
     assert r["health"] == {"status": "ok"} and r["health_db"] == {"status": "ok"}
     assert r["app"] == 200
+def test_texto_mas_largo_que_la_columna_da_422_y_no_error_interno(c, s):
+    """Antes, un título de 201 caracteres daba 500 y un «Nivel» largo en el programa, 503."""
+    largo = "Ñ" * 5000
+    fecha = (date.today() + timedelta(days=10)).isoformat()
+    r = c.post("/api/v1/tasks", headers=s["coordinacion"], json={"type_id": 4, "title": "T" * 201, "due_date": fecha})
+    es_error_comun(r, 422)
+    assert r.json()["error"]["details"]["field"] == "title"
+    assert c.post("/api/v1/tasks", headers=s["coordinacion"],
+                  json={"type_id": 4, "title": "T" * 200, "due_date": fecha}).status_code == 201
+    es_error_comun(c.post("/api/v1/tasks", headers=s["coordinacion"],
+                          json={"type_id": 4, "title": "x", "description": "d" * 10001, "due_date": fecha}), 422)
+
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    seccion = f"/api/v1/program-versions/{vid}/sections"
+    r = c.put(f"{seccion}/general", headers=s["docente1"], json={"contenido": {"nivel": "N" * 16, "pensum": "P" * 51}})
+    es_error_comun(r, 422)
+    assert set(r.json()["error"]["details"]) == {"nivel", "pensum"}
+    # «Nivel» solo admite los cuatro del esquema del G1; se acepta con mayúsculas y tildes.
+    r = c.put(f"{seccion}/general", headers=s["docente1"], json={"contenido": {"nivel": "Posgrado"}})
+    es_error_comun(r, 422)
+    assert "licenciatura" in r.json()["error"]["details"]["nivel"]
+    assert c.put(f"{seccion}/general", headers=s["docente1"],
+                 json={"contenido": {"nivel": " Maestría ", "pensum": "P" * 50}}).status_code == 200
+    assert c.get(f"/api/v1/program-versions/{vid}", headers=s["docente1"]).json()["secciones"]["general"]["contenido"]["nivel"] == "maestria"
+    # Lo que no tiene una regla propia cae en la red común: 422, nunca 5xx ni detalles de la base.
+    casos = [
+        ("general", {"horas": 99999999999}), ("general", {"horas": "muchas"}),
+        ("competencias", [{"descripcion": largo, "tipo": largo}]),
+        ("contenidos", [{"titulo": largo, "temas": [largo]}]),
+        ("bibliografia", [{"referencia": largo, "autor": largo}]),
+        ("descripcion", {"texto": "x" * 70000}),
+        ("competencias", [{}]), ("contenidos", [{}]), ("bibliografia", [{}]), ("evaluacion", [{}]),
+        ("bibliografia", ["texto"]), ("contenidos", [1]), ("competencias", "x"),
+    ]
+    for nombre, contenido in casos:
+        r = c.put(f"{seccion}/{nombre}", headers=s["docente1"], json={"contenido": contenido})
+        assert r.status_code < 500, (nombre, r.status_code, r.text[:200])
+        assert "pymysql" not in r.text and "sqlalchemy" not in r.text.lower(), nombre
