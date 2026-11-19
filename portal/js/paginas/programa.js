@@ -15,7 +15,7 @@ import {
   leerVersion, leerPrograma, leerCambios, guardarSeccion, transicionVersion, descargarPdf,
   accionesDeVersion, perfilesDeEgreso,
 } from "../programa/api-programa.js";
-import { SECCIONES, tituloSeccion, contenidoDe, crearEditor, lecturaSeccion, avanceDe } from "../programa/secciones.js";
+import { SECCIONES, tituloSeccion, contenidoDe, crearEditor, lecturaSeccion, avanceDe, sinPrerrequisitos } from "../programa/secciones.js";
 import {
   lineaPrograma, resumenPasoPrograma, pasoPrograma, etiquetaEstadoPrograma, claseEstadoPrograma,
 } from "../programa/flujo-programa.js";
@@ -119,7 +119,7 @@ const VERBO_TAREA = { review: "pasar la tarea a revisión", return: "devolver la
 function editorDe(id) {
   if (!st.editores.has(id)) {
     const editor = crearEditor(id, contenidoDe(st.v, id), {
-      cursos: st.cursos, perfiles: st.perfiles, versionId: st.v.id,
+      cursos: st.cursos, perfiles: st.perfiles, sinPrerrequisitos: sinPrerrequisitos(st.v),
       alCambiar: () => { refrescarEstado(); },
     });
     st.editores.set(id, { editor, base: JSON.stringify(editor.valor()), guardadoEn: null });
@@ -425,7 +425,7 @@ function pintarSeccion(zona) {
       refrescarEstado();
     } }, "Guardar sección");
   } else {
-    cuerpo = lecturaSeccion(s.id, contenidoDe(st.v, s.id), { versionId: st.v.id });
+    cuerpo = lecturaSeccion(s.id, contenidoDe(st.v, s.id), { sinPrerrequisitos: sinPrerrequisitos(st.v) });
   }
   const anterior = i > 0 ? SECCIONES[i - 1] : null;
   const siguiente = i < SECCIONES.length - 1 ? SECCIONES[i + 1] : null;

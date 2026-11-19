@@ -9,7 +9,7 @@ const CAMPOS = {
   tipo: "tipo", descripcion: "descripción", referencia: "referencia", isbn: "ISBN", url: "enlace", codigo: "código", nombre: "nombre",
   contribucion: "contribución", titulo: "título", item: "tema", actividad: "actividad", evidencia: "evidencia", punteo: "punteo",
   ponderacion: "ponderación", semana: "semana", docente: "docente", revisor: "revisor", autoridad: "autoridad",
-  decanatura: "decanatura", coordinador: "coordinación", estado: "estado",
+  decanatura: "decanatura", coordinador: "coordinación", estado: "estado", sin_prerrequisitos: "sin prerrequisitos",
 };
 const NOMBRE_FILA = { prerrequisitos: "prerrequisito", competencias: "competencia", perfil: "rasgo", bibliografia: "referencia", evaluacion: "actividad", contenidos: "unidad" };
 
@@ -39,6 +39,7 @@ export function etiquetaCampo(campo) {
 
 export function valorLegible(v) {
   if (v == null || v === "") return "(vacío)";
+  if (typeof v === "boolean") return v ? "Sí" : "No";
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
