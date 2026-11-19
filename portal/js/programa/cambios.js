@@ -1,5 +1,5 @@
 // "Ver cambios": GET /program-versions/{id}/changes con etiquetas legibles y sin identificadores internos.
-import { tituloSeccion as tituloBase } from "./secciones.js";
+import { tituloSeccion as tituloBase, nombreNivel } from "./secciones.js";
 
 const tituloSeccion = (id) => (id === "responsables" ? "Responsables" : tituloBase(id));
 
@@ -50,7 +50,10 @@ export function cambiosLegibles(respuesta) {
     if (ES_INTERNO.test(c.campo)) continue;
     const seccion = c.campo.split(".")[0];
     if (!grupos.has(seccion)) grupos.set(seccion, []);
-    grupos.get(seccion).push({ etiqueta: etiquetaCampo(c.campo), anterior: valorLegible(c.anterior), actual: valorLegible(c.actual) });
+    // El nivel viene como código («maestria»): se muestra con su nombre. La API lo nombra «general.contenido.nivel».
+    const esNivel = /^general\.(contenido\.)?nivel$/.test(c.campo);
+    const ver = (x) => valorLegible(esNivel && typeof x === "string" ? nombreNivel(x) : x);
+    grupos.get(seccion).push({ etiqueta: etiquetaCampo(c.campo), anterior: ver(c.anterior), actual: ver(c.actual) });
   }
   return [...grupos.entries()].map(([seccion, cambios]) => ({ seccion, titulo: seccion === "estado" ? "Estado" : tituloSeccion(seccion), cambios }));
 }

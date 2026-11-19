@@ -100,6 +100,16 @@ function campoNumero(etiqueta, valor, alCambiar, { min = 0, max, paso = "any", a
     ayuda ? h("span", { class: "v-campo__ayuda" }, ayuda) : null);
 }
 
+// Niveles que acepta el G5 (ck_pv_nivel del G1): código → nombre.
+export const NIVELES = { tecnico: "Técnico", licenciatura: "Licenciatura", maestria: "Maestría", doctorado: "Doctorado" };
+/** «Maestría», «MAESTRIA» o «maestria» → «maestria». Lo que no es un nivel se devuelve tal cual. */
+export function codigoNivel(v) {
+  const t = texto(v).trim();
+  const c = t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return Object.hasOwn(NIVELES, c) ? c : t;
+}
+export const nombreNivel = (v) => { const c = codigoNivel(v); return NIVELES[c] || c; };
+
 function campoSelect(etiqueta, valor, opciones, alCambiar, { vacio } = {}) {
   const id = nuevoId("s");
   return h("div", { class: "v-campo" }, h("label", { for: id }, etiqueta),
@@ -145,6 +155,9 @@ export function crearEditor(id, contenido, ctx) {
 
   if (id === "general") {
     const v = c || {};
+    v.nivel = codigoNivel(v.nivel) || null;
+    // Un nivel guardado que no está en la lista se muestra tal cual, para que se vea y se corrija.
+    const nivelesOfrecidos = v.nivel && !NIVELES[v.nivel] ? { ...NIVELES, [v.nivel]: `${v.nivel} (no válido)` } : NIVELES;
     const fijo = (dt, dd) => h("div", {}, h("dt", {}, dt), h("dd", {}, dd || "—"));
     return {
       nodo: h("div", { class: "v-editor" },
@@ -153,19 +166,21 @@ export function crearEditor(id, contenido, ctx) {
         h("p", { class: "v-campo__ayuda" }, "Código, período, sede y modalidad vienen del catálogo y no se cambian aquí."),
         campoTexto("Nombre de la asignatura", v.asignatura, (x) => { v.asignatura = x; avisar(); }, { max: 200 }),
         h("div", { class: "v-dos" },
-          campoTexto("Programa académico", v.programa, (x) => { v.programa = x; avisar(); }, { max: 200 }),
-          campoTexto("Departamento", v.departamento, (x) => { v.departamento = x; avisar(); }, { max: 200 })),
+          campoTexto("Programa académico", v.programa, (x) => { v.programa = x; avisar(); }, { max: 150 }),
+          campoTexto("Departamento", v.departamento, (x) => { v.departamento = x; avisar(); }, { max: 150 })),
         h("div", { class: "v-dos" },
-          campoTexto("Nivel", v.nivel, (x) => { v.nivel = x; avisar(); }, { max: 50, placeholder: "Por ejemplo: licenciatura" }),
-          campoTexto("Pénsum", v.pensum, (x) => { v.pensum = x; avisar(); }, { max: 20 }),
+          campoSelect("Nivel", v.nivel, nivelesOfrecidos, (x) => { v.nivel = x || null; avisar(); }, { vacio: "Sin indicar" }),
+          campoTexto("Pénsum", v.pensum, (x) => { v.pensum = x; avisar(); }, { max: 50 }),
           campoNumero("Horas de clase por semana", v.horas, (x) => { v.horas = x; avisar(); }, { min: 0.5, paso: 0.5 })),
         campoTexto("Resumen de cambios de esta versión", v.resumen_cambios, (x) => { v.resumen_cambios = x; avisar(); },
-          { multilinea: true, filas: 2, max: 500, ayuda: "Qué cambió respecto de la versión anterior. Aparece en el historial." })),
+          { multilinea: true, filas: 2, max: 1000, ayuda: "Qué cambió respecto de la versión anterior. Aparece en el historial." })),
       valor: () => ({
         asignatura: texto(v.asignatura).trim(), programa: texto(v.programa).trim() || null, departamento: texto(v.departamento).trim() || null,
-        nivel: texto(v.nivel).trim() || null, pensum: texto(v.pensum).trim() || null, horas: v.horas, resumen_cambios: texto(v.resumen_cambios).trim() || null,
+        nivel: v.nivel || null, pensum: texto(v.pensum).trim() || null, horas: v.horas, resumen_cambios: texto(v.resumen_cambios).trim() || null,
       }),
-      error: () => (!texto(v.asignatura).trim() ? "Escribe el nombre de la asignatura." : v.horas != null && v.horas <= 0 ? "Las horas deben ser mayores que cero." : null),
+      error: () => (!texto(v.asignatura).trim() ? "Escribe el nombre de la asignatura."
+        : v.nivel && !NIVELES[v.nivel] ? "Elige el nivel de la lista: Técnico, Licenciatura, Maestría o Doctorado."
+        : v.horas != null && v.horas <= 0 ? "Las horas deben ser mayores que cero." : null),
     };
   }
 
@@ -346,7 +361,6 @@ function editorEvaluacion(c, avisar) {
 
 // ── Lectura (versiones que no se editan) ─────────────────────
 // ── Lectura ──────────────────────────────────────────────────
-const conMayuscula = (t) => { const x = texto(t).trim(); return x ? x.charAt(0).toUpperCase() + x.slice(1) : x; };
 const valor = (v) => (v == null || v === "" ? "—" : String(v));
 
 /**
@@ -384,7 +398,7 @@ export function lecturaSeccion(id, c, ctx = {}) {
       const v = c || {};
       return ficha([
         ["Código", v.codigo], ["Asignatura", v.asignatura], ["Período", v.ciclo],
-        ["Sede", v.sede], ["Modalidad", v.modalidad], ["Nivel", conMayuscula(v.nivel)],
+        ["Sede", v.sede], ["Modalidad", v.modalidad], ["Nivel", nombreNivel(v.nivel)],
         ["Programa académico", v.programa], ["Departamento", v.departamento], ["Pénsum", v.pensum],
         ["Horas por semana", v.horas],
         ["Resumen de cambios", v.resumen_cambios, { ancho: true }],
