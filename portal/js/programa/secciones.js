@@ -200,13 +200,7 @@ export function crearEditor(id, contenido, ctx) {
     const casilla = h("input", { type: "checkbox", id: nuevoId("sp"), checked: ctx.sinPrerrequisitos === true, "aria-describedby": avisoId,
       onchange: () => { revisar(); avisar(); } });
     const revisar = () => { aviso.hidden = !(casilla.checked && conCursos()); };
-    // Agregar un curso desmarca la casilla (una lista con cursos anula la declaración, como en el servidor).
-    let antes = filas.length;
-    const alCambiarLista = () => {
-      if (filas.length > antes && casilla.checked) casilla.checked = false;
-      antes = filas.length;
-      revisar(); avisar();
-    };
+    const alCambiarLista = () => { revisar(); avisar(); };
     revisar();
     return {
       nodo: h("div", { class: "v-editor" },
@@ -215,7 +209,9 @@ export function crearEditor(id, contenido, ctx) {
         listaFilas({ filas, nombre: "Curso", agregar: "Agregar prerrequisito", vacio: "Sin cursos en la lista.", alCambiar: alCambiarLista,
           nueva: () => ({ curso_id: "", tipo: "obligatorio" }),
           campos: (f, ok) => h("div", { class: "v-dos" },
-            campoSelect("Curso", f.curso_id, opcionesCurso, (x) => { f.curso_id = num(x); ok(); }, { vacio: "Elige el curso" }),
+            // Elegir un curso desmarca la casilla (una lista con cursos anula la declaración, como en el servidor).
+            // Agregar una fila y quitarla sin elegir curso no la toca.
+            campoSelect("Curso", f.curso_id, opcionesCurso, (x) => { f.curso_id = num(x); if (f.curso_id) casilla.checked = false; ok(); }, { vacio: "Elige el curso" }),
             campoSelect("Tipo", f.tipo, TIPOS_PRERREQ, (x) => { f.tipo = x; ok(); })) })),
       valor: () => ({
         asignaturas: filas.filter((f) => f.curso_id).map((f, i) => ({ orden: i + 1, curso_id: f.curso_id, tipo: f.tipo })),
