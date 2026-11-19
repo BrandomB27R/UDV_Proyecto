@@ -1231,3 +1231,32 @@ def test_una_tarea_de_otro_tipo_se_entrega_sin_programa(c, s):
     a = asign[DOC1]
     assert c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"]).status_code == 200
     assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200
+
+
+# ---------------------------------------------- seguridad: hallazgos 8 y 9
+def test_la_lista_de_usuarios_es_solo_de_administracion_y_coordinacion(c, s):
+    for quien in ("admin", "coordinacion"):
+        assert c.get("/api/v1/users", headers=s[quien]).status_code == 200, quien
+        assert c.get("/api/v1/users/3", headers=s[quien]).status_code == 200, quien
+    for quien in ("revisor", "auditoria", "direccion", "docente1"):
+        es_error_comun(c.get("/api/v1/users", headers=s[quien]), 403)
+        es_error_comun(c.get("/api/v1/users/3", headers=s[quien]), 403)
+
+
+@pytest.mark.parametrize("enviado, guardado", [
+    ("../../etc/passwd", "passwd.pdf"),
+    ("C:\\Users\\ana\\Mis documentos\\cv final.PDF", "cv final.pdf"),
+    ("factura <x>|?*.pdf", "factura x.pdf"),
+    (".htaccess", "htaccess.pdf"),
+    ("informe.html", "informe.pdf"),
+    ("a" * 400 + ".pdf", "a" * 200 + ".pdf"),
+    ("...", "archivo.pdf"),
+])
+def test_el_nombre_del_archivo_se_guarda_limpio(c, s, enviado, guardado):
+    from urllib.parse import unquote
+    fid = _subir(c, s["docente1"], nombre=enviado)
+    r = c.get(f"/api/v1/files/{fid}", headers=s["docente1"])
+    assert r.status_code == 200
+    cabecera = unquote(r.headers["content-disposition"])
+    assert guardado in cabecera, cabecera
+    assert ".." not in cabecera and "/" not in cabecera.split("filename")[1] and "\\" not in cabecera

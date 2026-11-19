@@ -83,3 +83,4 @@ Este grupo no expone endpoints: entrega **el esquema**. Su contrato es:
 | 2026-09-26 | Versión inicial | — | PM |
 | 2026-09-28 | Jerarquía de fuentes; reglas del .docx que faltaban (inmutabilidad, orden, metadatos de archivo, fechas, total de evaluaciones); mapeo tabla↔recurso API; semillas vs. demo del G6; checklist con pruebas, índices y respaldo | PM | PM |
 | 2026-11-17 | Migración 1.2.3: `trg_entrega_no_update` deja cambiar `contenido_texto` y `programa_version_id` de una entrega mientras el intento no se haya enviado; un intento enviado sigue inmutable. Migración 1.2.2 (mismo día): permisos de programas y roles del usuario de coordinación | Interfaz Vinci; decisiones C y E | PM (17-nov), hechas por el PM tras el cierre de entregas |
+| 2026-11-18 | Migración 1.2.4 (solo datos): `users.read` queda para `admin` y `coordinator`; se les quita a `reviewer` y `auditor` | Revisión de seguridad, hallazgo 8 | PM (18-nov), hecha por el PM tras el cierre de entregas |
