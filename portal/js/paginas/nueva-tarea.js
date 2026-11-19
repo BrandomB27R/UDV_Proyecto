@@ -245,7 +245,7 @@ function pasoDatos() {
     campo("titulo", "Título", h("input", { id: "titulo", type: "text", maxlength: 200, value: f.title, autocomplete: "off",
       placeholder: "Por ejemplo: Actualizar CV para la acreditación 2027",
       oninput: (e) => { f.title = e.target.value; e.target.removeAttribute("aria-invalid"); } })),
-    campo("instrucciones", "Instrucciones", h("textarea", { id: "instrucciones", rows: 4, maxlength: 5000, value: f.description,
+    campo("instrucciones", "Instrucciones", h("textarea", { id: "instrucciones", rows: 4, maxlength: 10000, value: f.description,
       placeholder: "Qué se pide, cómo se entrega y qué se va a revisar.",
       oninput: (e) => { f.description = e.target.value; } }), "Opcional, pero ayuda a que nadie tenga que preguntar."),
     h("div", { class: "v-dos" },
