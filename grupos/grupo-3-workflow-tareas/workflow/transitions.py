@@ -183,7 +183,8 @@ _SELECT_MYSQL = (
     "       td.estado_codigo AS status, COALESCE(td.fecha_limite, t.fecha_limite) AS due_date,"
     "       t.titulo AS title, t.creado_por AS created_by, NULL AS responsible_id,"
     "       COALESCE(td.revisor_id, t.revisor_id) AS reviewer_id,"
-    "       'standard' AS flow, t.id AS tid, COALESCE(tt.requiere_archivo, 0) AS requires_file"
+    "       'standard' AS flow, t.id AS tid, COALESCE(tt.requiere_archivo, 0) AS requires_file,"
+    "       tt.modalidad_entrega AS delivery_mode, t.programa_version_id AS task_program_id"
     " FROM tarea_destinatario td JOIN tarea t ON t.id = td.tarea_id"
     " LEFT JOIN workflow w ON w.id = t.workflow_id"
     " LEFT JOIN tipo_tarea tt ON tt.id = w.tipo_tarea_id"
@@ -313,12 +314,18 @@ _PROGRAMA_EXPLICA = {
 }
 
 
-def _exigir_acuerdo_con_el_programa(conn, assignment_id, action):
+_SIN_PROGRAMA = ("Esta tarea se entrega con el programa del curso: ábrelo desde la tarea,"
+                 " complétalo y envíalo a revisión.")
+
+
+def _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row=None):
     """409 si la acción sobre la tarea contradice el estado de su programa.
 
-    Solo aplica a las tareas cuyo programa nació de la propia tarea. Una tarea
-    de programa sin versión abierta, o con una versión enlazada a mano por
-    coordinación para todos sus docentes, sigue las reglas de siempre.
+    Aplica a las tareas cuyo programa nació de la propia tarea. Además, una
+    tarea cuyo tipo se entrega con el programa de curso no se entrega si el
+    docente todavía no abrió ninguno (PROGRAM_REQUIRED): no hay nada que
+    revisar. La única excepción es la tarea a la que coordinación le enlazó a
+    mano una versión para todos sus docentes, que sigue las reglas de siempre.
     """
     permitidos = _PROGRAMA_PERMITE.get(action)
     if permitidos is None:
@@ -327,7 +334,12 @@ def _exigir_acuerdo_con_el_programa(conn, assignment_id, action):
         "SELECT id, estado_codigo FROM programa_version"
         " WHERE tarea_destinatario_origen_id = ? ORDER BY numero_version DESC, id DESC LIMIT 1",
         (assignment_id,)).fetchone()
-    if programa is None or programa["estado_codigo"] in permitidos:
+    if programa is None:
+        if (action in ("submit", "resubmit") and row is not None
+                and row["delivery_mode"] == "programa" and row["task_program_id"] is None):
+            raise Conflict(_SIN_PROGRAMA, code="PROGRAM_REQUIRED")
+        return
+    if programa["estado_codigo"] in permitidos:
         return
     raise Conflict(_PROGRAMA_EXPLICA[action], code="PROGRAM_STATE",
                    details={"program_version_id": programa["id"],
@@ -371,7 +383,7 @@ def perform(conn, assignment_id, action, actor, comment=None):
             raise ValidationFailed(f"La acción '{action}' requiere un comentario",
                                    details={"field": "comment"})
         if mysql:
-            _exigir_acuerdo_con_el_programa(conn, assignment_id, action)        # 409
+            _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row)   # 409
 
         entrega_id = None
         if mysql and action in ENTREGA_ACTIONS:
