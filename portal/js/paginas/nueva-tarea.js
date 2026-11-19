@@ -37,6 +37,9 @@ const delCurso = new Map();
 let aplicadosA = null;
 let cargandoCurso = null;
 let errorCurso = null;
+// Cuántos elegidos se reemplazaron al marcar los del curso. Se avisa una sola vez, justo después del
+// reemplazo: pintarEstado lo muestra y lo vuelve a 0 (al cambiar de modo, de paso o de elegidos ya no vale).
+let reemplazados = 0;
 let paso = 0;
 let tareaId = idBorrador && /^\d+$/.test(idBorrador) ? Number(idBorrador) : null;
 let buscarDocente = "";
@@ -102,7 +105,10 @@ async function cargarCurso() {
   }
   const d = delCurso.get(clave);
   if (aplicadosA !== clave) {
-    f.user_ids = new Set(d.filas.map((x) => x.id));
+    const nuevos = new Set(d.filas.map((x) => x.id));
+    // Si había elegidos que no dan el curso, se avisa que se reemplazaron.
+    reemplazados = [...f.user_ids].some((id) => !nuevos.has(id)) ? f.user_ids.size : 0;
+    f.user_ids = nuevos;
     aplicadosA = clave;
     paginaDocentes = 1;
   }
@@ -346,19 +352,23 @@ function pasoDestinatarios() {
     const pintarEstado = () => {
       const clave = claveCurso();
       const d = clave ? delCurso.get(clave) : null;
+      const n = reemplazados;
+      reemplazados = 0;
       if (!clave) { poner(estado, "Elige el curso y el período."); return; }
       if (cargandoCurso === clave) { poner(estado, "Buscando a los docentes de ese curso…"); return; }
       if (!d) { poner(estado); return; }
       const periodo = periodos.find((x) => x.id === f.curso.period_id)?.code || "";
       poner(estado, d.filas.length
         ? [h("strong", {}, `${d.filas.length} ${d.filas.length === 1 ? "docente da" : "docentes dan"}`),
-          ` este curso en ${periodo}. ${d.filas.length === 1 ? "Quedó marcado; puedes quitarlo." : "Quedaron marcados; puedes quitar alguno."}`]
-        : "Nadie tiene asignado este curso en ese período.");
+          ` este curso en ${periodo}. ${d.filas.length === 1 ? "Quedó marcado; puedes quitarlo." : "Quedaron marcados; puedes quitar alguno."}`,
+          n ? ` ${n === 1 ? "Se reemplazó el que tenías elegido." : `Se reemplazaron los ${n} que tenías elegidos.`}` : null]
+        : ["Nadie tiene asignado este curso en ese período.",
+          n ? ` ${n === 1 ? "Se quitó el que tenías elegido." : `Se quitaron los ${n} que tenías elegidos.`}` : null]);
     };
     const cambiar = async () => {
       poner(zonaError);
       const clave = claveCurso();
-      if (!clave) { pintarEstado(); return; }
+      if (!clave) { pintarEstado(); pintarTabla(); return; }
       cargandoCurso = clave;
       pintarEstado();
       const d = await cargarCurso();
@@ -434,7 +444,9 @@ function pasoDestinatarios() {
     const conSede = filas.some((x) => x.sede);
     const faltan = v.filter((x) => !f.user_ids.has(x.id)).length;
     botonMarcar.textContent = v.length ? `Marcar ${v.length === 1 ? "al 1" : `los ${v.length}`} de esta lista` : "Marcar los de esta lista";
-    botonMarcar.disabled = !v.length || !faltan;
+    // Sin filas en la lista filtrada no hay nada que marcar: el botón no se muestra.
+    botonMarcar.hidden = !v.length;
+    botonMarcar.disabled = !faltan;
     if (f.modo === "curso" && !claveCurso()) { poner(zonaTabla); return; }
     poner(zonaTabla,
       filas.length ? h("table", { class: "nt-docentes" },
