@@ -1163,3 +1163,60 @@ def test_texto_mas_largo_que_la_columna_da_422_y_no_error_interno(c, s):
         r = c.put(f"{seccion}/{nombre}", headers=s["docente1"], json={"contenido": contenido})
         assert r.status_code < 500, (nombre, r.status_code, r.text[:200])
         assert "pymysql" not in r.text and "sqlalchemy" not in r.text.lower(), nombre
+
+
+def test_la_tarea_de_un_programa_no_se_adelanta_ni_contradice_al_programa(c, s):
+    """El encadenado tarea-programa ya no depende de la pantalla: lo exige el servidor."""
+    t = _tarea(c, s, reviewer_id=COORD, course_id=1, period_id=2).json()      # revisa coordinación
+    c.post(f"/api/v1/tasks/{t['id']}/recipients", headers=s["coordinacion"], json={"mode": "users", "user_ids": [DOC1]})
+    a = c.post(f"/api/v1/tasks/{t['id']}/publish", headers=s["coordinacion"]).json()["assignment_ids"][0]
+    A, d, co, di = f"/api/v1/assignments/{a}", s["docente1"], s["coordinacion"], s["direccion"]
+    assert c.post(f"{A}/start", headers=d).status_code == 200
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=d).json()["id"]
+    V = f"/api/v1/program-versions/{vid}"
+
+    def choca(r):
+        es_error_comun(r, 409)
+        assert r.json()["error"]["code"] == "PROGRAM_STATE", r.text
+        assert r.json()["error"]["details"]["program_version_id"] == vid
+
+    def estados():
+        return (c.get(A, headers=co).json()["status"], c.get(V, headers=co).json()["estado"])
+
+    # Programa en borrador: la tarea no se entrega sola.
+    choca(c.post(f"{A}/submit", headers=d, json={}))
+    assert c.post(f"{V}/submit", headers=d, json={}).status_code == 200
+    assert c.post(f"{A}/submit", headers=d, json={}).status_code == 200
+    assert estados() == ("submitted", "submitted")
+
+    # En revisión: la tarea no se aprueba ni se devuelve por su cuenta.
+    assert c.post(f"{V}/review", headers=co, json={}).status_code == 200
+    assert c.post(f"{A}/review", headers=co, json={}).status_code == 200
+    choca(c.post(f"{A}/approve", headers=co, json={}))
+    choca(c.post(f"{A}/return", headers=co, json={"comment": "Falta la evaluación"}))
+    choca(c.post(f"{A}/actions/approve", headers=co, json={}))          # la ruta genérica también
+    assert estados() == ("under_review", "under_review")
+
+    # Devuelto el programa, la tarea sí se devuelve; y no se reentrega hasta reenviar el programa.
+    assert c.post(f"{V}/return", headers=co, json={"comentario": "Falta la evaluación"}).status_code == 200
+    assert c.post(f"{A}/return", headers=co, json={"comment": "Falta la evaluación"}).status_code == 200
+    choca(c.post(f"{A}/resubmit", headers=d, json={}))
+    assert c.post(f"{V}/submit", headers=d, json={}).status_code == 200
+    assert c.post(f"{A}/resubmit", headers=d, json={}).status_code == 200
+
+    # Aprobado no basta: la tarea se aprueba cuando dirección autoriza.
+    for ruta in (f"{V}/review", f"{A}/review", f"{V}/approve"):
+        assert c.post(ruta, headers=co, json={}).status_code == 200, ruta
+    choca(c.post(f"{A}/approve", headers=co, json={}))
+    choca(c.post(f"{A}/approve", headers=di, json={}))
+    assert c.post(f"{V}/authorize", headers=di, json={}).status_code == 200
+    assert c.post(f"{A}/approve", headers=di, json={}).status_code == 200
+    assert estados() == ("approved", "authorized")
+    assert c.post(f"{A}/close", headers=co, json={}).status_code == 200
+
+
+def test_una_tarea_de_programa_sin_programa_abierto_sigue_las_reglas_de_siempre(c, s):
+    _, asign = publicar(c, s, para=(DOC1,), tipo=1, revisor=COORD)
+    a = asign[DOC1]
+    assert c.post(f"/api/v1/assignments/{a}/start", headers=s["docente1"]).status_code == 200
+    assert c.post(f"/api/v1/assignments/{a}/submit", headers=s["docente1"], json={}).status_code == 200

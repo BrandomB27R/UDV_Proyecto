@@ -288,6 +288,52 @@ def _sync_entrega_with_draft(conn, entrega_id, assignment_id):
             raise
 
 
+# ---------------------------------------------------------------------------
+# Tarea de programa: la tarea no se adelanta ni contradice a su programa.
+#
+# Cuando el docente abre el programa desde su tarea (G5 lo deja ligado en
+# programa_version.tarea_destinatario_origen_id), el programa manda: se envía,
+# se devuelve y se autoriza en su página, y la tarea lo sigue. Antes esa regla
+# vivía solo en la pantalla, y el servidor aceptaba, por ejemplo, entregar la
+# tarea con el programa todavía en borrador, o aprobarla sin que dirección lo
+# hubiera autorizado. Aquí se exige en el servidor.
+#
+# Para cada acción de la tarea, los estados del programa que la permiten:
+_PROGRAMA_PERMITE = {
+    "submit":   {"submitted", "under_review", "approved", "authorized", "superseded"},
+    "resubmit": {"submitted", "under_review", "approved", "authorized", "superseded"},
+    "return":   {"returned"},
+    "approve":  {"authorized", "superseded"},
+}
+_PROGRAMA_EXPLICA = {
+    "submit":   "Primero envía el programa a revisión desde su página; la tarea se entrega con él.",
+    "resubmit": "Primero vuelve a enviar el programa a revisión desde su página; la tarea se entrega con él.",
+    "return":   "Devuelve el programa desde su página; la tarea se devuelve con él.",
+    "approve":  "La tarea se aprueba cuando dirección autoriza el programa.",
+}
+
+
+def _exigir_acuerdo_con_el_programa(conn, assignment_id, action):
+    """409 si la acción sobre la tarea contradice el estado de su programa.
+
+    Solo aplica a las tareas cuyo programa nació de la propia tarea. Una tarea
+    de programa sin versión abierta, o con una versión enlazada a mano por
+    coordinación para todos sus docentes, sigue las reglas de siempre.
+    """
+    permitidos = _PROGRAMA_PERMITE.get(action)
+    if permitidos is None:
+        return
+    programa = conn.execute(
+        "SELECT id, estado_codigo FROM programa_version"
+        " WHERE tarea_destinatario_origen_id = ? ORDER BY numero_version DESC, id DESC LIMIT 1",
+        (assignment_id,)).fetchone()
+    if programa is None or programa["estado_codigo"] in permitidos:
+        return
+    raise Conflict(_PROGRAMA_EXPLICA[action], code="PROGRAM_STATE",
+                   details={"program_version_id": programa["id"],
+                            "program_status": programa["estado_codigo"]})
+
+
 def perform(conn, assignment_id, action, actor, comment=None):
     """Ejecuta una acción sobre una asignación. Devuelve la asignación actualizada."""
     if action not in ACTIONS:
@@ -324,6 +370,8 @@ def perform(conn, assignment_id, action, actor, comment=None):
         if rule.comment_required and not comment:                               # 422
             raise ValidationFailed(f"La acción '{action}' requiere un comentario",
                                    details={"field": "comment"})
+        if mysql:
+            _exigir_acuerdo_con_el_programa(conn, assignment_id, action)        # 409
 
         entrega_id = None
         if mysql and action in ENTREGA_ACTIONS:
