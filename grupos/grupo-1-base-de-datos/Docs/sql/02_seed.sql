@@ -109,11 +109,11 @@ insert into rol_permiso (rol_id, permiso_id) values
 
 (3,7),(3,8),(3,12),(3,14),(3,16),(3,17),
 
-(4,1),(4,8),(4,13),(4,14),(4,16),(4,17),(4,18),
+(4,8),(4,13),(4,14),(4,16),(4,17),(4,18),
 
 (5,8),(5,15),(5,16),(5,17),(5,19),
 
-(6,1),(6,8),(6,9),(6,15),(6,17);
+(6,8),(6,9),(6,15),(6,17);
 
 insert into usuario (id, correo, id_academico, nombres, apellidos, hash_contrasena, unidad_academica_id, activo) values
 (1, 'admin@demo.udv.edu.gt',        'U-0001', 'Ana',    'Administradora', '$2b$10$IrPNlu9CPcXlLL.viZRic.z3vaku4uuI6eiWVXOoTa.HulL7SJyCu', 1, 1),
