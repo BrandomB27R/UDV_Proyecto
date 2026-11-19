@@ -27,19 +27,14 @@ const texto = (v) => (v == null ? "" : String(v));
 const num = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v));
 export const contenidoDe = (version, id) => version?.secciones?.[id]?.contenido ?? (["general", "descripcion", "metodologia"].includes(id) ? {} : []);
 
-// "Sin prerrequisitos": la API no lo guarda; queda en este navegador (NOTAS_BACKEND.md).
-const claveSinPrerreq = (versionId) => `vinci_sin_prerreq_${versionId}`;
-export function sinPrerrequisitos(versionId) {
-  try { return localStorage.getItem(claveSinPrerreq(versionId)) === "1"; } catch { return false; }
-}
-export function marcarSinPrerrequisitos(versionId, si) {
-  try { if (si) localStorage.setItem(claveSinPrerreq(versionId), "1"); else localStorage.removeItem(claveSinPrerreq(versionId)); } catch { /* sin almacenamiento */ }
-}
+/** «Sin prerrequisitos»: lo guarda el servidor junto a la sección (secciones.prerrequisitos.sin_prerrequisitos). */
+export const sinPrerrequisitos = (version) => version?.secciones?.prerrequisitos?.sin_prerrequisitos === true;
 
 export const totalEvaluacion = (filas) => Math.round((filas || []).reduce((s, x) => s + (Number(x.ponderacion) || 0), 0) * 100) / 100;
 
 // ── Completa o pendiente (acordado con el PM) ────────────────
-export function estadoSeccion(id, c, versionId) {
+// sinPrerreq: la declaración «Sin prerrequisitos» de la versión (solo cuenta para esa sección).
+export function estadoSeccion(id, c, sinPrerreq = false) {
   switch (id) {
     case "general": {
       const ok = !!texto(c?.asignatura).trim() && Number(c?.horas) > 0;
@@ -51,7 +46,7 @@ export function estadoSeccion(id, c, versionId) {
       return { ok, detalle: ok ? "" : "Falta el texto." };
     }
     case "prerrequisitos": {
-      const ok = (c || []).length > 0 || sinPrerrequisitos(versionId);
+      const ok = (c || []).length > 0 || sinPrerreq === true;
       return { ok, detalle: ok ? "" : "Agrega un curso o marca «Sin prerrequisitos»." };
     }
     case "competencias":
@@ -77,7 +72,7 @@ export function estadoSeccion(id, c, versionId) {
 }
 
 export function avanceDe(version) {
-  const estados = SECCIONES.map((s) => ({ ...s, ...estadoSeccion(s.id, contenidoDe(version, s.id), version?.id) }));
+  const estados = SECCIONES.map((s) => ({ ...s, ...estadoSeccion(s.id, contenidoDe(version, s.id), sinPrerrequisitos(version)) }));
   return { estados, listas: estados.filter((x) => x.ok).length, total: estados.length, faltan: estados.filter((x) => !x.ok) };
 }
 
@@ -146,7 +141,7 @@ function listaFilas({ filas, nombre, campos, nueva, agregar, alCambiar, vacio })
 
 // ── Editores ─────────────────────────────────────────────────
 /**
- * Crea el editor de una sección. ctx: {cursos, perfiles, versionId, alCambiar}.
+ * Crea el editor de una sección. ctx: {cursos, perfiles, sinPrerrequisitos, alCambiar}.
  * Devuelve {nodo, valor(), error()} — error() da el texto que impide guardar, o null.
  */
 export function crearEditor(id, contenido, ctx) {
@@ -197,18 +192,33 @@ export function crearEditor(id, contenido, ctx) {
   if (id === "prerrequisitos") {
     const filas = (c || []).map((x) => ({ curso_id: x.curso_id, tipo: x.tipo || "obligatorio" }));
     const opcionesCurso = Object.fromEntries((ctx.cursos || []).map((x) => [x.id, `${x.code} · ${x.name}`]));
-    const casilla = h("input", { type: "checkbox", id: nuevoId("sp"), checked: sinPrerrequisitos(ctx.versionId),
-      onchange: (e) => { marcarSinPrerrequisitos(ctx.versionId, e.target.checked); avisar(); } });
+    const conCursos = () => filas.some((f) => f.curso_id);
+    const choque = "Quita los cursos de la lista para marcar «Sin prerrequisitos», o desmarca la casilla.";
+    const avisoId = nuevoId("sp-aviso");
+    const aviso = h("p", { id: avisoId, class: "v-msg v-msg--aviso", hidden: true }, choque);
+    // Marcar con cursos en la lista no se guarda: se avisa junto a la casilla y error() lo frena.
+    const casilla = h("input", { type: "checkbox", id: nuevoId("sp"), checked: ctx.sinPrerrequisitos === true, "aria-describedby": avisoId,
+      onchange: () => { revisar(); avisar(); } });
+    const revisar = () => { aviso.hidden = !(casilla.checked && conCursos()); };
+    const alCambiarLista = () => { revisar(); avisar(); };
+    revisar();
     return {
       nodo: h("div", { class: "v-editor" },
         h("label", { class: "v-check v-check--sola", for: casilla.id }, casilla, h("span", {}, h("strong", {}, "Sin prerrequisitos"), h("small", {}, "Márcalo si el curso no exige otros cursos antes."))),
-        listaFilas({ filas, nombre: "Curso", agregar: "Agregar prerrequisito", vacio: "Sin cursos en la lista.", alCambiar: avisar,
+        aviso,
+        listaFilas({ filas, nombre: "Curso", agregar: "Agregar prerrequisito", vacio: "Sin cursos en la lista.", alCambiar: alCambiarLista,
           nueva: () => ({ curso_id: "", tipo: "obligatorio" }),
           campos: (f, ok) => h("div", { class: "v-dos" },
-            campoSelect("Curso", f.curso_id, opcionesCurso, (x) => { f.curso_id = num(x); ok(); }, { vacio: "Elige el curso" }),
+            // Elegir un curso desmarca la casilla (una lista con cursos anula la declaración, como en el servidor).
+            // Agregar una fila y quitarla sin elegir curso no la toca.
+            campoSelect("Curso", f.curso_id, opcionesCurso, (x) => { f.curso_id = num(x); if (f.curso_id) casilla.checked = false; ok(); }, { vacio: "Elige el curso" }),
             campoSelect("Tipo", f.tipo, TIPOS_PRERREQ, (x) => { f.tipo = x; ok(); })) })),
-      valor: () => filas.filter((f) => f.curso_id).map((f, i) => ({ orden: i + 1, curso_id: f.curso_id, tipo: f.tipo })),
-      error: () => (filas.some((f) => !f.curso_id) ? "Elige el curso en cada fila o quita la fila vacía." : null),
+      valor: () => ({
+        asignaturas: filas.filter((f) => f.curso_id).map((f, i) => ({ orden: i + 1, curso_id: f.curso_id, tipo: f.tipo })),
+        sin_prerrequisitos: casilla.checked,
+      }),
+      error: () => (casilla.checked && conCursos() ? choque
+        : filas.some((f) => !f.curso_id) ? "Elige el curso en cada fila o quita la fila vacía." : null),
     };
   }
 
@@ -409,7 +419,7 @@ export function lecturaSeccion(id, c, ctx = {}) {
       return texto(c?.texto).trim() ? h("p", { class: "v-texto" }, c.texto) : vacio();
     case "prerrequisitos":
       return (c || []).length ? tablaLectura(["Código", "Curso", "Tipo"], c.map((x) => [x.codigo, x.nombre, TIPOS_PRERREQ[x.tipo] || x.tipo]))
-        : vacio(sinPrerrequisitos(ctx.versionId) ? "Sin prerrequisitos." : "No se registraron prerrequisitos.");
+        : vacio(ctx.sinPrerrequisitos === true ? "Sin prerrequisitos." : "No se registraron prerrequisitos.");
     case "competencias":
       return (c || []).length ? tablaLectura(["Tipo", "Descripción"], c.map((x) => [TIPOS_COMPETENCIA[x.tipo] || x.tipo, x.descripcion])) : vacio();
     case "perfil":

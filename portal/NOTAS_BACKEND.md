@@ -74,12 +74,6 @@ El `PUT` de la sección `contenidos` guarda unidades planas con sus temas e igno
 reordenables. Para tener módulos dentro de la unidad, el G5 debe leer y guardar
 `unidad_padre_id`.
 
-### 5. "Sin prerrequisitos" no se guarda (G5)
-
-La sección se da por completa con al menos un curso o con la casilla "Sin
-prerrequisitos". La API no tiene dónde guardar esa casilla: hoy queda en el
-navegador de quien la marca. Pedido: un campo `sin_prerrequisitos` en la versión.
-
 ### 6. `/changes` devuelve identificadores internos (G5)
 
 Cada `programa_unidad_id` (y otros `*_id` y `orden`) sale como cambio aunque el
