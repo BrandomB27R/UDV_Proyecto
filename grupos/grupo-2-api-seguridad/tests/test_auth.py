@@ -217,12 +217,61 @@ def test_bloqueo_despues_de_los_intentos_permitidos(client, db):
     for _ in range(config.LOGIN_MAX_INTENTOS - 1):
         assert client.post(URL, json=mala).status_code == 401
 
-    # el ultimo intento bloquea la cuenta
+    # el ultimo intento bloquea la cuenta para esta direccion
     assert client.post(URL, json=mala).status_code == 429
-    assert _usuario(db).bloqueado_hasta is not None
+    # el bloqueo es de la direccion que fallo: la cuenta no queda marcada para todos
+    assert _usuario(db).bloqueado_hasta is None
 
-    # bloqueada: ni con la contraseña correcta entra
+    # bloqueada: ni con la contraseña correcta entra desde aqui
+    r = client.post(URL, json={"correo": CORREO, "password": CLAVE})
+    assert r.status_code == 429
+    assert "15 minutos" in r.text
+
+
+def _fallos_y_bloqueos(db):
+    db.expire_all()
+    acciones = [a for (a,) in db.query(Auditoria.accion).order_by(Auditoria.id).all()]
+    return acciones.count("LOGIN_FALLIDO"), acciones.count("LOGIN_BLOQUEADO")
+
+
+def test_insistir_durante_el_bloqueo_no_lo_alarga(client, db):
+    _crear_admin(db)
+    mala = {"correo": CORREO, "password": "otra-clave"}
+    for _ in range(config.LOGIN_MAX_INTENTOS):
+        client.post(URL, json=mala)
+    for _ in range(3):
+        assert client.post(URL, json=mala).status_code == 429
+    # los intentos hechos durante el bloqueo se anotan aparte y no cuentan como fallos nuevos
+    assert _fallos_y_bloqueos(db) == (config.LOGIN_MAX_INTENTOS, 3)
+
+
+def test_el_bloqueo_vence_solo(client, db):
+    _crear_admin(db)
+    mala = {"correo": CORREO, "password": "otra-clave"}
+    for _ in range(config.LOGIN_MAX_INTENTOS):
+        client.post(URL, json=mala)
     assert client.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 429
+    # pasan los minutos del bloqueo
+    hace_rato = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=config.LOGIN_BLOQUEO_MINUTOS + 1)
+    db.query(Auditoria).update({"creado_en": hace_rato})
+    db.commit()
+    assert client.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 200
+
+
+def test_fallar_la_clave_de_otro_no_lo_deja_fuera(db):
+    """Quien falla se bloquea a si mismo: el dueño de la cuenta entra desde su propia direccion."""
+    from fastapi.testclient import TestClient
+    from g2_api.main import app
+    _crear_admin(db)
+    mala = {"correo": CORREO, "password": "otra-clave"}
+    atacante = TestClient(app, client=("198.51.100.20", 50000))
+    dueno = TestClient(app, client=("198.51.100.21", 50000))
+    for _ in range(config.LOGIN_MAX_INTENTOS):
+        atacante.post(URL, json=mala)
+    assert atacante.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 429
+    assert dueno.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 200
+    # y el ingreso del dueño no le quita el bloqueo al otro
+    assert atacante.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 429
 
 
 def test_bloqueo_vencido_deja_entrar(client, db):
@@ -238,9 +287,12 @@ def test_bloqueo_vencido_deja_entrar(client, db):
 
 def test_login_correcto_reinicia_el_contador(client, db):
     _crear_admin(db)
-    client.post(URL, json={"correo": CORREO, "password": "otra-clave"})
-    client.post(URL, json={"correo": CORREO, "password": "otra-clave"})
-    assert _usuario(db).intentos_fallidos == 2
+    mala = {"correo": CORREO, "password": "otra-clave"}
+    for _ in range(config.LOGIN_MAX_INTENTOS - 1):
+        assert client.post(URL, json=mala).status_code == 401
 
     assert client.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 200
-    assert _usuario(db).intentos_fallidos == 0
+    # tras entrar bien la cuenta empieza de cero: caben otra vez los mismos fallos sin bloquear
+    for _ in range(config.LOGIN_MAX_INTENTOS - 1):
+        assert client.post(URL, json=mala).status_code == 401
+    assert client.post(URL, json={"correo": CORREO, "password": CLAVE}).status_code == 200

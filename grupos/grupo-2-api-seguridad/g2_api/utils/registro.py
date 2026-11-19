@@ -15,6 +15,7 @@ logger = logging.getLogger("g2_api.auditoria")
 
 LOGIN_OK        = "LOGIN_OK"
 LOGIN_FALLIDO   = "LOGIN_FALLIDO"
+LOGIN_BLOQUEADO = "LOGIN_BLOQUEADO"   # intento hecho mientras la dirección está bloqueada para esa cuenta
 LOGOUT          = "LOGOUT"
 ACCESS_DENIED   = "ACCESS_DENIED"
 USER_CREATED    = "USER_CREATED"
