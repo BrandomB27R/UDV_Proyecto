@@ -51,7 +51,7 @@ y `.DS_Store`.
 - Python 3.10 o posterior.
 - Las dependencias se fijan en `requirements.txt`: FastAPI 0.142.1,
   Pydantic 2.14.0, Uvicorn 0.54.0, SQLAlchemy 2.1.1, PyMySQL 1.1.1,
-  cryptography 44.0.2, ReportLab 4.5.1 y pytest 9.1.1.
+  cryptography 50.0.2, ReportLab 4.5.1 y pytest 9.1.1.
 - Una base MySQL compatible con el esquema compartido de G1, incluyendo sus
   catálogos, tablas, vistas y procedimientos usados por el repositorio. La
   autorización utiliza `sp_autorizar_version`.

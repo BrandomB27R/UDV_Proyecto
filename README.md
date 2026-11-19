@@ -226,7 +226,7 @@ pide al PM.
 | `pytest` | `9.1.1` |
 | `SQLAlchemy` | `2.1.1` |
 | `PyMySQL` | `1.1.1` |
-| `cryptography` | `44.0.2` |
+| `cryptography` | `50.0.2` |
 | `python-dotenv` | `1.2.3` |
 
 Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.

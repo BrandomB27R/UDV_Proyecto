@@ -16,7 +16,7 @@ PyJWT==2.15.1 # Tokens de sesion (Persona de autenticacion)
 # Base de datos
 SQLAlchemy==2.1.1 # Conexión a base de datos (Persona 5)
 PyMySQL==1.1.1 # Oficial. Driver de MySQL: mysql+pymysql://...
-cryptography==44.0.2 # Oficial. PyMySQL la necesita para el login de MySQL 8 (caching_sha2_password).
+cryptography==50.0.2 # Oficial. PyMySQL la necesita para el login de MySQL 8 (caching_sha2_password).
 
 # Configuracion
 python-dotenv==1.2.3 # Leer el archivo .env

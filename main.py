@@ -11,6 +11,7 @@ prefijo /api/v1 (por ejemplo APIRouter(prefix="/api/v1/auth")).
 Correr local:  uvicorn main:app --reload
 """
 import importlib
+import ipaddress
 import logging
 import os
 import sys
@@ -91,6 +92,40 @@ async def cabeceras_de_seguridad(request, call_next):
     if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
         c.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return respuesta
+
+class DireccionDelCliente:
+    """Detrás de un proxy, pone en la petición la dirección real de quien llama.
+
+    En Railway la conexión que ve la aplicación es la del proxy de la plataforma,
+    la misma para todos: sin esto, el límite de intentos de inicio de sesión por
+    dirección cuenta a todos los usuarios juntos (veinte fallos de cualquiera
+    bloquean el acceso de todos) y la auditoría guarda siempre la dirección del proxy.
+
+    Solo actúa si CABECERA_IP_CLIENTE nombra la cabecera donde el proxy escribe
+    esa dirección (en Railway, X-Real-IP, que el borde sobrescribe). Sin la
+    variable no se confía en ninguna cabecera: sin proxy delante, cualquiera
+    podría escribirla. El resto del código sigue leyendo request.client.host.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        cabecera = os.getenv("CABECERA_IP_CLIENTE", "").strip().lower().encode("latin-1", "ignore")
+        if cabecera and scope["type"] in ("http", "websocket"):
+            valores = [v for k, v in scope.get("headers", []) if k == cabecera]
+            if len(valores) == 1:                       # repetida o ausente: no se confía
+                try:
+                    ip = str(ipaddress.ip_address(valores[0].decode("latin-1").strip()))
+                except ValueError:
+                    ip = None
+                if ip:
+                    scope = dict(scope)
+                    scope["client"] = (ip, 0)
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(DireccionDelCliente)
 
 # Formato de error común: servicio compartido del G2 (CONTRATO_COMUN §1).
 try:
