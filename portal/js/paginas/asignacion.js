@@ -678,10 +678,12 @@ async function ejecutar(accion) {
       texto = "Para devolver la entrega escribe la observación.";
       document.getElementById("motivo")?.setAttribute("aria-invalid", "true");
     }
-    if (e instanceof ApiError && e.status === 409) texto = `${e.message} Recarga para ver el estado actual.`;
+    // Falta el programa o no está en el estado que pide la acción: el servidor ya dice qué hacer.
+    const delPrograma = e instanceof ApiError && ["PROGRAM_REQUIRED", "PROGRAM_STATE"].includes(e.code);
+    if (e instanceof ApiError && e.status === 409 && !delPrograma) texto = `${e.message} Recarga para ver el estado actual.`;
     refrescar();
     poner(zonaErrorAccion, mensaje("error", texto),
-      e instanceof ApiError && e.status === 409 ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { st.aviso = null; zonaErrorAccion = null; cargar(); } }, "Recargar") : null);
+      e instanceof ApiError && e.status === 409 && !delPrograma ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { st.aviso = null; zonaErrorAccion = null; cargar(); } }, "Recargar") : null);
   }
 }
 
