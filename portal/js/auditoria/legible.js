@@ -8,9 +8,10 @@ import { RUTAS } from "../config.js";
 const ACCIONES = {
   insert: "Creó", update: "Modificó", soft_delete: "Dio de baja", transition: "Cambió de estado",
   LOGIN_OK: "Inició sesión", LOGOUT: "Cerró sesión", LOGIN_FALLIDO: "Intento fallido",
+  LOGIN_BLOQUEADO: "Intento bloqueado",
 };
-// Clase del chip: el intento fallido va en rojo; dar de baja en naranja; lo demás neutro o azul.
-const TONO_ACCION = { LOGIN_FALLIDO: "fallo", soft_delete: "baja", transition: "estado" };
+// Clase del chip: el intento fallido o bloqueado va en rojo; dar de baja en naranja; lo demás neutro o azul.
+const TONO_ACCION = { LOGIN_FALLIDO: "fallo", LOGIN_BLOQUEADO: "fallo", soft_delete: "baja", transition: "estado" };
 
 export const etiquetaAccion = (a) => ACCIONES[a] || legible(a);
 
@@ -157,6 +158,10 @@ export function queCambio(r, cambios) {
   if (r.action === "LOGIN_FALLIDO") {
     const correo = r.changes?.correo;
     return { tipo: "texto", tono: "fallo", texto: "Correo o contraseña incorrectos", nota: correo ? `Correo usado: ${correo}` : null };
+  }
+  if (r.action === "LOGIN_BLOQUEADO") {
+    const correo = r.changes?.correo;
+    return { tipo: "texto", tono: "fallo", texto: "La dirección estaba bloqueada para esta cuenta por intentos fallidos", nota: correo ? `Correo usado: ${correo}` : null };
   }
   if (r.action === "transition") {
     const de = r.from_state ? nombreEstado(r.entity, r.from_state) : "—";

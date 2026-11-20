@@ -120,6 +120,7 @@ function editorDe(id) {
   if (!st.editores.has(id)) {
     const editor = crearEditor(id, contenidoDe(st.v, id), {
       cursos: st.cursos, perfiles: st.perfiles, sinPrerrequisitos: sinPrerrequisitos(st.v),
+      cursoCodigo: contenidoDe(st.v, "general").codigo || null,
       alCambiar: () => { refrescarEstado(); },
     });
     st.editores.set(id, { editor, base: JSON.stringify(editor.valor()), guardadoEn: null });
