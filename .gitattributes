@@ -1,0 +1,26 @@
+# Finales de línea: en el repositorio todo el texto va con LF, se edite en Windows, macOS o Linux.
+# Sin esto, Git en Windows marcaba archivos como modificados cuando solo cambiaba el fin de línea,
+# y un `git add -A` podía meter miles de líneas falsas en un commit.
+* text=auto eol=lf
+
+# Guiones de Windows: estos sí necesitan CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binarios: nunca se convierten.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.zip  binary

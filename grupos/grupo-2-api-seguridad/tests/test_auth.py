@@ -217,8 +217,10 @@ def test_bloqueo_despues_de_los_intentos_permitidos(client, db):
     for _ in range(config.LOGIN_MAX_INTENTOS - 1):
         assert client.post(URL, json=mala).status_code == 401
 
-    # el ultimo intento bloquea la cuenta para esta direccion
-    assert client.post(URL, json=mala).status_code == 429
+    # el ultimo intento bloquea la cuenta para esta direccion, y dice los minutos del bloqueo, no uno mas
+    r = client.post(URL, json=mala)
+    assert r.status_code == 429
+    assert f"{config.LOGIN_BLOQUEO_MINUTOS} minutos" in r.text
     # el bloqueo es de la direccion que fallo: la cuenta no queda marcada para todos
     assert _usuario(db).bloqueado_hasta is None
 
