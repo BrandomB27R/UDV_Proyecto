@@ -76,6 +76,7 @@ export function capacidades(a) {
     return: va.has("return"),
     approve: va.has("approve"),
     close: va.has("close"),
+    reopen: va.has("reopen"),
     editarEntrega: esDestinatario && EDITABLES.includes(a.status),
     comentar: !!a.viewer?.can_comment,
     esDestinatario,
@@ -244,24 +245,34 @@ export function pasoActual(a, yo, ctx = {}) {
       };
     }
     const creador = ctx.nombres?.creador || "coordinación";
+    // El título y la guía hablan de dos opciones solo si quien mira tiene las dos (p. ej. coordinación
+    // que regresó la entrega puede aprobarla por su rol de dirección, pero no devolverla).
+    const ambas = c.approve && c.return;
     return {
-      turno: "tuyo", eyebrow: "Te toca a ti", titulo: c.approve ? "Aprueba o devuelve la entrega" : "Revisa la entrega",
+      turno: "tuyo", eyebrow: "Te toca a ti",
+      titulo: ambas ? "Aprueba o devuelve la entrega" : c.approve ? "Aprueba la entrega" : "Revisa la entrega",
       resumen: "", requisitos: [], principal: null,
       decision: {
-        guia: c.approve ? "Revisa el texto y los archivos, que están abajo, y elige una de las dos opciones." : "Revisa el texto y los archivos, que están abajo.",
-        irA: "Ir a la entrega ↓",
+        // La entrega va en su propia tarjeta, arriba de esta decisión.
+        guia: ambas ? "Revisa la entrega, que está arriba, y elige una de las dos opciones." : "Revisa la entrega, que está arriba.",
         aprobar: c.approve ? { texto: `La entrega queda «Aprobada». Después ${creador} cierra la tarea.`, etiqueta: "Aprobar la entrega" } : null,
         devolver: c.return ? { texto: `La entrega vuelve a ${docente} con tu observación, para que la corrija y la entregue de nuevo.`, docente,
           placeholder: "Por ejemplo: falta la bibliografía actualizada de la unidad 3." } : null,
-        nota: c.approve ? null : "Aprobarla le corresponde a dirección.",
+        nota: !c.approve ? "Aprobarla le corresponde a dirección."
+          : !c.return ? `Devolverla al docente le corresponde a ${revisor}.` : null,
       },
     };
   }
   if (c.close) {
     const ap = ultimaVez(a, "approved");
+    // Con «reopen» (no viene en tareas de programa) la coordinación también puede regresarla a revisión.
     return {
-      turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Cierra la tarea",
-      resumen: "La entrega está aprobada. Al cerrarla queda terminada con su historial completo.",
+      turno: "tuyo", eyebrow: "Te toca a ti",
+      titulo: c.reopen ? "Cierra la tarea o regrésala a revisión" : "Cierra la tarea",
+      resumen: c.reopen
+        ? "La entrega está aprobada. Si está completa, ciérrala. Si encontraste algo que falta, regrésala a revisión con una observación."
+        : "La entrega está aprobada. Al cerrarla queda terminada con su historial completo.",
+      regresar: c.reopen,
       requisitos: [{ id: "aprobada", titulo: "Entrega aprobada", estado: ETQ.hecho, detalle: ap ? `${ap.actor || "Aprobada"} · ${fechaCorta(ap.at)}` : "Aprobada." }],
       principal: { accion: "close", etiqueta: "Cerrar la tarea", habilitada: true },
     };
@@ -274,7 +285,9 @@ export function pasoActual(a, yo, ctx = {}) {
     in_progress: [tu ? "Estás preparando tu entrega" : `${capital(docente)} está preparando su entrega`, ""],
     returned: [tu ? "Te devolvieron la entrega" : `Devuelta a ${docente} para corrección`, ""],
     submitted: [`En espera de revisión por ${revisor}`, tu ? "Recibirás un aviso cuando la revisen." : ""],
-    under_review: [ctx.nombres?.revisor ? `${capital(revisor)} está revisando la entrega` : `En revisión por ${revisor}`, tu ? "Recibirás un aviso con el resultado." : ""],
+    // Si coordinación la regresó a revisión, el docente lo sabe (sin acciones: decide quien revisa).
+    under_review: [ctx.nombres?.revisor ? `${capital(revisor)} está revisando la entrega` : `En revisión por ${revisor}`,
+      tu ? (regresoVigente(a) ? `Coordinación la regresó a revisión. ${capital(revisor)} la está revisando de nuevo.` : "Recibirás un aviso con el resultado.") : ""],
     approved: ["Entrega aprobada", `Falta que ${ctx.nombres?.creador || "la coordinación"} cierre la tarea.`],
     closed: ["Tarea cerrada", "No queda nada pendiente."],
     cancelled: ["Tarea cancelada", "La coordinación canceló esta tarea."],
@@ -291,8 +304,23 @@ const etiquetaEstadoPrograma = (s) => ESTADOS_PROGRAMA[s] || s || "sin estado";
 
 const capital = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
+/**
+ * ¿La transición regresó a revisión una entrega aprobada? (action "reopen"; /history la trae como
+ * from_status "approved" → to_status "under_review"). Se distingue de «tomó la entrega para revisión».
+ */
+export const esRegreso = (x) => !!x && (x.action === "reopen"
+  || ((x.new_status || x.to_status) === "under_review" && x.from_status === "approved"));
+
+/** La última transición, si fue un regreso a revisión (deja de serlo en cuanto hay otra después). */
+export function regresoVigente(a) {
+  const h = a.history || [];
+  const ultima = h[h.length - 1];
+  return a.status === "under_review" && esRegreso(ultima) ? ultima : null;
+}
+
 /** Frase del historial: "Diana Pérez inició la tarea". */
 export function fraseHistorial(item) {
+  if (esRegreso(item)) return `${item.actor || "Alguien"} regresó la entrega a revisión`;
   const verbo = {
     assigned: "publicó la tarea",
     in_progress: "inició la tarea",
