@@ -37,7 +37,7 @@ class TipoEvento:
     plantilla: str           # Mensaje que ve el destinatario
 
 
-# Los mismos siete nombres que acepta la tabla evento del G1
+# Los mismos ocho nombres que acepta la tabla evento del G1
 # (CHECK ck_evento_nombre) y la tabla del CONTRATO.md §3.
 EVENTOS: dict[str, TipoEvento] = {e.nombre: e for e in (
     TipoEvento("task.published", ("task_title", "due_date"), "Nueva tarea asignada",
@@ -50,6 +50,8 @@ EVENTOS: dict[str, TipoEvento] = {e.nombre: e for e in (
                "Tu entrega de «{task_title}» fue devuelta. Observación: {comment}"),
     TipoEvento("assignment.approved", ("task_title",), "Entrega aprobada",
                "La entrega de «{task_title}» fue aprobada."),
+    TipoEvento("assignment.reopened", ("task_title", "comment"), "Entrega regresada a revisión",
+               "Coordinación regresó a revisión la entrega de «{task_title}». Observación: {comment}"),
     TipoEvento("program.authorized", ("program_name",), "Programa autorizado",
                "Se autorizó una nueva versión del programa «{program_name}»."),
     TipoEvento("task.cancelled", ("task_title",), "Tarea cancelada",
@@ -336,6 +338,12 @@ class ServicioNotificaciones:
             revisor = (asignacion.revisor_id or (tarea.revisor_id if tarea else None)
                        or (tarea.creado_por if tarea else None))
             destinatarios = [revisor] if revisor else []
+        elif nombre == "assignment.reopened" and asignacion:
+            # Quien revisa (debe volver a decidir) y el docente (su entrega ya no está aprobada).
+            revisor = (asignacion.revisor_id or (tarea.revisor_id if tarea else None)
+                       or (tarea.creado_por if tarea else None))
+            destinatarios = [revisor, asignacion.usuario_id]
+            datos["comment"] = (payload.get("comentario") or "").strip() or "Sin comentario."
         elif nombre == "assignment.approved" and asignacion:
             # Docente y coordinador (quien creó la tarea).
             destinatarios = [asignacion.usuario_id] + ([tarea.creado_por] if tarea else [])

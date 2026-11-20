@@ -18,7 +18,7 @@ ROLES = (COORDINATOR, TEACHER, REVIEWER, AUTHORITY, SYSTEM, ADMIN)
 STATES = ("draft", "assigned", "in_progress", "submitted", "under_review",
           "returned", "approved", "closed", "cancelled")
 ACTIONS = ("publish", "start", "submit", "review", "return",
-           "resubmit", "approve", "close", "cancel")
+           "resubmit", "approve", "close", "cancel", "reopen")
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,10 @@ STANDARD = (
     _r("returned",     "resubmit", "submitted",    [TEACHER],               "assignee"),
     _r("under_review", "approve",  "approved",     [REVIEWER, AUTHORITY],   "task_reviewer", unscoped=[AUTHORITY]),
     _r("approved",     "close",    "closed",       [COORDINATOR, SYSTEM],   "task_coordinator", unscoped=[SYSTEM]),
+    # reopen (pedido del ingeniero, 20-nov): antes de cerrar, la coordinación dueña de la tarea puede
+    # regresar a revisión una entrega aprobada, con observación. El revisor vuelve a decidir con las
+    # reglas de siempre: aprobar de nuevo o devolver al docente. Una entrega cerrada ya no se regresa.
+    _r("approved",     "reopen",   "under_review", [COORDINATOR],           "task_coordinator", comment=True),
     _r("draft",        "cancel",   "cancelled",    [COORDINATOR],           "task_coordinator"),
     _r("assigned",     "cancel",   "cancelled",    [COORDINATOR],           "task_coordinator"),
 )

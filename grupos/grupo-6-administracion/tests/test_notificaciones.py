@@ -38,6 +38,7 @@ def detalle(error: HTTPException) -> set[str]:
     ("assignment.submitted", [ID_ADMIN], "lista para revisión"),
     ("assignment.returned", [ID_DOCENTE], "Observación: Falta la bibliografía."),
     ("assignment.approved", [ID_DOCENTE, ID_ADMIN], "aprobada"),
+    ("assignment.reopened", [ID_DOCENTE, ID_ADMIN], "regresó a revisión"),
     ("program.authorized", [ID_DOCENTE, ID_ADMIN], "Programación Web"),
     ("task.cancelled", [ID_DOCENTE, ID_ADMIN], "cancelada"),
 ])
@@ -57,9 +58,9 @@ def test_cada_evento_notifica_a_sus_destinatarios(notificaciones, admin, docente
             assert recibidas == []
 
 
-def test_estan_los_siete_eventos_oficiales():
+def test_estan_los_ocho_eventos_oficiales():
     assert set(EVENTOS) == {"task.published", "assignment.due_soon", "assignment.submitted",
-                            "assignment.returned", "assignment.approved",
+                            "assignment.returned", "assignment.approved", "assignment.reopened",
                             "program.authorized", "task.cancelled"}
 
 

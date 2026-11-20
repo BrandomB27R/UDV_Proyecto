@@ -346,6 +346,27 @@ def _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row=None):
                             "program_status": programa["estado_codigo"]})
 
 
+_ES_DE_PROGRAMA = ("Esta tarea se entrega con el programa del curso y no se regresa a revisión:"
+                   " el programa aprobado sigue su propio camino hasta la autorización.")
+
+
+def _exigir_que_no_sea_de_programa(conn, assignment_id, row):
+    """409 al regresar a revisión una tarea que se entrega con un programa de curso.
+
+    La tarea de programa se aprueba cuando dirección autoriza el programa, y una versión
+    autorizada ya no cambia: regresarla dejaría a la tarea y a su programa contando historias
+    distintas. Mientras no se defina qué pasa con esa versión, el servidor no lo permite.
+    """
+    if row["delivery_mode"] == "programa" or row["task_program_id"] is not None:
+        raise Conflict(_ES_DE_PROGRAMA, code="PROGRAM_TASK")
+    programa = conn.execute(
+        "SELECT id FROM programa_version WHERE tarea_destinatario_origen_id = ? LIMIT 1",
+        (assignment_id,)).fetchone()
+    if programa is not None:
+        raise Conflict(_ES_DE_PROGRAMA, code="PROGRAM_TASK",
+                       details={"program_version_id": programa["id"]})
+
+
 def perform(conn, assignment_id, action, actor, comment=None):
     """Ejecuta una acción sobre una asignación. Devuelve la asignación actualizada."""
     if action not in ACTIONS:
@@ -384,6 +405,8 @@ def perform(conn, assignment_id, action, actor, comment=None):
                                    details={"field": "comment"})
         if mysql:
             _exigir_acuerdo_con_el_programa(conn, assignment_id, action, row)   # 409
+            if action == "reopen":
+                _exigir_que_no_sea_de_programa(conn, assignment_id, row)        # 409
 
         entrega_id = None
         if mysql and action in ENTREGA_ACTIONS:

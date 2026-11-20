@@ -327,6 +327,7 @@ def test_direccion_puede_autorizar_un_programa_aprobado(c, s):
     assert c.put("/api/v1/program-versions/2/sections/evaluacion",
                  json={"contenido": {"parcial": 40, "final": 60}},
                  headers=s["docente1"]).status_code == 200
+    _completar(c, s["docente1"], 2)
     r = c.post("/api/v1/program-versions/2/submit", json={}, headers=s["docente1"])
     assert r.status_code == 200, r.text
     assert c.post("/api/v1/program-versions/2/review", json={}, headers=s["revisor"]).status_code == 200
@@ -359,6 +360,18 @@ def test_login_fallido_no_revela_si_el_correo_existe(c):
 
 
 # ------------------------------------------- 7. reglas del workflow (G3)
+def _completar(c, cabeceras, version):
+    """Deja listo para enviar el borrador que nace de la versión sembrada: solo le falta Metodología.
+
+    Desde la rama 27 el servidor no acepta enviar a revisión un programa con secciones pendientes.
+    `version` es el id o la ruta /api/v1/program-versions/{id}.
+    """
+    ruta = version if isinstance(version, str) else f"/api/v1/program-versions/{version}"
+    r = c.put(f"{ruta}/sections/metodologia", headers=cabeceras,
+              json={"contenido": {"texto": "Clases prácticas y un proyecto integrador."}})
+    assert r.status_code == 200, r.text
+
+
 def _accion(c, h, a, nombre, comentario=None):
     return c.post(f"/api/v1/assignments/{a}/{nombre}", json={"comment": comentario}, headers=h)
 
@@ -502,7 +515,7 @@ def test_viewer_actions_cruza_el_estado_con_quien_mira(c, s):
     assert ver("direccion")["viewer_actions"] == ["approve"]        # la autoridad aprueba cualquiera
     assert c.post(f"/api/v1/assignments/{a}/approve", headers=s["coordinacion"], json={}).status_code == 200
     d = ver("coordinacion")
-    assert d["allowed_actions"] == ["close"] and d["viewer_actions"] == ["close"]
+    assert d["allowed_actions"] == ["close", "reopen"] and d["viewer_actions"] == ["close", "reopen"]
     assert ver("docente1")["viewer_actions"] == []
     assert c.post(f"/api/v1/assignments/{a}/close", headers=s["coordinacion"], json={}).status_code == 200
     assert ver("coordinacion")["history"][-1]["action"] == "close"
@@ -713,6 +726,7 @@ def test_la_tarea_sin_curso_no_abre_borrador_y_el_primer_programa_se_abre_en_bla
 def test_viewer_actions_del_programa_sigue_el_flujo(c, s):
     a = _asignar_programa(c, s, course_id=1, period_id=2)
     vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente2"]).json()["id"]
+    _completar(c, s["docente2"], vid)
 
     def puede(quien):
         return c.get(f"/api/v1/program-versions/{vid}", headers=s[quien]).json()["viewer_actions"]
@@ -755,6 +769,7 @@ def test_solo_el_docente_responsable_envia_el_programa(c, s):
     # Coordinación ya no lo envía en nombre del docente: lo elabora y lo envía su responsable.
     es_error_comun(c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["coordinacion"]), 403)
     es_error_comun(c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["docente2"]), 403)
+    _completar(c, s["docente1"], vid)
     assert c.post(f"/api/v1/program-versions/{vid}/submit", json={}, headers=s["docente1"]).status_code == 200
     assert c.post(f"/api/v1/program-versions/{vid}/review", json={}, headers=s["coordinacion"]).status_code == 200
     acciones = c.get(f"/api/v1/program-versions/{vid}", headers=s["coordinacion"]).json()["viewer_actions"]
@@ -970,6 +985,7 @@ def test_programas_por_autorizar_dicen_quien_elaboro_y_quien_aprobo(c, s):
     vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
     # El borrador nuevo no hereda al revisor de la versión de origen.
     assert not c.get(f"/api/v1/program-versions/{vid}", headers=s["docente1"]).json()["secciones"]["responsables"]["contenido"].get("revisor")
+    _completar(c, s["docente1"], vid)
     for accion, quien in (("submit", "docente1"), ("review", "coordinacion"), ("approve", "coordinacion")):
         assert c.post(f"/api/v1/program-versions/{vid}/{accion}", json={}, headers=s[quien]).status_code == 200, accion
     fila = next(f for f in c.get("/api/v1/course-programs?estado=approved&per_page=100", headers=s["direccion"]).json()["data"]
@@ -1190,6 +1206,7 @@ def test_la_tarea_de_un_programa_no_se_adelanta_ni_contradice_al_programa(c, s):
 
     # Programa en borrador: la tarea no se entrega sola.
     choca(c.post(f"{A}/submit", headers=d, json={}))
+    _completar(c, d, V)
     assert c.post(f"{V}/submit", headers=d, json={}).status_code == 200
     assert c.post(f"{A}/submit", headers=d, json={}).status_code == 200
     assert estados() == ("submitted", "submitted")
@@ -1310,6 +1327,7 @@ def test_sin_prerrequisitos_se_guarda_en_el_servidor_y_se_copia_a_la_version_sig
 
     # Hasta autorizado; la versión autorizada ya no cambia.
     A = f"/api/v1/assignments/{a}"
+    _completar(c, d, V)
     for ruta, quien in ((f"{V}/submit", d), (f"{A}/submit", d), (f"{V}/review", co), (f"{A}/review", co),
                         (f"{V}/approve", co), (f"{V}/authorize", di)):
         r = c.post(ruta, headers=quien, json={})
@@ -1393,6 +1411,98 @@ def test_un_curso_no_es_prerrequisito_de_si_mismo_ni_va_repetido(c, s):
     assert c.get(f"/api/v1/program-versions/{vid}", headers=d).json()["secciones"]["prerrequisitos"]["contenido"] == antes
     # y una lista correcta se guarda
     assert c.put(P, headers=d, json={"contenido": [{"curso_id": 4}, {"curso_id": 3, "tipo": "recomendado"}]}).status_code == 200
+
+
+# --------------------------------- 14. rama 27: regresar a revisión y programa completo
+
+def _hasta_aprobada(c, s, tipo=4):
+    """Tarea de docente1 con revisor designado, llevada hasta «Aprobada»."""
+    titulo, asign = publicar(c, s, tipo=tipo, revisor=REVISOR)
+    a = asign[DOC1]
+    for accion, quien in (("start", "docente1"), ("submit", "docente1"), ("review", "revisor"), ("approve", "revisor")):
+        assert _accion(c, s[quien], a, accion).status_code == 200, accion
+    return titulo, a
+
+
+def test_coordinacion_regresa_a_revision_una_entrega_aprobada(c, s):
+    """Pedido del ingeniero: antes de cerrar, coordinación puede regresar la entrega a revisión."""
+    titulo, a = _hasta_aprobada(c, s)
+    A = f"/api/v1/assignments/{a}"
+
+    def estado():
+        return c.get(A, headers=s["coordinacion"]).json()["status"]
+
+    # Sin observación no pasa; tampoco quien no es la coordinación de la tarea.
+    es_error_comun(_accion(c, s["coordinacion"], a, "reopen"), 422)
+    es_error_comun(_accion(c, s["coordinacion"], a, "reopen", "   "), 422)
+    for quien in ("revisor", "docente1", "direccion", "auditoria"):
+        es_error_comun(_accion(c, s[quien], a, "reopen", "No me corresponde"), 403)
+    assert estado() == "approved"
+
+    r = _accion(c, s["coordinacion"], a, "reopen", "Falta la firma en el anexo 2.")
+    assert r.status_code == 200 and r.json()["status"] == "under_review", r.text
+    # Queda en el historial con su observación, y avisa a quien revisa y al docente.
+    ultima = c.get(f"{A}/history", headers=s["coordinacion"]).json()
+    ultima = _items(ultima)[-1]
+    assert (ultima["from_status"], ultima["to_status"], ultima["comment"]) == ("approved", "under_review", "Falta la firma en el anexo 2.")
+    for quien in ("revisor", "docente1"):
+        avisos = c.get("/api/v1/notifications?per_page=100", headers=s[quien]).json()["data"]
+        mio = [n for n in avisos if n["event"] == "assignment.reopened" and n["assignment_id"] == a]
+        assert len(mio) == 1 and "Falta la firma en el anexo 2." in mio[0]["message"], quien
+    # Vuelve a la cola de quien revisa, que decide con lo de siempre.
+    cola = c.get("/api/v1/review-queue?per_page=100", headers=s["revisor"]).json()["data"]
+    assert a in {f["id"] for f in cola}
+    assert set(c.get(A, headers=s["revisor"]).json()["viewer_actions"]) == {"return", "approve"}
+    assert _accion(c, s["revisor"], a, "return", "Agrega la firma y vuelve a enviar.").status_code == 200
+    assert _accion(c, s["docente1"], a, "resubmit").status_code == 200
+    for accion in ("review", "approve"):
+        assert _accion(c, s["revisor"], a, accion).status_code == 200
+    # Aprobada otra vez: se puede regresar de nuevo o cerrar. Cerrada ya no se regresa.
+    assert _accion(c, s["coordinacion"], a, "close").status_code == 200
+    es_error_comun(_accion(c, s["coordinacion"], a, "reopen", "Ya estaba cerrada"), 409)
+    assert estado() == "closed"
+
+
+def test_una_tarea_de_programa_no_se_regresa_a_revision(c, s):
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    V, A = f"/api/v1/program-versions/{vid}", f"/api/v1/assignments/{a}"
+    _completar(c, s["docente1"], V)
+    c.post(f"{A}/start", headers=s["docente1"], json={})
+    for ruta, quien in ((f"{V}/submit", "docente1"), (f"{A}/submit", "docente1"), (f"{V}/review", "revisor"),
+                        (f"{A}/review", "revisor"), (f"{V}/approve", "revisor"), (f"{V}/authorize", "direccion"),
+                        (f"{A}/approve", "revisor")):
+        r = c.post(ruta, headers=s[quien], json={})
+        assert r.status_code == 200, (ruta, r.text)
+    d = c.get(A, headers=s["coordinacion"]).json()
+    assert d["status"] == "approved" and d["allowed_actions"] == ["close"] and d["viewer_actions"] == ["close"]
+    r = _accion(c, s["coordinacion"], a, "reopen", "Quiero regresarla")
+    es_error_comun(r, 409)
+    assert r.json()["error"]["code"] == "PROGRAM_TASK"
+    assert c.get(A, headers=s["coordinacion"]).json()["status"] == "approved"
+
+
+def test_un_programa_con_secciones_pendientes_no_se_envia_a_revision(c, s):
+    """Lo que Vinci impide deshabilitando el botón, el servidor también lo rechaza."""
+    a = _asignar_programa(c, s, docente=DOC1, course_id=1, period_id=2)
+    vid = c.post(f"/api/v1/program-versions/for-assignment/{a}", headers=s["docente1"]).json()["id"]
+    V = f"/api/v1/program-versions/{vid}"
+    d = s["docente1"]
+    # El borrador hereda lo que tenga la versión anterior: aquí se deja Metodología en blanco.
+    assert c.put(f"{V}/sections/metodologia", headers=d, json={"contenido": {"texto": "   "}}).status_code == 200
+    r = c.post(f"{V}/submit", headers=d, json={})
+    es_error_comun(r, 422)
+    assert r.json()["error"]["details"] == {"secciones.metodologia": "Falta el texto."}
+    # Dejar otra sección vacía también cuenta; el estado no cambió.
+    assert c.put(f"{V}/sections/bibliografia", headers=d, json={"contenido": []}).status_code == 200
+    r = c.post(f"{V}/submit", headers=d, json={})
+    es_error_comun(r, 422)
+    assert set(r.json()["error"]["details"]) == {"secciones.metodologia", "secciones.bibliografia"}
+    assert c.get(V, headers=d).json()["estado"] == "draft"
+    assert c.put(f"{V}/sections/bibliografia", headers=d,
+                 json={"contenido": [{"tipo": "basica", "referencia": "Duckett, J. (2014). HTML and CSS. Wiley."}]}).status_code == 200
+    _completar(c, d, V)
+    assert c.post(f"{V}/submit", headers=d, json={}).status_code == 200
 
 
 def test_fallar_la_clave_de_otro_no_lo_deja_fuera(c, monkeypatch):

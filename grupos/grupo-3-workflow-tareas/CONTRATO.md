@@ -40,6 +40,7 @@ Todas las rutas llevan el prefijo `/api/v1` (CONTRATO_COMUN.md §1).
 | POST | /tasks/{id}/cancel | Cancelar según reglas |
 | GET | /tasks/{id}/assignments | Monitorear destinatarios (individual y agregado) |
 | POST | /assignments/{id}/close | Cerrar una asignación aprobada |
+| POST | /assignments/{id}/reopen | Regresar a revisión una asignación aprobada (exige `comment`) |
 | GET | /assignments/{id}/history | Historial de transiciones |
 
 Transiciones válidas (la máquina de estados es LEY — el Grupo 4 pinta lo que
@@ -55,6 +56,7 @@ esta tabla permite, nunca más):
 | returned | resubmit | submitted | Docente destinatario | G4 `/assignments/{id}/resubmit` |
 | under_review | approve | approved | Revisor o autoridad | G4 `/assignments/{id}/approve` |
 | approved | close | closed | Coordinador o sistema | G3 `/assignments/{id}/close` |
+| approved | reopen | under_review | Coordinador de la tarea, con observación | G3 `/assignments/{id}/reopen` |
 | draft/assigned | cancel | cancelled | Coordinador autorizado | G3 `/tasks/{id}/cancel` |
 
 **Quién hace qué.** El G3 es dueño del **servicio de transiciones** (en
@@ -124,3 +126,4 @@ asignaciones cuando se cancela una tarea publicada.
 | 2026-11-18 | `GET /tasks?include=progress` agrega a cada tarea `progress: {total, done, to_review, overdue_pending, by_status, assignee_name}` (una sola consulta para toda la página). Sin `include` la respuesta no cambia | La lista de tareas de Vinci pedía las asignaciones de cada tarea por separado | PM (18-nov), hecho por el PM |
 | 2026-11-18 | `progress` de `GET /tasks?include=progress` agrega `assignee_names`: los nombres de todos los destinatarios (sin cancelados), en orden alfabético | Buscar una tarea por docente solo encontraba las de un destinatario | PM (18-nov), hecho por el PM |
 | 2026-11-18 | `GET /tasks`: una tarea ya publicada que tiene `eliminado_en` (baja administrativa, por ejemplo datos de prueba retirados) no se lista en ninguna pestaña. Un borrador cancelado desde la aplicación sigue saliendo en «Canceladas» | Las tareas de prueba retiradas de Railway seguían apareciendo como canceladas | PM (18-nov), hecho por el PM |
+| 2026-11-20 | **Nuevo** `POST /assignments/{id}/reopen` con `{"comment": "..."}`: la coordinación dueña de la tarea regresa a revisión una entrega aprobada (`approved` → `under_review`). `422` sin observación, `403` si no es esa coordinación, `409 INVALID_TRANSITION` desde otro estado (una cerrada ya no se regresa) y `409 PROGRAM_TASK` si la tarea se entrega con un programa de curso. Quien revisa decide después con `approve` o `return` | Pedido del ingeniero | PM (20-nov) |
