@@ -66,6 +66,7 @@ _ACCION_POR_TRANSICION = {
     ("under_review", "returned"): "return",
     ("under_review", "approved"): "approve",
     ("approved", "closed"): "close",
+    ("approved", "under_review"): "reopen",
     (None, "assigned"): "publish",
 }
 

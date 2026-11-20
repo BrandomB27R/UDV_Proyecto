@@ -185,6 +185,7 @@ cross join (
   union all select 'returned',     'submitted',    'resubmit'
   union all select 'under_review', 'approved',     'approve'
   union all select 'approved',     'closed',       'close'
+  union all select 'approved',     'under_review', 'reopen'
   union all select 'assigned',     'cancelled',    'cancel'
 ) t;
 
@@ -192,7 +193,7 @@ insert into workflow_detalle_rol (workflow_detalle_id, rol_id)
 select wd.id, r.id
 from workflow_detalle wd
 join rol r on r.codigo = case
-    when wd.accion in ('publish', 'close', 'cancel')           then 'coordinator'
+    when wd.accion in ('publish', 'close', 'cancel', 'reopen') then 'coordinator'
     when wd.accion in ('start', 'submit', 'resubmit')          then 'teacher'
     when wd.accion in ('review', 'return', 'approve')          then 'reviewer'
   end;

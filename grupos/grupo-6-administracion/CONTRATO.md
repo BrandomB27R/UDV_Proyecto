@@ -54,6 +54,7 @@ el sistema (CONTRATO_COMUN.md §3):
 | assignment.submitted | G3 | Revisor | Entrega disponible para revisión |
 | assignment.returned | G3 | Docente | Entrega devuelta con observación |
 | assignment.approved | G3 | Docente y coordinador | Entrega aprobada |
+| assignment.reopened | G3 | Revisor y docente | Entrega regresada a revisión por coordinación, con su observación |
 | program.authorized | G5 | Docente y coordinación | Nueva versión de programa autorizada |
 | task.cancelled | G3 | Destinatarios | Tarea cancelada |
 

@@ -248,9 +248,18 @@ def detalle_asignacion(assignment_id: int, usuario: Usuario = Depends(obtener_us
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "ver")
     permitidas = acciones_permitidas(a)
+    if _se_entrega_con_programa(a):
+        # G3 responde 409 PROGRAM_TASK: la tarea de programa no se regresa a revisión.
+        permitidas = [accion for accion in permitidas if accion != "reopen"]
     return {**a, "allowed_actions": permitidas,
             "viewer": _papel_del_usuario(a, usuario),
             "viewer_actions": _acciones_de_quien_mira(a, usuario, permitidas)}
+
+
+def _se_entrega_con_programa(asignacion: dict) -> bool:
+    """La tarea se entrega con un programa de curso (por su tipo o porque ya tiene uno)."""
+    return bool((asignacion.get("delivery") or {}).get("mode") == "programa"
+                or asignacion.get("program_version_id") or asignacion.get("program_version"))
 
 
 def _acciones_de_quien_mira(asignacion: dict, usuario: Usuario, permitidas: List[str]) -> List[str]:
@@ -272,7 +281,8 @@ def _acciones_de_quien_mira(asignacion: dict, usuario: Usuario, permitidas: List
     aprueba = "authority" in roles or ("reviewer" in roles and revisor == yo)
     cierra = "coordinator" in roles and creador == yo
     puede = {"start": es_docente, "submit": es_docente, "resubmit": es_docente,
-             "review": revisa, "return": revisa, "approve": aprueba, "close": cierra}
+             "review": revisa, "return": revisa, "approve": aprueba, "close": cierra,
+             "reopen": cierra}
     return [accion for accion in permitidas if puede.get(accion, False)]
 
 

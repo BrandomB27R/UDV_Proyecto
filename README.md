@@ -234,7 +234,7 @@ Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 ### Base de datos, entorno local y despliegue
 
 - **Una sola base:** `db_udv` en MySQL 8.4, con el esquema del G1 (versión
-  1.2.5). Ningún grupo crea, borra ni altera tablas desde su código (nada de
+  1.2.6). Ningún grupo crea, borra ni altera tablas desde su código (nada de
   `Base.metadata.create_all`); un cambio de esquema se le pide al G1, que lo
   entrega como migración numerada.
 - **Conexión:** siempre por la variable `DATABASE_URL`

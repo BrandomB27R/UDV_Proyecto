@@ -163,6 +163,11 @@ BEGIN
   IF NEW.estado_nuevo = 'returned' AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: una devolucion exige una observacion (422)';
   END IF;
+
+  IF NEW.estado_anterior = 'approved' AND NEW.estado_nuevo = 'under_review'
+     AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: regresar a revision exige una observacion (422)';
+  END IF;
 END$$
 
 -- Programas de curso
@@ -539,10 +544,11 @@ END$$
 CREATE TRIGGER trg_tt_evento AFTER INSERT ON tarea_transicion FOR EACH ROW
 BEGIN
   DECLARE v_nombre VARCHAR(40) DEFAULT NULL;
-  SET v_nombre = CASE NEW.estado_nuevo
-                   WHEN 'submitted' THEN 'assignment.submitted'
-                   WHEN 'returned'  THEN 'assignment.returned'
-                   WHEN 'approved'  THEN 'assignment.approved'
+  SET v_nombre = CASE
+                   WHEN NEW.estado_nuevo = 'submitted' THEN 'assignment.submitted'
+                   WHEN NEW.estado_nuevo = 'returned'  THEN 'assignment.returned'
+                   WHEN NEW.estado_nuevo = 'approved'  THEN 'assignment.approved'
+                   WHEN NEW.estado_nuevo = 'under_review' AND NEW.estado_anterior = 'approved' THEN 'assignment.reopened'
                  END;
   IF v_nombre IS NOT NULL THEN
     INSERT INTO evento (nombre, clave_unica, tarea_id, tarea_destinatario_id, actor_id, payload)

@@ -71,6 +71,54 @@ class TransitionTests(Base):
             self.assertTrue(h["actor_id"] and h["created_at"] and h["from_status"] and h["to_status"])
         self.assertEqual(hist[4]["comment"], "Falta bibliografía")
 
+    # ── reopen: coordinación regresa a revisión una entrega aprobada (pedido del ingeniero) ──
+    def _approved(self):
+        aid = self.assignment_of(self.make_task(publish=True))
+        for a, w in (("start", self.t[0]), ("submit", self.t[0]), ("review", "reviewer"),
+                     ("approve", "reviewer")):
+            self.do(aid, a, w)
+        return aid
+
+    def test_reopen_sends_an_approved_delivery_back_to_review_and_on_to_the_teacher(self):
+        aid = self._approved()
+        self.assertEqual(self.do(aid, "reopen", "coord", "Falta la firma del anexo")["status"],
+                         "under_review")
+        hist = tasks.get_history(self.conn, self.actor("coord"), aid)
+        self.assertEqual((hist[-1]["action"], hist[-1]["from_status"], hist[-1]["to_status"],
+                          hist[-1]["comment"]),
+                         ("reopen", "approved", "under_review", "Falta la firma del anexo"))
+        # Quien revisa decide con las reglas de siempre: devolver al docente...
+        self.assertEqual(self.do(aid, "return", "reviewer", "Agrega la firma")["status"], "returned")
+        self.assertEqual(self.do(aid, "resubmit", self.t[0])["status"], "submitted")
+        # ...o aprobar de nuevo, y entonces sí se cierra.
+        self.do(aid, "review", "reviewer")
+        self.assertEqual(self.do(aid, "approve", "reviewer")["status"], "approved")
+        self.assertEqual(self.do(aid, "close", "coord")["status"], "closed")
+
+    def test_reopen_without_comment_is_422_and_changes_nothing(self):
+        aid = self._approved()
+        before = self.snapshot()
+        for bad in (None, "", "   "):
+            with self.assertRaises(ValidationFailed):
+                self.do(aid, "reopen", "coord", bad)
+        self.assertEqual(before, self.snapshot())
+
+    def test_reopen_is_only_for_the_coordinator_of_the_task(self):
+        aid = self._approved()
+        before = self.snapshot()
+        for who in ("reviewer", "authority", self.t[0], "coord2"):
+            with self.subTest(who=who), self.assertRaises(Forbidden):
+                self.do(aid, "reopen", who, "No me corresponde")
+        self.assertEqual(before, self.snapshot())
+
+    def test_a_closed_delivery_is_not_reopened(self):
+        aid = self._approved()
+        self.do(aid, "close", "coord")
+        before = self.snapshot()
+        with self.assertRaises(Conflict):
+            self.do(aid, "reopen", "coord", "Ya estaba cerrada")
+        self.assertEqual(before, self.snapshot())
+
     def test_return_without_comment_is_422_and_changes_nothing(self):
         aid = self.assignment_of(self.make_task(publish=True))
         for a, w in (("start", self.t[0]), ("submit", self.t[0]), ("review", "reviewer")):
@@ -86,7 +134,8 @@ class TransitionTests(Base):
         # (Si el usuario no tuviera permiso, respondería 403 antes; ver el test siguiente.)
         permitted = {"publish": "coord", "start": self.t[0], "submit": self.t[0],
                      "review": "reviewer", "return": "reviewer", "resubmit": self.t[0],
-                     "approve": "authority", "close": "system", "cancel": "coord"}
+                     "approve": "authority", "close": "system", "cancel": "coord",
+                     "reopen": "coord"}
         self.assertEqual(set(permitted), set(ACTIONS))
         for flow, type_code in (("standard", "update_program"), ("short", "confirm_activity")):
             aid = self.assignment_of(self.make_task(type_code, publish=True))
@@ -101,7 +150,7 @@ class TransitionTests(Base):
                                           (state, aid))
                         before = self.snapshot()
                         with self.assertRaises(Conflict):
-                            self.do(aid, action, permitted[action])
+                            self.do(aid, action, permitted[action], "Observación de prueba")
                         self.assertEqual(before, self.snapshot())
 
     def test_forbidden_takes_precedence_over_conflict(self):

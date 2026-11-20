@@ -27,8 +27,9 @@ from .matrix import SHORT, STANDARD
 
 PREFIX = "/api/v1"
 
-# Las 6 acciones de asignación que ahora son de G3 (antes las hacía G4).
-ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve", "close")
+# Las acciones de asignación que son de G3 (antes las hacía G4). `reopen` regresa a revisión una
+# entrega aprobada y exige {"comment": "..."}.
+ASSIGNMENT_ACTIONS = ("start", "submit", "resubmit", "review", "return", "approve", "close", "reopen")
 
 
 def _codigo_mayusculas(body):

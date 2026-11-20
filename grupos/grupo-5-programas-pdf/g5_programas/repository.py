@@ -1191,25 +1191,72 @@ def update_version(session: Session, actor: Actor, version_id: int, body: dict, 
 
 
 # Reglas de envío y cambios de estado de las versiones.
+def _texto(value) -> str:
+    return str(value or "").strip()
+
+
+def _secciones_pendientes(sections: dict) -> dict:
+    """Secciones del programa que todavía no están completas, con lo que le falta a cada una.
+
+    Son las mismas reglas con las que Vinci marca cada sección como «Lista» o «Falta»
+    (portal/js/programa/secciones.js). La pantalla deshabilita el botón de enviar; aquí se
+    exige en el servidor, para que tampoco se pueda enviar por la API un programa a medias.
+    La evaluación (que sume 100) se revisa aparte, en _validate_for_submit.
+    """
+    def contenido(key, vacio):
+        value = (sections.get(key) or {}).get("contenido")
+        return value if isinstance(value, type(vacio)) else vacio
+
+    general = contenido("general", {})
+    try:
+        horas = float(general.get("horas") or 0)
+    except (TypeError, ValueError):
+        horas = 0
+    pendientes = {}
+    if not _texto(general.get("asignatura")) or horas <= 0:
+        pendientes["general"] = "Falta el nombre de la asignatura o las horas por semana."
+    prerrequisitos = sections.get("prerrequisitos") or {}
+    if not contenido("prerrequisitos", []) and prerrequisitos.get("sin_prerrequisitos") is not True:
+        pendientes["prerrequisitos"] = "Agrega un curso o marca «Sin prerrequisitos»."
+    if not _texto(contenido("descripcion", {}).get("texto")):
+        pendientes["descripcion"] = "Falta el texto."
+    if not any(_texto(item.get("descripcion")) for item in contenido("competencias", [])):
+        pendientes["competencias"] = "Agrega al menos una."
+    if not any((item.get("perfil_egreso_id") or item.get("codigo")) and _texto(item.get("contribucion"))
+               for item in contenido("perfil", [])):
+        pendientes["perfil"] = "Agrega al menos un rasgo con su contribución."
+    if not _texto(contenido("metodologia", {}).get("texto")):
+        pendientes["metodologia"] = "Falta el texto."
+    if not any(_texto(unit.get("titulo")) and any(_texto(item.get("item")) for item in unit.get("items") or [])
+               for unit in contenido("contenidos", [])):
+        pendientes["contenidos"] = "Agrega al menos una unidad con un tema."
+    if not any(_texto(item.get("referencia")) for item in contenido("bibliografia", [])):
+        pendientes["bibliografia"] = "Agrega al menos una."
+    return pendientes
+
+
 def _validate_for_submit(session: Session, version_id: int, row: dict):
     """Revisa que el programa esté completo antes de enviarlo a revisión.
 
-    Por ejemplo, debe tener nombre y período, y las evaluaciones deben sumar 100.
+    Debe tener nombre y período, las evaluaciones deben sumar 100 y las demás
+    secciones deben estar completas, con las mismas reglas que muestra la pantalla.
     """
-    missing = []
+    missing = {}
     if not row.get("nombre"):
-        missing.append("nombre")
+        missing["nombre"] = "Campo obligatorio o inválido."
     if not row.get("periodo_id"):
-        missing.append("periodo_id")
+        missing["periodo_id"] = "Campo obligatorio o inválido."
     evaluations = _all(
         session,
         "SELECT ponderacion FROM programa_evaluacion WHERE programa_version_id = :id",
         {"id": version_id},
     )
     if sum(Decimal(str(item["ponderacion"])) for item in evaluations) != Decimal("100"):
-        missing.append("evaluacion.ponderacion (debe sumar 100)")
+        missing["evaluacion.ponderacion (debe sumar 100)"] = "Campo obligatorio o inválido."
+    for section, detail in _secciones_pendientes(_load_sections(session, row)).items():
+        missing[f"secciones.{section}"] = detail
     if missing:
-        raise ApiError(422, "VALIDATION_ERROR", "Completa los campos requeridos antes de enviar.", {field: "Campo obligatorio o inválido." for field in missing})
+        raise ApiError(422, "VALIDATION_ERROR", "Completa los campos requeridos antes de enviar.", missing)
 
 
 def transition(

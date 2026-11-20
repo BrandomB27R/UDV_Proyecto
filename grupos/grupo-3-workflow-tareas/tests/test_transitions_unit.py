@@ -88,8 +88,8 @@ def test_matrix_rules_are_consistent():
         assert rule.unscoped_roles <= rule.roles
 
 
-def test_matrix_return_is_the_only_rule_requiring_comment():
-    assert [r.action for r in STANDARD if r.comment_required] == ["return"]
+def test_matrix_return_and_reopen_are_the_rules_requiring_comment():
+    assert [r.action for r in STANDARD if r.comment_required] == ["return", "reopen"]
 
 
 def test_matrix_short_flow_skips_review_steps():
