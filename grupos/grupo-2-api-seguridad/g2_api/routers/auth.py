@@ -88,7 +88,9 @@ def _par_bloqueado_hasta(db: Session, usuario_id: int, ip: str, ahora: datetime)
 
 # arma el error 429 con los minutos que faltan
 def _cuenta_bloqueada(bloqueado_hasta: datetime, ahora: datetime):
-    minutos = max(1, math.ceil((bloqueado_hasta - ahora).total_seconds() / 60))
+    # Nunca más que la duración del bloqueo: el intento que lo activa se anota un instante después
+    # de leer la hora, y el redondeo hacia arriba decía «16 minutos» para un bloqueo de 15.
+    minutos = min(config.LOGIN_BLOQUEO_MINUTOS, max(1, math.ceil((bloqueado_hasta - ahora).total_seconds() / 60)))
     return HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail=f"Cuenta bloqueada por intentos fallidos. Intenta de nuevo en {minutos} minutos.",
