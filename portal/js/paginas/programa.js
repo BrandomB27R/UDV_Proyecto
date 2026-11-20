@@ -310,6 +310,8 @@ async function ejecutar(accion, zonaError) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) {
     st.ocupado = false;
+    // El botón se deshabilitó al empezar a enviar: vuelve a estar disponible (p. ej. tras un 422 del servidor).
+    if (entregar) refrescarEstado();
     // 409: por ejemplo, quien elaboró la versión no puede aprobarla. Se muestra el mensaje tal cual.
     poner(zonaError, mensaje("error", e.message));
   }

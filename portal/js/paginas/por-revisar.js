@@ -143,9 +143,12 @@ function pintarTabla() {
   const desde = (st.pagina - 1) * POR_PAGINA;
   const filas = v.slice(desde, desde + POR_PAGINA);
   const n = cerrables.length;
+  // Si alguna se puede regresar a revisión (no las de programa), el contador lo dice.
+  const regresables = cerrables.some(puedeRegresar);
   const cuenta = st.buscar.trim()
     ? `${plural(v.length, "tarea coincide", "tareas coinciden")} con la búsqueda, de ${n} por cerrar.`
-    : `${n === 1 ? "1 tarea aprobada espera" : `${n} tareas aprobadas esperan`} que ${n === 1 ? "la cierres" : "las cierres"}.`;
+    : `${n === 1 ? "1 tarea aprobada espera" : `${n} tareas aprobadas esperan`} que ${n === 1 ? "la cierres" : "las cierres"}`
+      + `${regresables ? ` o ${n === 1 ? "la regreses" : "las regreses"} a revisión` : ""}.`;
   poner(zonaTabla,
     h("p", { class: "pr-cuenta", role: "status" }, cuenta),
     filas.length ? h("table", { class: "pn-tabla ini-tabla" },
@@ -168,14 +171,19 @@ function filaCerrar(x) {
   const puede = (x.viewer_actions || []).includes("close");
   const boton = puede ? h("button", { type: "button", class: "v-btn v-btn--chico", "data-cerrar": x.id,
     "aria-label": `Cerrar la tarea: ${x.title} de ${x.teacher}`, onclick: (e) => cerrar(x, e.currentTarget) }, "Cerrar la tarea") : null;
+  // «reopen» no viene en tareas de programa: ahí no aparece el enlace.
+  const regresar = puedeRegresar(x) ? h("a", { class: "pr-regresar", href: `${RUTAS.asignacion(x.id)}#regresar`,
+    "aria-label": `Regresar a revisión: ${x.title} de ${x.teacher}` }, "Regresar a revisión") : null;
   return h("tr", { class: "pn-fila pn-fila--cerrar" },
     h("td", { "data-etiqueta": "Tarea" }, h("div", { class: "pn-tarea" }, h("a", { href: RUTAS.asignacion(x.id) }, x.title || "Tarea"), sub ? h("span", {}, sub) : null)),
     h("td", { "data-etiqueta": "Docente" }, h("strong", {}, x.teacher || "—")),
     h("td", { "data-etiqueta": "Estado" }, chipEstado(x.status)),
     h("td", { "data-etiqueta": "Aprobó" }, h("div", { class: "pn-tarea" },
       h("strong", {}, x.aprobo || "—"), x.aprobadoEn ? h("span", {}, haceCuando(x.aprobadoEn)) : null)),
-    h("td", { class: "pn-accion ini-accion" }, boton));
+    h("td", { class: "pn-accion ini-accion" }, h("div", { class: "pr-acciones" }, regresar, boton)));
 }
+
+const puedeRegresar = (x) => (x.viewer_actions || []).includes("reopen");
 
 async function cerrar(x, boton) {
   boton.disabled = true;

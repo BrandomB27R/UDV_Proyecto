@@ -1,6 +1,7 @@
 // Detalle de la asignación: la pantalla central, la misma para todos los perfiles.
 // Diseño compacto (mockup vinci-entrega): encabezado con la línea de estados como tira,
-// un solo bloque "Te toca a ti" con cada requisito y su control en línea, columna
+// la entrega en su propia tarjeta arriba (mockups regresar-m4/m5; solo cuando ya hay entrega),
+// un bloque "Te toca a ti" con cada requisito y su control en línea, columna
 // derecha (instrucciones, historial, comentarios) y barra de acción fija abajo con el
 // único botón principal. Los requisitos y su lógica vienen de flujo.js.
 import { api, ApiError, descargarArchivo } from "../api.js";
@@ -11,7 +12,7 @@ import {
   chipEstado, chipPrioridad, etiquetaTipo, fechaCorta, fechaHora, plazo, tamano, aInstante, ZONA,
 } from "../formato.js";
 import {
-  lineaDeEstados, capacidades, formaDeEntrega, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial,
+  lineaDeEstados, capacidades, formaDeEntrega, pasoActual, archivosPorIntento, archivosDelIntentoActual, envios, fraseHistorial, regresoVigente,
 } from "../flujo.js";
 import { requerirSesion, perfiles, puedeRevisar, tieneRol } from "../sesion.js";
 import { sinAcceso, tomarAviso, TEXTO_MARCA, botonVolver, origenConocido } from "../componentes.js";
@@ -28,7 +29,9 @@ const EXITO = {
   return: "Devuelta al docente con tu observación.",
   approve: "Entrega aprobada.",
   close: "Tarea cerrada.",
+  reopen: "La entrega volvió a revisión con tu observación.",
 };
+const MAX_OBSERVACION_REGRESO = 1000;
 const ESPERA_GUARDADO_MS = 1200;     // el mensaje se guarda solo, un momento después de dejar de escribir
 
 const raiz = document.getElementById("contenido");
@@ -42,6 +45,7 @@ const st = {
   nombres: { docente: null, revisor: null, creador: null },
   texto: "",                 // mensaje para quien revisa (borrador local)
   motivo: "",                // observación del revisor
+  regreso: "",               // observación de coordinación para regresar la entrega a revisión
   aviso: null,               // {tipo, texto} tras una acción
   enfocarEntrega: false,     // al volver del programa sin entregar: foco en «Entregar»
   avisoArchivo: null,        // estado de la última subida
@@ -105,7 +109,8 @@ function pintar() {
   poner(raiz,
     aviso ? mensaje(aviso.tipo, aviso.texto) : null,
     h("div", { class: "d-cols" },
-      bloquePrincipal(),
+      // Columna principal: primero lo que se entregó (si ya hay entrega), debajo la decisión.
+      h("div", { class: "d-principal" }, tarjetaEntrega(), bloquePrincipal()),
       h("aside", { class: "d-lado", "aria-label": "Instrucciones, historial y comentarios" },
         instrucciones(), historial(), comentarios())));
   refrescar();
@@ -226,34 +231,113 @@ function bloquePrincipal() {
   resumen.hidden = !p.resumen;
   encabezadoBloque = { eyebrow, titulo, resumen };
 
-  const c = capacidades(st.a);
   const cuerpo = [];
+  // La entrega ya no va aquí: está en su propia tarjeta, arriba (tarjetaEntrega).
   if (p.decision) {
-    // Quien revisa elige en dos recuadros; la entrega queda debajo. Sin barra fija (pintarBarra la oculta).
+    // Quien revisa elige en dos recuadros. Sin barra fija (pintarBarra la oculta).
+    cuerpo.push(avisoRegreso());
     cuerpo.push(decisionEntrega(p.decision));
-    cuerpo.push(h("div", { id: "la-entrega", class: "d-entrega-revisar", tabindex: "-1" }, entregaLectura("La entrega")));
   } else if (p.irAlPrograma) {
     // Tarea de programa: se aprueba o devuelve en la página del programa, que mueve la tarea.
     cuerpo.push(h("div", { class: "v-acciones" },
       h("a", { class: "v-btn", href: RUTAS.programa(st.a.program_version.id, st.a.id) }, "Revisar el programa")));
-    cuerpo.push(entregaLectura("La entrega"));
   } else if (p.requisitos.length) {
     // Primero los obligatorios, después los opcionales (orden estable; la lógica es de flujo.js).
     const peso = (r) => (r.obligatorio || r.estado === "pendiente" ? 0 : 1);
     const enOrden = p.requisitos.map((r, i) => [r, i]).sort((x, y) => peso(x[0]) - peso(y[0]) || x[1] - y[1]).map((x) => x[0]);
     cuerpo.push(h("ul", { class: "v-req d-req" }, enOrden.map(filaRequisito)));
-  } else {
-    // No le toca a quien mira: la misma estructura, con la entrega a la vista.
-    if (st.a.status === "returned") cuerpo.push(observacion());
-    cuerpo.push(entregaLectura(c.esDestinatario ? "Tu entrega" : "La entrega"));
+    if (p.regresar) cuerpo.push(seccionRegresar());
+  } else if (st.a.status === "returned") {
+    // No le toca a quien mira: en una devuelta, la observación del revisor.
+    cuerpo.push(observacion());
   }
-  const anterior = devolucionAnterior(p);
   return h("section", { class: `d-bloque ${p.turno === "tuyo" ? "d-bloque--tuyo" : "d-bloque--espera"}`, "aria-labelledby": "t-paso" },
     h("div", { class: "d-bloque__cab" }, eyebrow, titulo),
     resumen,
     cuerpo,
-    intentosAnteriores(p),
-    anterior);
+    devolucionAnterior(p));
+}
+
+/** Aviso dorado para quien revisa cuando la última transición fue un regreso a revisión de coordinación. */
+function avisoRegreso() {
+  const r = regresoVigente(st.a);
+  if (!r) return null;
+  return h("div", { class: "d-regreso", role: "note", "aria-labelledby": "t-regreso" },
+    h("p", { id: "t-regreso", class: "d-regreso__titulo" }, "Coordinación la regresó a revisión"),
+    h("p", { class: "d-regreso__texto" },
+      [r.comment ? `«${r.comment}»` : "Sin observación.", r.actor, fechaCorta(r.at)].filter(Boolean).join(" · ")));
+}
+
+/**
+ * Coordinación: regresar a revisión una entrega aprobada (solo si viewer_actions trae «reopen»).
+ * Mismo patrón que «Devolver con observación»: el botón se habilita al escribir la observación.
+ */
+function seccionRegresar() {
+  const zonaError = h("div", { class: "d-regresar__error", "aria-live": "assertive" });
+  const ayuda = h("span", { class: "v-nota rv-opcion__ayuda" }, "Se habilita al escribir la observación.");
+  const campo = h("textarea", {
+    id: "observacion-regreso", rows: 3, maxlength: MAX_OBSERVACION_REGRESO, value: st.regreso,
+    placeholder: "Por ejemplo: falta la firma en el anexo 2.",
+  });
+  const boton = h("button", { type: "button", class: "v-btn v-btn--sec", disabled: !st.regreso.trim() || st.ocupado,
+    onclick: () => regresar(campo, boton, zonaError) }, "Regresar a revisión");
+  ayuda.hidden = !boton.disabled || st.ocupado;
+  campo.addEventListener("input", () => {
+    st.regreso = campo.value;
+    campo.removeAttribute("aria-invalid");
+    boton.disabled = !campo.value.trim() || st.ocupado;
+    ayuda.hidden = !boton.disabled;
+  });
+  return h("section", { id: "regresar", class: "d-regresar", "aria-labelledby": "t-regresar" },
+    h("h3", { id: "t-regresar", class: "d-regresar__h3" }, "¿Encontraste algo que falta?"),
+    h("p", { class: "v-nota" }, `La entrega vuelve a ${quienRevisa()}, que decide si la aprueba de nuevo o la devuelve al docente. Los dos reciben tu observación.`),
+    h("div", { class: "v-campo d-regresar__campo" },
+      h("label", { for: "observacion-regreso" }, h("strong", {}, "Observación para quien revisa"), h("span", {}, " · obligatoria para regresar")),
+      campo),
+    h("div", { class: "rv-opcion__pie" }, boton, ayuda),
+    zonaError);
+}
+
+/** POST /assignments/{id}/reopen {comment}. Si falla, lo escrito se queda en el campo. */
+async function regresar(campo, boton, zonaError) {
+  const texto = st.regreso.trim();
+  if (!texto) { campo.setAttribute("aria-invalid", "true"); campo.focus(); return; }
+  if (st.ocupado) return;
+  st.ocupado = true;
+  boton.disabled = true;
+  boton.textContent = "Regresando…";
+  poner(zonaError);
+  pintarBarra(pasoActual(st.a, yo, ctxPaso()));
+  try {
+    await api(`/assignments/${st.a.id}/reopen`, { method: "POST", body: { comment: texto } });
+    st.ocupado = false;
+    st.regreso = "";
+    st.aviso = { tipo: "ok", texto: EXITO.reopen };
+    zonaErrorAccion = null;
+    if (location.hash === "#regresar") history.replaceState(null, "", `${location.pathname}${location.search}`);
+    await cargar();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    st.ocupado = false;
+    boton.textContent = "Regresar a revisión";
+    boton.disabled = !st.regreso.trim();
+    pintarBarra(pasoActual(st.a, yo, ctxPaso()));
+    let texto = e.message;
+    let recargar = false;
+    if (e instanceof ApiError && e.status === 422) {
+      texto = "Escribe la observación para regresar la entrega a revisión.";
+      campo.setAttribute("aria-invalid", "true");
+    } else if (e instanceof ApiError && e.status === 403) {
+      texto = "Solo la coordinación que creó la tarea puede regresarla a revisión.";
+    } else if (e instanceof ApiError && e.status === 409 && e.code !== "PROGRAM_TASK") {
+      // PROGRAM_TASK: el mensaje del servidor ya explica por qué una tarea de programa no se regresa.
+      texto = "La entrega ya no está aprobada: alguien la cerró o la movió. Recarga para ver el estado actual.";
+      recargar = true;
+    }
+    poner(zonaError, mensaje("error", texto),
+      recargar ? h("button", { type: "button", class: "v-btn v-btn--sec v-btn--chico", onclick: () => { st.aviso = null; cargar(); } }, "Recargar") : null);
+    campo.focus();
+  }
 }
 
 /** Aprobar o devolver la entrega: dos recuadros (js/decision.js); los errores se muestran aquí, no en una barra. */
@@ -261,7 +345,6 @@ function decisionEntrega(d) {
   zonaErrorAccion = h("div", { class: "d-decision__error", "aria-live": "assertive" });
   const { nodo } = bloqueDecision({
     guia: d.guia, nota: d.nota, ocupado: st.ocupado,
-    irA: { texto: d.irA, alPulsar: () => { const e = document.getElementById("la-entrega"); e?.scrollIntoView({ block: "start" }); e?.focus({ preventScroll: true }); } },
     aprobar: d.aprobar ? { ...d.aprobar, alPulsar: () => ejecutar("approve") } : null,
     devolver: d.devolver ? { ...d.devolver, valor: st.motivo, alEscribir: (v) => { st.motivo = v; }, alPulsar: () => ejecutar("return") } : null,
   });
@@ -282,7 +365,6 @@ function filaRequisito(r) {
   if (r.id === "texto") { control = campoMensaje(); enLinea = true; }
   if (r.id === "archivo") { control = adjuntos(); enLinea = true; }
   if (r.id === "programa") control = controlPrograma(r);
-  if (r.id === "tomar" || r.id === "revisar") { control = entregaLectura(null); enLinea = r.id === "revisar"; }
   if (enLinea) detalle.hidden = true;
 
   return h("li", { class: `d-req__fila d-req__fila--${r.id} v-req__fila-txt` },
@@ -459,7 +541,7 @@ function adjuntos() {
     zona, estado);
 }
 
-function filaArchivo(f, actual = false) {
+function filaArchivo(f, actual = false, { botonDescarga = false } = {}) {
   // Si Descargar o Quitar fallan, el aviso de error ocupa todo el ancho de la fila del archivo.
   const zona = h("div", { class: "d-archivo__aviso" });
   const ext = extensionDe(f.name);
@@ -471,12 +553,14 @@ function filaArchivo(f, actual = false) {
       h("span", { class: "d-archivo__dato", title: fechaHora(f.uploaded_at) },
         [tamano(f.size), subido ? `subido ${actual ? "a las" : "el"} ${actual ? hora(subido) : fechaCorta(f.uploaded_at)}` : null].filter(Boolean).join(" · "))),
     h("div", { class: "d-archivo__acciones" },
-      h("button", { type: "button", class: "d-enlace", onclick: async (e) => {
-        e.target.disabled = true;
-        poner(zona);
-        try { await descargarArchivo(f.file_id, f.name); } catch (err) { poner(zona, mensaje("error", `No se pudo descargar: ${err.message}`)); }
-        e.target.disabled = false;
-      } }, "Descargar"),
+      h("button", { type: "button", class: botonDescarga ? "v-btn v-btn--sec v-btn--chico" : "d-enlace",
+        "aria-label": `Descargar ${sinExtension(f.name)}`, onclick: async (e) => {
+          const b = e.currentTarget;
+          b.disabled = true;
+          poner(zona);
+          try { await descargarArchivo(f.file_id, f.name); } catch (err) { poner(zona, mensaje("error", `No se pudo descargar: ${err.message}`)); }
+          b.disabled = false;
+        } }, "Descargar"),
       // Solo los archivos del intento que todavía no se envía se pueden quitar.
       actual && capacidades(st.a).editarEntrega
         ? h("button", { type: "button", class: "d-enlace d-enlace--quitar", "aria-label": `Quitar ${sinExtension(f.name)}`, onclick: (e) => quitarArchivo(f, e.target, zona) }, "Quitar")
@@ -533,44 +617,87 @@ function controlPrograma(r) {
   return h("div", { class: "d-control" }, h("div", { class: "v-acciones" }, boton), zona);
 }
 
-/** La entrega enviada: el texto y los archivos del último intento, y el programa si aplica. */
-function entregaLectura(titulo) {
+/**
+ * La entrega con su propia tarjeta, la primera de la columna principal: lo que el docente envió en
+ * su último intento (comentario y archivos, o el programa en tareas de programa) y los intentos
+ * anteriores plegados. La misma pieza en todos los estados con entrega y para todo perfil que la ve.
+ * Mientras el docente todavía no entrega, no hay tarjeta.
+ */
+function tarjetaEntrega() {
   const a = st.a;
-  const forma = formaDeEntrega(a);
   const n = envios(a);
-  const intento = (a.attempts || []).find((x) => Number(x.number) === n);
-  const archivos = archivosPorIntento(a).find((g) => g.intento === n)?.archivos || [];
-  const pv = a.program_version;
-  if (!n && !pv) return titulo ? h("p", { class: "v-nota" }, "Todavía no hay entrega.") : null;
-  return h("div", { class: "d-entrega" },
-    titulo ? h("p", { class: "d-entrega__titulo" }, titulo) : null,
-    n ? h("div", { class: "v-intento" },
-      h("p", { class: "v-intento__titulo" }, `Intento ${n}${intento?.created_at ? ` · ${fechaCorta(intento.created_at)}` : ""}`),
-      h("p", { class: "v-texto" }, intento?.text || "Sin mensaje."),
-      archivos.length ? h("ul", { class: "d-archivos" }, archivos.map((f) => filaArchivo(f))) : (forma.archivos ? h("p", { class: "v-nota" }, "Sin archivos.") : null)) : null,
-    forma.programa && pv?.id ? h("div", { class: "d-programa" },
-      h("span", {}, `Programa del curso · versión ${pv.number} (${ESTADOS_PROGRAMA[pv.status] || pv.status})`),
-      h("a", { class: "v-btn v-btn--sec v-btn--chico", href: RUTAS.programa(pv.id, a.id) }, "Ver el programa")) : null);
+  if (!n || a.status === "cancelled") return null;
+  const forma = formaDeEntrega(a);
+  const intento = intentoN(n);
+  const cuando = intento?.created_at || ultimoEnvio(a)?.at;
+  return h("section", { class: "d-entregada", "aria-labelledby": "t-entrega" },
+    h("div", { class: "d-entregada__cab" },
+      h("div", { class: "d-entregada__titulos" },
+        h("p", { class: "v-eyebrow" }, "Lo que entregó"),
+        h("h2", { id: "t-entrega", class: "d-entregada__h2" }, `Entrega de ${st.nombres.docente || "el docente"}`)),
+      h("p", { class: "d-entregada__cuando", title: cuando ? fechaHora(cuando) : null },
+        `Intento ${n}${cuando ? ` · entregada el ${fechaCorta(cuando)}` : ""}`)),
+    contenidoIntento(n, forma, { actual: true }),
+    anterioresPlegados(n, forma));
 }
 
-/** Intentos ya enviados antes del actual, plegados al final del bloque. */
-function intentosAnteriores(p) {
+const intentoN = (num) => (st.a.attempts || []).find((x) => Number(x.number) === num);
+function ultimoEnvio(a) {
+  const h2 = (a.history || []).filter((x) => x.new_status === "submitted");
+  return h2[h2.length - 1] || null;
+}
+
+/** Comentario y archivos de un intento; en una tarea de programa, el programa en vez de archivos. */
+function contenidoIntento(num, forma, { actual = false } = {}) {
+  const intento = intentoN(num);
+  const archivos = archivosPorIntento(st.a).find((g) => g.intento === num)?.archivos || [];
+  const texto = intento?.text || "";
+  const partes = [];
+  if (!forma.programa || texto) {
+    partes.push(h("div", { class: "d-entregada__parte" },
+      h("h3", { class: "d-entregada__h3" }, "Comentario de la entrega"),
+      h("p", { class: `v-texto d-entregada__texto${texto ? "" : " v-nota"}` }, texto || "Sin comentario.")));
+  }
+  if (forma.programa) {
+    if (actual) partes.push(programaEntregado());
+  } else if (forma.archivos || archivos.length) {
+    partes.push(h("div", { class: "d-entregada__parte" },
+      h("h3", { class: "d-entregada__h3" }, `Archivos · ${archivos.length}`),
+      archivos.length
+        ? h("ul", { class: "d-archivos" }, archivos.map((f) => filaArchivo(f, false, { botonDescarga: true })))
+        : h("p", { class: "v-nota" }, "Sin archivos.")));
+  }
+  return partes;
+}
+
+/** Tareas de programa: curso, versión y estado del programa entregado, con «Ver el programa». */
+function programaEntregado() {
   const a = st.a;
-  const n = envios(a);
-  // Quien está entregando no tiene "último enviado" en pantalla; los demás ya ven el último arriba.
-  const preparando = p.requisitos.some((r) => r.id === "texto" || r.id === "archivo");
-  const hasta = preparando ? n : n - 1;
-  if (hasta < 1) return null;
-  const textos = new Map((a.attempts || []).map((x) => [Number(x.number), x]));
-  const archivos = new Map(archivosPorIntento(a).map((g) => [g.intento, g.archivos]));
+  const pv = a.program_version;
+  if (!pv?.id) return h("div", { class: "d-entregada__parte" }, h("p", { class: "v-nota" }, "El programa de esta entrega no está disponible."));
+  const curso = [a.course_code, a.course_name].filter(Boolean).join(" · ") || "Programa del curso";
+  return h("div", { class: "d-entregada__parte" },
+    h("h3", { class: "d-entregada__h3" }, "Programa del curso"),
+    h("div", { class: "d-programa" },
+      h("div", { class: "d-programa__info" },
+        h("strong", {}, curso),
+        h("span", {}, `Versión ${pv.number} · ${ESTADOS_PROGRAMA[pv.status] || pv.status || "sin estado"}`)),
+      h("a", { class: "v-btn v-btn--sec v-btn--chico", href: RUTAS.programa(pv.id, a.id) }, "Ver el programa")));
+}
+
+/** Intentos anteriores al último, plegados al pie de la tarjeta. */
+function anterioresPlegados(n, forma) {
+  if (n < 2) return null;
   const nums = [];
-  for (let i = hasta; i >= 1; i--) nums.push(i);
-  return h("details", { class: "d-plegable" },
-    h("summary", {}, preparando ? `Intentos enviados (${nums.length})` : `Intentos anteriores (${nums.length})`),
-    nums.map((num) => h("div", { class: "v-intento" },
-      h("p", { class: "v-intento__titulo" }, `Intento ${num}${textos.get(num)?.created_at ? ` · ${fechaCorta(textos.get(num).created_at)}` : ""}`),
-      h("p", { class: "v-texto" }, textos.get(num)?.text || "Sin mensaje."),
-      (archivos.get(num) || []).length ? h("ul", { class: "d-archivos" }, archivos.get(num).map((f) => filaArchivo(f))) : null)));
+  for (let i = n - 1; i >= 1; i--) nums.push(i);
+  return h("details", { class: "d-plegable d-entregada__anteriores" },
+    h("summary", {}, `Ver intentos anteriores (${nums.length})`),
+    nums.map((num) => {
+      const x = intentoN(num);
+      return h("div", { class: "v-intento" },
+        h("p", { class: "v-intento__titulo" }, `Intento ${num}${x?.created_at ? ` · ${fechaCorta(x.created_at)}` : ""}`),
+        contenidoIntento(num, forma));
+    }));
 }
 
 /** Devolución de un intento anterior: plegada al final del bloque. */
@@ -619,7 +746,9 @@ function detalleListo(accion) {
     case "review": return "Al tomarla pasa a «En revisión»; el docente lo verá.";
     case "approve": return st.motivo.trim() ? "Tu observación quedará en el historial." : "Si falta algo, escribe la observación y devuélvela.";
     case "return": return "El docente la verá como observación.";
-    case "close": return "Al cerrarla queda terminada con su historial completo.";
+    case "close": return capacidades(st.a).reopen
+      ? "Si está completa, ciérrala. Si falta algo, regrésala a revisión desde el recuadro de arriba."
+      : "Al cerrarla queda terminada con su historial completo.";
     default: return "";
   }
 }
@@ -764,4 +893,10 @@ if (!id || !/^\d+$/.test(id)) {
   if (llegado && String(llegado.asignacion ?? id) === id) { st.aviso = { tipo: llegado.tipo, texto: llegado.texto }; st.enfocarEntrega = !!llegado.enfocarEntrega; }
   await cargar();
   if (st.enfocarEntrega) document.querySelector(".d-accion__principal")?.focus();
+  // Desde «Por cerrar» (…#regresar): baja a la sección y pone el foco en la observación.
+  if (location.hash === "#regresar") {
+    const seccion = document.getElementById("regresar");
+    seccion?.scrollIntoView({ block: "start" });
+    document.getElementById("observacion-regreso")?.focus({ preventScroll: true });
+  }
 }

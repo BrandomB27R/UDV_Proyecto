@@ -548,9 +548,34 @@ body.d-pagina { display: flex; flex-direction: column; }
 .d-zona--subiendo { opacity: .7; }
 .d-enlace { font: inherit; font-size: 13px; font-weight: 700; color: var(--v-navy); background: none; border: none; text-decoration: underline; padding: 10px 4px; cursor: pointer; align-self: flex-start; }
 
-/* Entrega enviada (para quien revisa y para quien espera) */
-.d-entrega { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-.d-entrega__titulo { font-size: 13px; font-weight: 700; color: var(--v-muted-2); }
+/* La entrega con su propia tarjeta (mockups regresar-m4/m5): primera de la columna principal */
+.d-principal { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.d-entregada { background: var(--v-white); border: 2px solid var(--v-cyan); border-top-width: 8px; border-radius: var(--v-radius); padding: 22px 28px 26px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.d-entregada__cab { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 16px; }
+.d-entregada__titulos { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.d-entregada__h2 { font-size: 20px; font-weight: 800; color: var(--v-navy); overflow-wrap: anywhere; }
+.d-entregada__cuando { font-size: 13px; color: var(--v-muted); }
+.d-entregada__parte { display: flex; flex-direction: column; gap: 10px; }
+.d-entregada__h3 { font-size: 15px; font-weight: 800; color: var(--v-navy); }
+.d-entregada__texto { white-space: pre-line; overflow-wrap: anywhere; }
+.d-entregada .d-archivo__acciones .v-btn { padding: 8px 18px; }
+.d-entregada__anteriores { margin-top: 0; }
+.d-programa__info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.d-programa__info span { font-size: 13px; color: var(--v-muted-2); }
+
+/* Coordinación la regresó a revisión (aviso dorado para quien revisa) */
+.d-regreso { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; background: #FBF3DE; border: 1px solid #E9D49A; border-left: 6px solid var(--v-gold); border-radius: 12px; }
+.d-regreso__titulo { font-size: 16px; font-weight: 800; color: var(--v-gold); }
+.d-regreso__texto { font-size: 15px; color: var(--v-ink); overflow-wrap: anywhere; }
+
+/* Coordinación: ¿Encontraste algo que falta? (regresar a revisión) */
+.d-regresar { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--v-line); scroll-margin-top: 96px; }
+.d-regresar__h3 { font-size: 18px; font-weight: 800; color: var(--v-navy); }
+.d-regresar__campo label span { font-weight: 700; }
+.d-regresar .rv-opcion__pie { margin-top: 0; }
+.d-regresar__error:empty { display: none; }
+/* Deshabilitado como «Devolver con observación»: contorno gris sobre blanco. */
+.vinci .d-regresar .v-btn--sec:disabled { color: #9AA3AE; border-color: #D5DAE1; background: var(--v-white); }
 .d-programa { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: #F7F9FB; border: 1px solid var(--v-line); border-radius: 10px; font-size: 14px; }
 .d-plegable { border-top: 1px solid var(--v-line); padding-top: 6px; margin-top: 6px; display: flex; flex-direction: column; gap: 10px; }
 .d-plegable summary { cursor: pointer; font-size: 14px; font-weight: 700; color: var(--v-navy); min-height: 44px; display: list-item; padding: 12px 0; }
@@ -588,6 +613,9 @@ body.d-pagina { display: flex; flex-direction: column; }
   .d-tira__paso { flex: 1 1 40%; }
   .d-bloque { padding: 18px 16px; }
   .d-bloque__h2 { font-size: 18px; }
+  .d-entregada { padding: 18px 16px 20px; }
+  .d-entregada__h2 { font-size: 18px; }
+  .d-regresar .rv-opcion__pie .v-btn { width: 100%; }
   .d-mensaje__cab { margin-top: 0; justify-content: flex-start; }
   .d-accion__in { padding: 12px 16px; }
   .d-accion__botones { width: 100%; }
@@ -855,7 +883,6 @@ body.d-pagina { display: flex; flex-direction: column; }
 .vinci .rv-btn-devolver:disabled { color: #9AA3AE; border-color: #D5DAE1; }
 .rv-opcion__ayuda { font-size: 12px; }
 .d-decision__error:empty { display: none; }
-.d-entrega-revisar:focus { outline: none; }
 
 /* Franja de la tarea en la página del programa */
 .p-franja { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; background: var(--v-white); border: 1px solid var(--v-line); border-left: 5px solid var(--v-cyan); border-radius: var(--v-radius); }
@@ -961,6 +988,14 @@ body.d-pagina { display: flex; flex-direction: column; }
 .pr-card { display: flex; flex-direction: column; gap: 20px; }
 .pr-panel { display: flex; flex-direction: column; gap: 16px; }
 .pr-panel section { display: flex; flex-direction: column; gap: 8px; }
+/* Por cerrar: «Regresar a revisión» y «Cerrar la tarea» en la misma celda */
+.pr-acciones { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 20px; }
+.vinci .pr-acciones a.pr-regresar { font-size: 14px; font-weight: 700; text-decoration: underline; padding: 10px 0; }
+@media (max-width: 720px) {
+  /* La tabla pasa a tarjetas: las acciones van a la izquierda, el botón a lo ancho. */
+  .pr-acciones { justify-content: flex-start; }
+  .pr-acciones .v-btn { flex: 1 1 100%; }
+}
 .pr-cuenta { font-size: 14px; color: var(--v-muted-2); background: var(--v-bg); border-radius: var(--v-radius-sm); padding: 10px 14px; }
 .pr-otras { border-top: 1px solid var(--v-line); padding-top: 12px; }
 .pr-otras summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
