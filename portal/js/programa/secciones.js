@@ -141,7 +141,7 @@ function listaFilas({ filas, nombre, campos, nueva, agregar, alCambiar, vacio })
 
 // ── Editores ─────────────────────────────────────────────────
 /**
- * Crea el editor de una sección. ctx: {cursos, perfiles, sinPrerrequisitos, alCambiar}.
+ * Crea el editor de una sección. ctx: {cursos, perfiles, sinPrerrequisitos, cursoCodigo, alCambiar}.
  * Devuelve {nodo, valor(), error()} — error() da el texto que impide guardar, o null.
  */
 export function crearEditor(id, contenido, ctx) {
@@ -191,7 +191,25 @@ export function crearEditor(id, contenido, ctx) {
 
   if (id === "prerrequisitos") {
     const filas = (c || []).map((x) => ({ curso_id: x.curso_id, tipo: x.tipo || "obligatorio" }));
-    const opcionesCurso = Object.fromEntries((ctx.cursos || []).map((x) => [x.id, `${x.code} · ${x.name}`]));
+    // Cada fila ofrece los cursos del catálogo menos el del propio programa y los ya elegidos en otras filas.
+    // Lo que la fila ya tiene se conserva (un programa viejo puede traerlo); si es el propio curso, se dice.
+    const propio = ctx.cursoCodigo || null;
+    const opcionesPara = (f) => {
+      const enOtras = new Set(filas.filter((o) => o !== f && o.curso_id).map((o) => String(o.curso_id)));
+      return Object.fromEntries((ctx.cursos || [])
+        .filter((x) => String(x.id) === String(f.curso_id ?? "") || (x.code !== propio && !enOtras.has(String(x.id))))
+        .map((x) => [x.id, `${x.code} · ${x.name}${x.code === propio ? " (es el curso de este programa)" : ""}`]));
+    };
+    const selectDe = new WeakMap();
+    // Al elegir un curso en una fila, las demás dejan de ofrecerlo (y vuelven a ofrecer el que se soltó).
+    const refrescarCursos = () => {
+      for (const f of filas) {
+        const sel = selectDe.get(f);
+        if (!sel) continue;
+        poner(sel, h("option", { value: "" }, "Elige el curso"),
+          Object.entries(opcionesPara(f)).map(([v, t]) => h("option", { value: v, selected: String(f.curso_id ?? "") === String(v) }, t)));
+      }
+    };
     const conCursos = () => filas.some((f) => f.curso_id);
     const choque = "Quita los cursos de la lista para marcar «Sin prerrequisitos», o desmarca la casilla.";
     const avisoId = nuevoId("sp-aviso");
@@ -211,7 +229,11 @@ export function crearEditor(id, contenido, ctx) {
           campos: (f, ok) => h("div", { class: "v-dos" },
             // Elegir un curso desmarca la casilla (una lista con cursos anula la declaración, como en el servidor).
             // Agregar una fila y quitarla sin elegir curso no la toca.
-            campoSelect("Curso", f.curso_id, opcionesCurso, (x) => { f.curso_id = num(x); if (f.curso_id) casilla.checked = false; ok(); }, { vacio: "Elige el curso" }),
+            (() => {
+              const campo = campoSelect("Curso", f.curso_id, opcionesPara(f), (x) => { f.curso_id = num(x); if (f.curso_id) casilla.checked = false; refrescarCursos(); ok(); }, { vacio: "Elige el curso" });
+              selectDe.set(f, campo.querySelector("select"));
+              return campo;
+            })(),
             campoSelect("Tipo", f.tipo, TIPOS_PRERREQ, (x) => { f.tipo = x; ok(); })) })),
       valor: () => ({
         asignaturas: filas.filter((f) => f.curso_id).map((f, i) => ({ orden: i + 1, curso_id: f.curso_id, tipo: f.tipo })),
