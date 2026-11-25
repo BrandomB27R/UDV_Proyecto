@@ -42,7 +42,17 @@ END$$
 
 CREATE TRIGGER trg_entrega_no_update BEFORE UPDATE ON entrega FOR EACH ROW
 BEGIN
-SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+-- Un intento ya enviado no se modifica nunca. Mientras el docente lo prepara (aun no hay
+-- una transicion 'submitted' posterior a su creacion) solo pueden cambiar el texto y la
+-- version de programa; lo demas identifica al intento y queda fijo. (1.2.3)
+IF EXISTS (SELECT 1 FROM tarea_transicion tt
+            WHERE tt.tarea_destinatario_id = OLD.tarea_destinatario_id
+              AND tt.estado_nuevo = 'submitted' AND tt.creado_en >= OLD.entregado_en)
+   OR NOT (NEW.id <=> OLD.id AND NEW.tarea_destinatario_id <=> OLD.tarea_destinatario_id
+           AND NEW.numero_intento <=> OLD.numero_intento AND NEW.entregado_por <=> OLD.entregado_por
+           AND NEW.entregado_en <=> OLD.entregado_en) THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+END IF;
 END$$
 
 CREATE TRIGGER trg_entrega_valor_no_update BEFORE UPDATE ON entrega_valor FOR EACH ROW
@@ -153,6 +163,11 @@ BEGIN
   IF NEW.estado_nuevo = 'returned' AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: una devolucion exige una observacion (422)';
   END IF;
+
+  IF NEW.estado_anterior = 'approved' AND NEW.estado_nuevo = 'under_review'
+     AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: regresar a revision exige una observacion (422)';
+  END IF;
 END$$
 
 -- Programas de curso
@@ -181,6 +196,7 @@ BEGIN
               AND NEW.nivel <=> OLD.nivel
               AND NEW.area_id <=> OLD.area_id
               AND NEW.pensum <=> OLD.pensum
+              AND NEW.sin_prerrequisitos <=> OLD.sin_prerrequisitos
               AND NEW.horas_clase_semanal <=> OLD.horas_clase_semanal
               AND NEW.docente_responsable_id <=> OLD.docente_responsable_id
               AND NEW.revisor_id <=> OLD.revisor_id
@@ -528,10 +544,11 @@ END$$
 CREATE TRIGGER trg_tt_evento AFTER INSERT ON tarea_transicion FOR EACH ROW
 BEGIN
   DECLARE v_nombre VARCHAR(40) DEFAULT NULL;
-  SET v_nombre = CASE NEW.estado_nuevo
-                   WHEN 'submitted' THEN 'assignment.submitted'
-                   WHEN 'returned'  THEN 'assignment.returned'
-                   WHEN 'approved'  THEN 'assignment.approved'
+  SET v_nombre = CASE
+                   WHEN NEW.estado_nuevo = 'submitted' THEN 'assignment.submitted'
+                   WHEN NEW.estado_nuevo = 'returned'  THEN 'assignment.returned'
+                   WHEN NEW.estado_nuevo = 'approved'  THEN 'assignment.approved'
+                   WHEN NEW.estado_nuevo = 'under_review' AND NEW.estado_anterior = 'approved' THEN 'assignment.reopened'
                  END;
   IF v_nombre IS NOT NULL THEN
     INSERT INTO evento (nombre, clave_unica, tarea_id, tarea_destinatario_id, actor_id, payload)

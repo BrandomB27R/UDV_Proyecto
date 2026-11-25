@@ -1,0 +1,335 @@
+// Reglas del flujo vistas desde la pantalla: línea de estados, quién puede qué
+// y qué falta para avanzar (requisito 2). Sin DOM: solo datos.
+//
+// Los botones salen de viewer_actions del detalle: las acciones que el estado permite
+// y que puede ejecutar quien mira (el backend ya cruzó rol, revisor designado y creador).
+import { etiquetaEstado, fechaCorta } from "./formato.js";
+
+export const LINEA = ["assigned", "in_progress", "submitted", "under_review", "approved", "closed"];
+export const EDITABLES = ["in_progress", "returned"];   // estados en que el docente prepara la entrega
+
+const ultimaVez = (a, estado) => {
+  const h = (a.history || []).filter((x) => x.new_status === estado);
+  return h.length ? h[h.length - 1] : null;
+};
+
+/** Número de envíos ya hechos (submit + resubmit). */
+export const envios = (a) => (a.history || []).filter((x) => x.new_status === "submitted").length;
+
+/** Archivos del intento en preparación (los de intentos ya enviados no cuentan: trampa 5). */
+export function archivosDelIntentoActual(a) {
+  const n = envios(a);
+  return (a.files || []).filter((f) => Number(f.attempt) > n);
+}
+
+/** Archivos agrupados por intento, del más reciente al más antiguo. */
+export function archivosPorIntento(a) {
+  const grupos = new Map();
+  for (const f of a.files || []) {
+    const k = Number(f.attempt) || 1;
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(f);
+  }
+  return [...grupos.entries()].sort((x, y) => y[0] - x[0]).map(([intento, archivos]) => ({ intento, archivos }));
+}
+
+/** Pasos de la línea con su marca. Devuelve null si la asignación está cancelada. */
+export function lineaDeEstados(a) {
+  if (a.status === "cancelled") return null;
+  const pasos = LINEA.map((estado) => ({ estado, etiqueta: etiquetaEstado(estado), marca: "", dato: "" }));
+  if (a.status === "returned") {
+    // Desvío: después de "En revisión" aparece "Devuelta" y el flujo vuelve a "Entregada".
+    pasos.forEach((p, i) => { if (i <= 3) marcarHecho(a, p); });
+    const dev = ultimaVez(a, "returned");
+    pasos.splice(4, 0, { estado: "returned", etiqueta: "Devuelta", marca: "desvio", dato: dev ? `Corrige y reentrega · ${fechaCorta(dev.at)}` : "Corrige y reentrega" });
+    return pasos;
+  }
+  const actual = LINEA.indexOf(a.status);
+  pasos.forEach((p, i) => {
+    if (i < actual) marcarHecho(a, p);
+    else if (i === actual) {
+      p.marca = a.status === "closed" ? "hecho" : "actual";
+      p.dato = a.status === "closed" ? fechaCorta(ultimaVez(a, "closed")?.at) : "Paso actual";
+      if (a.status === "submitted" && envios(a) > 1) p.dato = `Paso actual · intento ${envios(a)}`;
+    }
+  });
+  return pasos;
+}
+
+function marcarHecho(a, p) {
+  p.marca = "hecho";
+  p.dato = fechaCorta(ultimaVez(a, p.estado)?.at);
+}
+
+/**
+ * Qué puede hacer quien mira. Las acciones salen de viewer_actions: el backend ya cruzó
+ * el estado con el rol, el revisor designado y quien creó la tarea. Aquí no se decide nada más.
+ */
+export function capacidades(a) {
+  const va = new Set(a.viewer_actions || []);
+  const esDestinatario = !!a.viewer?.is_assignee;
+  return {
+    start: va.has("start"),
+    submit: va.has("submit"),
+    resubmit: va.has("resubmit"),
+    review: va.has("review"),
+    return: va.has("return"),
+    approve: va.has("approve"),
+    close: va.has("close"),
+    reopen: va.has("reopen"),
+    editarEntrega: esDestinatario && EDITABLES.includes(a.status),
+    comentar: !!a.viewer?.can_comment,
+    esDestinatario,
+    esRevisor: !!a.viewer?.is_reviewer,
+  };
+}
+
+/**
+ * Qué pide la entrega según delivery.mode (texto, archivo, ambos, formulario o programa).
+ * archivos: se pueden adjuntar; archivoObligatorio: el tipo lo exige (requiere_archivo);
+ * textoObligatorio: el texto es la entrega (modo texto, o formulario sin archivo obligatorio); programa: se hace en el editor.
+ */
+export function formaDeEntrega(a) {
+  const d = a.delivery || {};
+  const modo = d.mode || (a.requiere_archivo ? "archivo" : "ambos");
+  const archivoObligatorio = !!a.requiere_archivo;
+  return {
+    modo,
+    programa: modo === "programa",
+    archivos: archivoObligatorio || modo === "archivo" || modo === "ambos",
+    archivoObligatorio,
+    // El texto es la entrega solo en modo "texto" o en "formulario" sin archivo obligatorio (p. ej. Confirmar actividad).
+    textoObligatorio: modo === "texto" || (modo === "formulario" && !archivoObligatorio),
+    extensiones: (d.extensions || []).map((x) => String(x).toLowerCase()),
+    noAceptadas: (d.not_accepted || []).map((x) => String(x).toLowerCase()),
+    maxMb: Number(d.max_mb) || 5,
+  };
+}
+
+const ETQ = { hecho: "hecho", pendiente: "pendiente", opcional: "opcional" };
+
+// Qué pide cada tipo, para decir qué sigue sin pedir el detalle de la asignación. Solo lo que la
+// pantalla de entrega de verdad pide (archivo o respuesta): no los campos del catálogo que aún no pide.
+const QUE_PIDE = {
+  ACTUALIZAR_PROGRAMA: { inicio: "Después completas el programa del curso.", curso: ["Completa el programa", "Llena las nueve secciones y envíalo a revisión."] },
+  SUBIR_CV: { inicio: "Te pedirá tu CV en PDF.", curso: ["Adjunta el archivo y entrega", "Te pedirá el CV en PDF."] },
+  ENTREGAR_FACTURA: { inicio: "Te pedirá el archivo.", curso: ["Adjunta la factura y entrega", "Te pedirá el archivo."] },
+  CONFIRMAR_ACTIVIDAD: { inicio: "Te pedirá confirmar tu asistencia.", curso: ["Confirma y entrega", "Te pedirá tu respuesta."] },
+  CARGAR_EVIDENCIA: { inicio: "Te pedirá uno o varios archivos.", curso: ["Adjunta el archivo y entrega", "Te pedirá uno o varios archivos."] },
+};
+
+const recortar = (t, max) => (t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t);
+
+/**
+ * Qué sigue para una fila del inbox (assigned, in_progress o returned), sin el detalle completo.
+ * En las devueltas, la observación viene en la misma fila (last_return_comment, vinci-11).
+ * Devuelve {frase, detalle, boton}.
+ */
+export function queSigue(item) {
+  const t = QUE_PIDE[item.task_type] || {};
+  if (item.status === "assigned") return { frase: "Inicia la tarea", detalle: t.inicio || "Lee las instrucciones antes de empezar.", boton: "Iniciar" };
+  if (item.status === "returned") {
+    const obs = String(item.last_return_comment || "").trim();
+    return { frase: "Corrige y reentrega", detalle: obs ? `Observación: ${recortar(obs, 90)}` : "Lee la observación de quien la revisó.", boton: "Corregir" };
+  }
+  const [frase, detalle] = t.curso || ["Prepara tu entrega", "Revisa lo que pide la tarea."];
+  return { frase, detalle, boton: "Continuar" };
+}
+
+/**
+ * Lo que toca ahora. ctx: {texto, textoCambiado, leyoDevolucion, motivo, nombres: {docente, revisor, creador}, programa}
+ * Devuelve {turno, eyebrow, titulo, resumen, requisitos, principal, secundaria, decision, irAlPrograma}
+ *   turno: "tuyo" | "espera" | "fin"
+ *   requisitos: [{id, titulo, estado, detalle, nota}]
+ *   principal/secundaria: {accion, etiqueta, habilitada, motivo}
+ *   decision: quien revisa elige entre aprobar y devolver (js/decision.js); sin requisitos ni barra fija
+ *   irAlPrograma: la entrega es un programa y se aprueba o devuelve en su página
+ */
+export function pasoActual(a, yo, ctx = {}) {
+  const c = capacidades(a);
+  const forma = formaDeEntrega(a);
+  const docente = ctx.nombres?.docente || "el docente";
+  const revisor = ctx.nombres?.revisor || "la coordinación";
+  const actuales = archivosDelIntentoActual(a);
+  const textoListo = !!(ctx.texto || "").trim();
+  const inicio = ultimaVez(a, "in_progress");
+
+  // ── Docente destinatario ──
+  if (c.start) {
+    return {
+      turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Inicia la tarea",
+      resumen: "Al iniciarla pasa a «En curso» y podrás preparar tu entrega.",
+      requisitos: [{ id: "iniciar", titulo: "Iniciar la tarea", estado: ETQ.pendiente, detalle: "Lee las instrucciones y la fecha límite antes de empezar." }],
+      principal: { accion: "start", etiqueta: "Iniciar la tarea", habilitada: true },
+    };
+  }
+  if (c.submit || c.resubmit) {
+    const reentrega = c.resubmit;
+    const req = [];
+    if (reentrega) {
+      req.push({ id: "leer", titulo: "Lee la observación del revisor", obligatorio: true, estado: ctx.leyoDevolucion ? ETQ.hecho : ETQ.pendiente,
+        detalle: ctx.leyoDevolucion ? "Leída." : "Es el recuadro de aquí arriba. Cuando la leas, márcala como leída." });
+    } else {
+      req.push({ id: "iniciar", titulo: "Iniciar la tarea", obligatorio: true, estado: ETQ.hecho, detalle: inicio ? `Hecho el ${fechaCorta(inicio.at)}` : "Hecho." });
+    }
+    if (forma.programa) {
+      // ctx.programa: {avance: {listas, total, faltan}} de la versión ligada, o null si todavía no hay.
+      const pv = a.program_version;
+      const av = ctx.programa?.avance;
+      const listo = !!av && av.listas === av.total;
+      req.push({ id: "programa", titulo: "Completar el programa del curso", obligatorio: true, estado: listo ? ETQ.hecho : ETQ.pendiente,
+        detalle: !pv ? "Ábrelo con «Completar el programa»: parte de la última versión autorizada del curso o, si todavía no tiene programa, de uno en blanco."
+          : !av ? `Versión ${pv.number} · ${etiquetaEstadoPrograma(pv.status)}.`
+            : listo ? `Las ${av.total} secciones están listas (versión ${pv.number}).`
+              : `${av.listas} de ${av.total} secciones listas. Faltan ${av.faltan.map((x) => x.titulo).join(", ")}.`,
+        avance: av ? av.listas / av.total : null });
+    }
+    // En una reentrega el texto anterior sigue en el borrador: solo cuenta si se cambió.
+    const textoHecho = reentrega ? ctx.textoCambiado || (forma.textoObligatorio && textoListo) : textoListo;
+    // Si el texto es la entrega se llama "Escribe tu entrega" y es obligatorio; si no, es un mensaje opcional.
+    req.push({ id: "texto", titulo: forma.textoObligatorio ? "Escribe tu entrega" : "Mensaje para quien revisa",
+      obligatorio: forma.textoObligatorio,
+      estado: textoHecho ? ETQ.hecho : forma.textoObligatorio ? ETQ.pendiente : ETQ.opcional,
+      nota: forma.textoObligatorio ? "obligatorio" : null,
+      detalle: "Puedes escribirlo abajo, en «Tu entrega». Lo leerá quien revisa." });
+    const tituloArchivo = reentrega ? "Adjunta un archivo nuevo" : "Adjunta un archivo";
+    if (!forma.archivos) {
+      // Este tipo no pide archivos: no se agrega el requisito.
+    } else if (forma.archivoObligatorio) {
+      req.push({ id: "archivo", titulo: tituloArchivo, obligatorio: true, estado: actuales.length ? ETQ.hecho : ETQ.pendiente,
+        nota: "obligatorio en este tipo de tarea",
+        detalle: actuales.length
+          ? `${actuales.length} ${actuales.length === 1 ? "archivo adjunto" : "archivos adjuntos"} en este intento.`
+          : (reentrega ? "El archivo del intento anterior no cuenta: adjunta uno nuevo abajo." : "Adjúntalo abajo, en «Tu entrega».") });
+    } else {
+      req.push({ id: "archivo", titulo: tituloArchivo, estado: actuales.length ? ETQ.hecho : ETQ.opcional,
+        detalle: "Adjuntar archivos es opcional en este tipo de tarea." });
+    }
+    const etiquetas = { leer: "marques la observación como leída", programa: "el programa esté completo", archivo: "adjuntes el archivo", texto: "escribas tu entrega" };
+    const faltan = req.filter((r) => r.estado === ETQ.pendiente);
+    const destino = "Entregada";
+    let motivo = "";
+    if (faltan.length) {
+      const partes = faltan.map((r) => etiquetas[r.id]).filter(Boolean);
+      motivo = `Se habilita cuando ${partes.length > 1 ? `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}` : partes[0]}.`;
+    }
+    return {
+      turno: "tuyo", eyebrow: "Te toca a ti",
+      titulo: reentrega ? "Corrige y vuelve a entregar" : (forma.programa ? "Actualiza el programa y entrega" : "Prepara y envía tu entrega"),
+      resumen: faltan.length
+        ? `Para pasar a «${destino}» ${faltan.length === 1 ? "falta un requisito" : `faltan ${faltan.length} requisitos`}.`
+        : `Todo listo: ya puedes ${reentrega ? "reentregar" : "entregar"}.`,
+      requisitos: req,
+      principal: { accion: reentrega ? "resubmit" : "submit", etiqueta: reentrega ? "Reentregar" : "Entregar", habilitada: !faltan.length, motivo },
+    };
+  }
+
+  // ── Revisión ──
+  if (c.review) {
+    return {
+      turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Revisa la entrega",
+      resumen: `${capital(docente)} ya entregó. Toma la entrega para empezar a revisarla.`,
+      requisitos: [{ id: "tomar", titulo: "Toma la entrega para revisarla", estado: ETQ.pendiente,
+        detalle: "Pasa a «En revisión»; el docente verá que la estás revisando." }],
+      principal: { accion: "review", etiqueta: "Comenzar revisión", habilitada: true },
+    };
+  }
+  if (c.return || c.approve) {
+    // La entrega de una tarea de programa es la versión: se aprueba o devuelve en su página y la tarea
+    // la sigue (programa.js encadena). Aquí no se ofrece aprobar ni devolver la asignación directo.
+    if (forma.programa && a.program_version?.id) {
+      return {
+        turno: "tuyo", eyebrow: "Te toca a ti", titulo: "Revisa el programa",
+        resumen: "La entrega de esta tarea es el programa de curso. Apruébalo o devuélvelo desde su página; la tarea avanza con él.",
+        requisitos: [], principal: null, irAlPrograma: true,
+      };
+    }
+    const creador = ctx.nombres?.creador || "coordinación";
+    // El título y la guía hablan de dos opciones solo si quien mira tiene las dos (p. ej. coordinación
+    // que regresó la entrega puede aprobarla por su rol de dirección, pero no devolverla).
+    const ambas = c.approve && c.return;
+    return {
+      turno: "tuyo", eyebrow: "Te toca a ti",
+      titulo: ambas ? "Aprueba o devuelve la entrega" : c.approve ? "Aprueba la entrega" : "Revisa la entrega",
+      resumen: "", requisitos: [], principal: null,
+      decision: {
+        // La entrega va en su propia tarjeta, arriba de esta decisión.
+        guia: ambas ? "Revisa la entrega, que está arriba, y elige una de las dos opciones." : "Revisa la entrega, que está arriba.",
+        aprobar: c.approve ? { texto: `La entrega queda «Aprobada». Después ${creador} cierra la tarea.`, etiqueta: "Aprobar la entrega" } : null,
+        devolver: c.return ? { texto: `La entrega vuelve a ${docente} con tu observación, para que la corrija y la entregue de nuevo.`, docente,
+          placeholder: "Por ejemplo: falta la bibliografía actualizada de la unidad 3." } : null,
+        nota: !c.approve ? "Aprobarla le corresponde a dirección."
+          : !c.return ? `Devolverla al docente le corresponde a ${revisor}.` : null,
+      },
+    };
+  }
+  if (c.close) {
+    const ap = ultimaVez(a, "approved");
+    // Con «reopen» (no viene en tareas de programa) la coordinación también puede regresarla a revisión.
+    return {
+      turno: "tuyo", eyebrow: "Te toca a ti",
+      titulo: c.reopen ? "Cierra la tarea o regrésala a revisión" : "Cierra la tarea",
+      resumen: c.reopen
+        ? "La entrega está aprobada. Si está completa, ciérrala. Si encontraste algo que falta, regrésala a revisión con una observación."
+        : "La entrega está aprobada. Al cerrarla queda terminada con su historial completo.",
+      regresar: c.reopen,
+      requisitos: [{ id: "aprobada", titulo: "Entrega aprobada", estado: ETQ.hecho, detalle: ap ? `${ap.actor || "Aprobada"} · ${fechaCorta(ap.at)}` : "Aprobada." }],
+      principal: { accion: "close", etiqueta: "Cerrar la tarea", habilitada: true },
+    };
+  }
+
+  // ── No le toca a quien mira: se dice a quién ──
+  const tu = c.esDestinatario;
+  const espera = {
+    assigned: [`En espera de que ${tu ? "inicies" : `${docente} inicie`} la tarea`, ""],
+    in_progress: [tu ? "Estás preparando tu entrega" : `${capital(docente)} está preparando su entrega`, ""],
+    returned: [tu ? "Te devolvieron la entrega" : `Devuelta a ${docente} para corrección`, ""],
+    submitted: [`En espera de revisión por ${revisor}`, tu ? "Recibirás un aviso cuando la revisen." : ""],
+    // Si coordinación la regresó a revisión, el docente lo sabe (sin acciones: decide quien revisa).
+    under_review: [ctx.nombres?.revisor ? `${capital(revisor)} está revisando la entrega` : `En revisión por ${revisor}`,
+      tu ? (regresoVigente(a) ? `Coordinación la regresó a revisión. ${capital(revisor)} la está revisando de nuevo.` : "Recibirás un aviso con el resultado.") : ""],
+    approved: ["Entrega aprobada", `Falta que ${ctx.nombres?.creador || "la coordinación"} cierre la tarea.`],
+    closed: ["Tarea cerrada", "No queda nada pendiente."],
+    cancelled: ["Tarea cancelada", "La coordinación canceló esta tarea."],
+  }[a.status] || [etiquetaEstado(a.status), ""];
+  return {
+    turno: ["closed", "cancelled"].includes(a.status) ? "fin" : "espera",
+    eyebrow: ["closed", "cancelled"].includes(a.status) ? "Terminada" : "En espera",
+    titulo: espera[0], resumen: espera[1], requisitos: [], principal: null,
+  };
+}
+
+const ESTADOS_PROGRAMA = { draft: "borrador", submitted: "enviada", under_review: "en revisión", returned: "devuelta", approved: "aprobada", authorized: "autorizada", superseded: "reemplazada" };
+const etiquetaEstadoPrograma = (s) => ESTADOS_PROGRAMA[s] || s || "sin estado";
+
+const capital = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/**
+ * ¿La transición regresó a revisión una entrega aprobada? (action "reopen"; /history la trae como
+ * from_status "approved" → to_status "under_review"). Se distingue de «tomó la entrega para revisión».
+ */
+export const esRegreso = (x) => !!x && (x.action === "reopen"
+  || ((x.new_status || x.to_status) === "under_review" && x.from_status === "approved"));
+
+/** La última transición, si fue un regreso a revisión (deja de serlo en cuanto hay otra después). */
+export function regresoVigente(a) {
+  const h = a.history || [];
+  const ultima = h[h.length - 1];
+  return a.status === "under_review" && esRegreso(ultima) ? ultima : null;
+}
+
+/** Frase del historial: "Diana Pérez inició la tarea". */
+export function fraseHistorial(item) {
+  if (esRegreso(item)) return `${item.actor || "Alguien"} regresó la entrega a revisión`;
+  const verbo = {
+    assigned: "publicó la tarea",
+    in_progress: "inició la tarea",
+    submitted: item.action === "resubmit" ? "volvió a entregar" : "entregó",
+    under_review: "tomó la entrega para revisión",
+    returned: "devolvió la entrega",
+    approved: "aprobó la entrega",
+    closed: "cerró la tarea",
+    cancelled: "canceló la tarea",
+  }[item.new_status] || `cambió el estado a «${etiquetaEstado(item.new_status)}»`;
+  return `${item.actor || "Alguien"} ${verbo}`;
+}

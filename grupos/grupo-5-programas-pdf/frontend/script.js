@@ -1,39 +1,38 @@
 
 document.addEventListener("DOMContentLoaded", async () => {
   const API = new URL("/api/v1", window.location.origin).toString().replace(/\/$/, "");
-  const requestedProgramId = Number(new URLSearchParams(window.location.search).get("program_id"));
-  const programId = Number.isSafeInteger(requestedProgramId) && requestedProgramId > 0
+  const searchParams = new URLSearchParams(window.location.search);
+  const requestedProgramId = Number(searchParams.get("program_id"));
+  const hasRequestedProgramId = searchParams.has("program_id");
+  let programId = Number.isSafeInteger(requestedProgramId) && requestedProgramId > 0
     ? requestedProgramId
     : null;
-  const searchParams = new URLSearchParams(window.location.search);
   const assignmentOriginParam = searchParams.get("tarea_destinatario_origen_id");
   const parsedAssignmentOriginId = Number(assignmentOriginParam);
   const assignmentOriginId = Number.isSafeInteger(parsedAssignmentOriginId) && parsedAssignmentOriginId > 0
     ? parsedAssignmentOriginId
     : null;
   const invalidAssignmentOrigin = assignmentOriginParam !== null && assignmentOriginId === null;
-  const TOKEN_KEY = "g5_access_token";
+  const TOKEN_KEY = "udv_token";
   let accessToken = sessionStorage.getItem(TOKEN_KEY);
   let authenticatedUser = null;
 
   const $ = (selector) => document.querySelector(selector);
 
   const loginPanel = $("#login-panel");
-  const loginForm = $("#login-form");
-  const loginEmail = $("#login-email");
-  const loginPassword = $("#login-password");
-  const loginSubmit = $("#login-submit");
   const loginStatus = $("#login-status");
   const appContainer = $(".container");
-  const role = $("#role");
-  const logoutButton = $("#logout");
+  const programList = $("#program-list");
   const programStatus = $("#program-status");
   const versionNumberLabel = $("#version-number");
   const saveStatus = $("#save-status");
+  const versionUpdated = $("#version-updated");
 
   const instructor = $("#instructor");
   const deanName = $("#dean-name");
   const coordinatorName = $("#coordinator-name");
+  const reviewerName = $("#reviewer-name");
+  const instructorId = $("#instructor-id");
 
   const saveButton = $("#save-section");
   const createVersionButton = $("#create-version");
@@ -63,23 +62,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   let state = "draft";
   let currentVersionNumber = 1;
   let isSaving = false;
+  let authenticatedRoles = new Set();
+  let authenticatedRoleNames = [];
 
-  const roleNames = {
-    docente: "Docente",
-    "coordinador-academico": "Coordinador académico",
-    revisor: "Revisor",
-    decanatura: "Decanatura",
-  };
+  const PROGRAM_MANAGERS = ["admin", "coordinator", "reviewer"];
+  const PROGRAM_AUTHORS = ["teacher", "coordinator"];
+  const PROGRAM_REVIEWERS = ["coordinator", "reviewer"];
+  const API_READ_ONLY_FIELDS = new Set([
+    "course-code",
+    "faculty",
+    "training-area",
+    "term",
+    "year",
+    "modality",
+    "credits",
+    "campus",
+  ]);
 
   const roleOptions = [
-    { value: "docente", label: "Docente", codes: ["teacher", "docente", "author", "elaborador"] },
-    {
-      value: "coordinador-academico",
-      label: "Coordinador académico",
-      codes: ["coordinator", "coordinador", "coordinador-academico", "coordinador_academico"],
-    },
-    { value: "revisor", label: "Revisor", codes: ["reviewer", "revisor"] },
-    { value: "decanatura", label: "Decanatura", codes: ["authority", "autoridad", "decanatura", "decano", "dean"] },
+    { value: "admin", label: "Administrador de programas" },
+    { value: "coordinator", label: "Coordinación académica" },
+    { value: "teacher", label: "Docente responsable" },
+    { value: "reviewer", label: "Revisor" },
+    { value: "authority", label: "Dirección" },
+    { value: "auditor", label: "Auditor (consulta)" },
   ];
 
   const statusNames = {
@@ -105,6 +111,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }
 
+  function isAssignedTeacher(version = currentVersion) {
+    const rawActorId = authenticatedUser?.id ?? authenticatedUser?.user_id;
+    const actorId = Number(rawActorId);
+    const responsibleId = Number(
+      getSectionContent(version, "responsables").docente_responsable_id,
+    );
+    return Number.isSafeInteger(actorId) && actorId > 0 && actorId === responsibleId;
+  }
+
+  function canEditCurrentVersion() {
+    return hasAnyRole(PROGRAM_MANAGERS) ||
+      (authenticatedRoles.has("teacher") && isAssignedTeacher());
+  }
+
+  function hasAnyRole(roles) {
+    return roles.some((roleCode) => authenticatedRoles.has(roleCode));
+  }
+
+  function roleDescription() {
+    return authenticatedRoleNames.join(", ");
+  }
+
   /** Guarda la versión en la lista local o actualiza sus datos si ya estaba. */
   function updateProgramVersion(data) {
     const index = programVersions.findIndex((item) => item.id === data.id);
@@ -119,15 +147,15 @@ document.addEventListener("DOMContentLoaded", async () => {
    * Muestra a cada rol la versión que le toca: la que debe revisar o autorizar,
    * o la más reciente que todavía se puede editar.
    */
-  function selectVersionForRole(selectedRole) {
+  function selectVersionForUser() {
     const latestVersion = getLatestVersion();
 
-    if (selectedRole === "decanatura" && latestVersion?.estado === "approved") {
+    if (authenticatedRoles.has("authority") && latestVersion?.estado === "approved") {
       return latestVersion;
     }
 
     if (
-      ["coordinador-academico", "revisor"].includes(selectedRole) &&
+      hasAnyRole(PROGRAM_MANAGERS) &&
       ["submitted", "under_review", "approved"].includes(latestVersion?.estado)
     ) {
       return latestVersion;
@@ -136,6 +164,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     const editableVersions = programVersions
       .filter((item) => ["draft", "returned"].includes(item.estado))
       .sort((a, b) => b.numero_version - a.numero_version);
+
+    if (authenticatedRoles.has("teacher") && !hasAnyRole(PROGRAM_MANAGERS)) {
+      return (
+        editableVersions.find(isAssignedTeacher) ||
+        programVersions
+          .filter(isAssignedTeacher)
+          .sort((a, b) => b.numero_version - a.numero_version)[0] ||
+        null
+      );
+    }
 
     return (
       editableVersions[0] ||
@@ -151,64 +189,109 @@ document.addEventListener("DOMContentLoaded", async () => {
   /** Le cuenta al usuario qué falta hacer con la versión que está viendo. */
   function getVersionStatusMessage() {
     const latestVersion = getLatestVersion();
-    if (!latestVersion) return `Rol seleccionado: ${roleNames[role.value]}`;
+    if (!latestVersion) return `Roles de la cuenta: ${roleDescription()}`;
 
-    if (role.value === "decanatura" && latestVersion.estado === "approved") {
+    if (authenticatedRoles.has("authority") && latestVersion.estado === "approved") {
       return `La versión ${latestVersion.numero_version} está aprobada y pendiente de autorización.`;
     }
 
     if (
-      ["coordinador-academico", "revisor"].includes(role.value) &&
+      hasAnyRole(PROGRAM_MANAGERS) &&
       latestVersion.estado !== "authorized"
     ) {
       const nextStep = {
-        draft: "el docente debe enviarla a revisión",
-        submitted: "Coordinación académica debe tomar la revisión",
-        under_review: "Coordinación académica debe aprobarla o devolverla",
-        returned: "el docente debe corregirla y enviarla nuevamente",
-        approved: "Decanatura debe autorizarla",
+        draft: hasAnyRole(PROGRAM_AUTHORS)
+          ? "el docente responsable o coordinación debe enviarla a revisión"
+          : "coordinación o revisión debe enviarla a revisión",
+        submitted: "un revisor debe tomar la revisión",
+        under_review: "un revisor debe aprobarla o devolverla",
+        returned: "un usuario con permiso de gestión debe corregirla",
+        approved: "Dirección debe autorizarla",
       }[latestVersion.estado] || "debe completarse su revisión y autorización";
 
       return `La versión ${latestVersion.numero_version} aún no está vigente: ${nextStep}.`;
     }
 
-    return `Rol seleccionado: ${roleNames[role.value]}`;
-  }
-
-  // Toma el nombre de la persona que corresponde al rol seleccionado.
-  function currentUser() {
-    if (role.value === "docente") {
-      return instructor.value.trim();
+    if (
+      authenticatedRoles.has("teacher") &&
+      !authenticatedRoles.has("coordinator") &&
+      !isAssignedTeacher()
+    ) {
+      return "Solo puedes editar la versión en la que figuras como docente responsable.";
     }
 
-    if (["coordinador-academico", "revisor"].includes(role.value)) {
-      return coordinatorName.value.trim();
-    }
-
-    return deanName.value.trim();
+    return `Roles de la cuenta: ${roleDescription()}`;
   }
 
   function configureRoles(user) {
-    const userRoles = new Set((user.roles || []).map((item) => String(item).trim().toLowerCase()));
-    const allowedRoles = roleOptions.filter((option) =>
-      option.codes.some((code) => userRoles.has(code)),
+    const userRoles = new Set(
+      (user.roles || []).map((item) =>
+        String(typeof item === "string" ? item : item.codigo || "").trim().toLowerCase(),
+      ),
     );
+    const allowedRoles = roleOptions.filter((option) => userRoles.has(option.value));
     if (!allowedRoles.length) {
       throw new Error("Tu cuenta no tiene un rol habilitado para G5.");
     }
 
-    role.replaceChildren(
-      ...allowedRoles.map((option) => {
-        const element = document.createElement("option");
-        element.value = option.value;
-        element.textContent = option.label;
-        return element;
-      }),
-    );
-    role.value = allowedRoles[0].value;
-    role.disabled = allowedRoles.length === 1;
-    const coordinatorLabel = document.querySelector('label[for="coordinator-name"]');
-    coordinatorLabel.textContent = role.value === "revisor" ? "Revisor" : "Coordinador académico";
+    authenticatedRoles = new Set(allowedRoles.map((option) => option.value));
+    authenticatedRoleNames = allowedRoles.map((option) => option.label);
+  }
+
+  async function loadProgramOptions() {
+    const programs = [];
+    let page = 1;
+    let total = 0;
+    do {
+      const result = await request(`/course-programs?page=${page}&per_page=100`);
+      programs.push(...(result.data || []));
+      total = result.total || 0;
+      page += 1;
+    } while (programs.length < total);
+
+    const uniquePrograms = new Map();
+    programs.forEach((item) => {
+      if (!uniquePrograms.has(item.id)) uniquePrograms.set(item.id, item);
+    });
+
+    programList.replaceChildren();
+    if (!uniquePrograms.size) {
+      const empty = document.createElement("li");
+      empty.textContent = "No hay programas disponibles para tu usuario.";
+      programList.append(empty);
+      return uniquePrograms;
+    }
+
+    uniquePrograms.forEach((item) => {
+      const row = document.createElement("li");
+      const details = document.createElement("div");
+      const course = document.createElement("strong");
+      course.textContent = [item.codigo, item.asignatura]
+        .filter(Boolean)
+        .join(" · ") || `Programa ${item.id}`;
+      const period = document.createElement("p");
+      period.textContent = `Período: ${item.periodo_vigente || item.periodo || "Sin período"}`;
+      const currentVersion = document.createElement("p");
+      currentVersion.textContent = item.version_actual
+        ? `Versión vigente: ${item.version_actual}`
+        : "Sin versión vigente";
+      details.append(course, period, currentVersion);
+
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "btn-udv btn-udv-primary";
+      openButton.textContent = "Abrir";
+      openButton.addEventListener("click", () => {
+        void withLoading(async () => {
+          await openProgram(item.id);
+          showMessage("Programa cargado desde el servidor.");
+        });
+      });
+
+      row.append(details, openButton);
+      programList.append(row);
+    });
+    return uniquePrograms;
   }
 
   async function openProgramForUser(user) {
@@ -216,19 +299,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     configureRoles(authenticatedUser);
     loginPanel.hidden = true;
     appContainer.hidden = false;
-    showMessage("Conectando con el programa...");
+    programLoaded = false;
+    programFields.forEach((control) => { control.disabled = true; });
+    updateResponsibleEditing();
+    updateInterface();
     try {
-      await loadProgram(programId);
-      showMessage("Programa cargado desde el servidor.");
+      const programs = await loadProgramOptions();
+      if (!programs.size) {
+        showMessage("No hay programas disponibles para mostrar.");
+        return;
+      }
+
+      const selectedId = programId && programs.has(programId) ? programId : null;
+      if (selectedId) {
+        await openProgram(selectedId);
+        showMessage("Programa cargado desde el servidor.");
+      } else {
+        programId = null;
+        showMessage(
+          hasRequestedProgramId
+            ? "El programa solicitado no está disponible. Selecciona otro."
+            : "Selecciona un programa de la lista y pulsa Abrir.",
+        );
+      }
     } catch (error) {
       console.error(error);
       showMessage("No se pudo cargar el programa: " + error.message);
     }
   }
 
+  async function openProgram(id) {
+    programId = id;
+    program = null;
+    programVersions = [];
+    programLoaded = false;
+    programFields.forEach((control) => { control.disabled = true; });
+    const url = new URL(window.location.href);
+    url.searchParams.set("program_id", String(id));
+    window.history.replaceState(null, "", url);
+    await loadProgram(id);
+  }
+
   /** Muestra un aviso junto al encabezado del programa. */
   function showMessage(message) {
     saveStatus.textContent = message;
+  }
+
+  function formatApiDate(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("es-GT", {
+      timeZone: "America/Guatemala",
+    });
   }
 
   function parseResponse(response) {
@@ -293,9 +416,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   function setValue(id, dataItem) {
     const element = document.getElementById(id);
 
-    if (!element || dataItem === undefined || dataItem === null) return;
+    if (!element) return;
 
     if (element.tagName === "SELECT") {
+      if (dataItem === undefined || dataItem === null || dataItem === "") {
+        element.value = "";
+        return;
+      }
+
       const option = [...element.options].find(
         (item) => item.value === String(dataItem) ||
           item.textContent.trim() === String(dataItem),
@@ -305,49 +433,78 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    element.value = dataItem;
+    element.value = dataItem ?? "";
   }
 
-  /** Busca los datos de una sección; si aún no tiene, usa un objeto vacío. */
+  /** Devuelve el contenido de una sección en la forma publicada por la API. */
   function getSectionContent(versionData, name) {
-    return versionData?.secciones?.[name]?.contenido || {};
+    const content = versionData?.secciones?.[name]?.contenido;
+    if (content !== undefined && content !== null) return content;
+    return ["prerrequisitos", "competencias", "perfil", "contenidos", "bibliografia", "evaluacion"].includes(name)
+      ? []
+      : {};
   }
 
-  /** Junta la información general y le pone los nombres que espera la API. */
+  /** Lee los datos generales editables sin inventar ni enviar valores de muestra. */
   function captureGeneral() {
-    return {
-      codigo: getValue("course-code"),
-      asignatura: getValue("course"),
-      programa: getValue("program-name"),
-      departamento: getValue("department"),
-      facultad: getValue("faculty"),
-      area_formacion: getValue("training-area"),
-      pensum: getValue("curriculum"),
-      ciclo: getValue("term"),
-      anio: getValue("year"),
-      nivel: getValue("level"),
-      modalidad: getValue("modality"),
-      creditos: getValue("credits"),
-      horas: getValue("hours"),
-      sede: getValue("campus"),
+    const fields = {
+      asignatura: "course",
+      programa: "program-name",
+      departamento: "department",
+      nivel: "level",
+      pensum: "curriculum",
+      horas: "hours",
     };
+    return Object.fromEntries(
+      Object.entries(fields)
+        .map(([key, id]) => [key, getValue(id).trim()])
+        .filter(([, value]) => value !== ""),
+    );
   }
 
   /** Lee las filas de prerrequisitos y las deja listas para guardar. */
   function capturePrerequisites() {
     const rows = [...document.querySelectorAll("#prerequisites tbody tr")];
 
-    return {
-      asignaturas: rows.map((row) => {
-        const controls = row.querySelectorAll("input");
+    return rows.flatMap((row, index) => {
+      const controls = row.querySelectorAll("input");
+      const nombre = controls[0]?.value.trim() || "";
+      const codigo = controls[1]?.value.trim() || "";
+      if (!nombre && !codigo) return [];
 
-        return {
-          asignatura: controls[0]?.value || "",
-          codigo: controls[1]?.value || "",
-          orden: controls[2]?.value || "",
-        };
-      }),
-    };
+      const rawOrder = controls[2]?.value;
+      const item = {
+        orden: rawOrder ? Number(rawOrder) : index + 1,
+        tipo: row.dataset.type || "obligatorio",
+        codigo,
+        nombre,
+      };
+      if (row.dataset.courseId) item.curso_id = Number(row.dataset.courseId);
+      return [item];
+    });
+  }
+
+  function captureList(id, section) {
+    const value = getValue(id).trim();
+    if (!value) return [];
+
+    let parsed;
+    try {
+      parsed = JSON.parse(value);
+    } catch (error) {
+      throw new Error(`La sección "${section}" debe contener una lista JSON válida.`);
+    }
+    if (!Array.isArray(parsed) || parsed.some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
+      throw new Error(`La sección "${section}" debe ser una lista de objetos JSON.`);
+    }
+    return parsed;
+  }
+
+  function setListValue(id, content, section) {
+    if (!Array.isArray(content)) {
+      throw new Error(`El servidor devolvió "${section}" en un formato distinto a una lista.`);
+    }
+    setValue(id, JSON.stringify(content, null, 2));
   }
 
   // Convierte los campos visibles del formulario al formato que espera la API.
@@ -355,8 +512,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     return {
       responsables: {
         docente: instructor.value,
+        docente_responsable_id: instructorId.value ? Number(instructorId.value) : null,
         decanatura: deanName.value,
         coordinador: coordinatorName.value,
+        revisor: reviewerName.value,
       },
 
       general: captureGeneral(),
@@ -367,33 +526,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         texto: getValue("description-text"),
       },
 
-      competencias: {
-        general: getValue("general-competency"),
-        especificas: getValue("specific-competencies"),
-      },
-
-      perfil: {
-        codigo: getValue("profile-code"),
-        contribucion: getValue("profile-contribution"),
-      },
+      competencias: captureList("competencies-data", "Competencias"),
+      perfil: captureList("profile-data", "Perfil de egreso"),
 
       metodologia: {
         texto: getValue("methodology-text"),
       },
 
-      contenidos: {
-        texto: getValue("contents-text"),
-      },
+      contenidos: captureList("contents-data", "Contenidos"),
 
-      bibliografia: {
-        texto: getValue("bibliography-text"),
-      },
+      bibliografia: captureList("bibliography-data", "Bibliografía"),
 
-      evaluacion: {
-        parcial: getValue("midterm-assessment"),
-        final: getValue("final-assessment"),
-        proyecto: getValue("project-assessment"),
-      },
+      evaluacion: captureList("evaluation-data", "Evaluación"),
     };
   }
 
@@ -410,60 +554,42 @@ document.addEventListener("DOMContentLoaded", async () => {
     const bibliography = getSectionContent(versionData, "bibliografia");
     const evaluation = getSectionContent(versionData, "evaluacion");
 
-    // Los datos del programa sirven como valores iniciales.
-    setValue("course-code", program?.codigo || "PW-001");
-    setValue("course", program?.asignatura || "Programación Web");
-    setValue(
-      "program-name",
-      program?.programa_academico || "Ingeniería en Sistemas",
-    );
-    setValue("department", program?.departamento || "Tecnología");
-    setValue("faculty", program?.facultad || "Ingeniería");
-    setValue("training-area", program?.area_formacion || "");
-    setValue("curriculum", program?.pensum || "");
-    setValue("term", program?.ciclo_academico || "Segundo ciclo");
-    setValue("year", program?.anio || 2026);
-    setValue("level", program?.nivel_academico || "Licenciatura");
-    setValue("modality", program?.modalidad || "Presencial");
-    setValue("credits", program?.creditos ?? 4);
-    setValue("hours", program?.horas_semanales ?? 64);
-    setValue("campus", program?.sede || "Campus Central");
-
-    // Los valores guardados en la sección tienen prioridad.
-    Object.entries(general).forEach(([field, dataItem]) => {
-      const fieldMappings = {
-        programa: "programa",
-        ciclo: "ciclo",
-        anio: "anio",
-        nivel: "nivel",
-        horas: "horas",
-      };
-
-      setValue(fieldMappings[field] || field, dataItem);
-    });
+    setValue("course-code", general.codigo ?? program?.codigo);
+    setValue("course", general.asignatura ?? program?.asignatura);
+    setValue("program-name", general.programa ?? program?.programa_academico);
+    setValue("department", general.departamento ?? program?.departamento);
+    setValue("faculty", general.facultad ?? program?.facultad);
+    setValue("training-area", general.area_formacion ?? program?.area_formacion);
+    setValue("curriculum", general.pensum ?? program?.pensum);
+    setValue("term", general.ciclo ?? program?.ciclo_academico);
+    setValue("year", general.anio ?? program?.anio);
+    setValue("level", general.nivel ?? program?.nivel);
+    setValue("modality", general.modalidad ?? program?.modalidad);
+    setValue("credits", general.creditos ?? program?.creditos);
+    setValue("hours", general.horas ?? program?.horas_clase_semanal);
+    setValue("campus", general.sede ?? program?.sede);
 
     setValue(
       "instructor",
       responsibleSection.docente || program?.profesor || "",
     );
+    setValue("instructor-id", responsibleSection.docente_responsable_id ?? "");
     setValue("dean-name", responsibleSection.decanatura ?? "");
     setValue("coordinator-name", responsibleSection.coordinador ?? "");
+    setValue("reviewer-name", responsibleSection.revisor ?? "");
 
-    setValue("description-text", description.texto ?? "");
-    setValue("general-competency", competencies.general ?? "");
-    setValue("specific-competencies", competencies.especificas ?? "");
-    setValue("profile-code", profile.codigo ?? "");
-    setValue("profile-contribution", profile.contribucion ?? "");
-    setValue("methodology-text", methodology.texto ?? "");
-    setValue("contents-text", contentSection.texto ?? "");
-    setValue("bibliography-text", bibliography.texto ?? "");
-    setValue("midterm-assessment", evaluation.parcial ?? "");
-    setValue("final-assessment", evaluation.final ?? "");
-    setValue("project-assessment", evaluation.proyecto ?? "");
+    setValue("description-text", description.texto);
+    setListValue("competencies-data", competencies, "Competencias");
+    setListValue("profile-data", profile, "Perfil de egreso");
+    setValue("methodology-text", methodology.texto);
+    setListValue("contents-data", contentSection, "Contenidos");
+    setListValue("bibliography-data", bibliography, "Bibliografía");
+    setListValue("evaluation-data", evaluation, "Evaluación");
 
-    if (Array.isArray(prerequisites.asignaturas)) {
-      loadPrerequisiteRows(prerequisites.asignaturas);
+    if (!Array.isArray(prerequisites)) {
+      throw new Error('El servidor devolvió "Prerrequisitos" en un formato distinto a una lista.');
     }
+    loadPrerequisiteRows(prerequisites);
   }
 
   /** Reconstruye la tabla de prerrequisitos con los registros recibidos del servidor. */
@@ -471,11 +597,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const bodyElement = $("#prerequisites tbody");
     bodyElement.replaceChildren();
 
-    rows.forEach((dataItem) => {
+    (rows.length ? rows : [{}]).forEach((dataItem) => {
       const row = document.createElement("tr");
 
       [
-        ["text", dataItem.asignatura],
+        ["text", dataItem.nombre ?? dataItem.asignatura],
         ["text", dataItem.codigo],
         ["number", dataItem.orden],
       ].forEach(([type, content]) => {
@@ -488,6 +614,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         row.append(cell);
       });
 
+      row.dataset.courseId = dataItem.curso_id ?? "";
+      row.dataset.type = dataItem.tipo ?? "obligatorio";
       bodyElement.append(row);
     });
   }
@@ -504,7 +632,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       throw new Error("No se encontró el programa solicitado.");
     }
 
-    const selectedVersion = selectVersionForRole(role.value);
+    const selectedVersion = selectVersionForUser();
 
     if (selectedVersion) {
       await loadVersion(selectedVersion.id);
@@ -515,6 +643,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Sincroniza la versión seleccionada y refresca tanto el formulario como sus permisos.
   async function loadVersion(id) {
+    programLoaded = false;
     const data = await request(`/program-versions/${id}`);
 
     updateProgramVersion(data);
@@ -522,13 +651,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     versionId = data.id ?? id;
     currentVersionNumber = data.numero_version ?? 1;
     state = data.estado || "draft";
-    programLoaded = true;
 
     loadSections(data);
+    programLoaded = true;
     updateStatus();
   }
 
-  // Persiste cada sección por separado para no reemplazar datos de otras secciones.
+  // Persiste secciones por separado y detiene el guardado al primer error.
   async function saveOnServer() {
     if (!versionId) {
       throw new Error("No hay una versión seleccionada para guardar.");
@@ -537,19 +666,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     const capturedSections = captureSections();
 
     for (const [name, content] of Object.entries(capturedSections)) {
-      await sendJson(
-        `/program-versions/${versionId}/sections/${name}`,
-        "PUT",
-        {
-          contenido: content,
-        },
-      );
+      try {
+        await sendJson(
+          `/program-versions/${versionId}/sections/${name}`,
+          "PUT",
+          { contenido: content },
+        );
+      } catch (error) {
+        throw new Error(`No se guardó la sección "${name}" y se detuvo el guardado. ${error.message}`);
+      }
     }
 
-    currentVersion = await request(`/program-versions/${versionId}`);
-    state = currentVersion.estado || state;
-
-    updateStatus();
+    await loadVersion(versionId);
     showMessage("Borrador guardado en el servidor.");
   }
 
@@ -570,6 +698,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     showMessage(message);
   }
 
+  function reviewResponsiblePayload() {
+    return {
+      coordinador: coordinatorName.value.trim(),
+      revisor: reviewerName.value.trim(),
+    };
+  }
+
   // Cambiar de sección y responder a los botones del flujo.
   // Navegación entre secciones.
   sectionLinks.forEach((link) => {
@@ -586,26 +721,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
-  role.addEventListener("change", async () => {
-    const coordinatorLabel = document.querySelector('label[for="coordinator-name"]');
-    coordinatorLabel.textContent = role.value === "revisor" ? "Revisor" : "Coordinador académico";
-    const selectedVersion = selectVersionForRole(role.value);
-    if (selectedVersion && selectedVersion.id !== versionId) {
-      await withLoading(async () => {
-        await loadVersion(selectedVersion.id);
-        showMessage(getVersionStatusMessage());
-      });
-      return;
-    }
-
-    updateStatus();
-    showMessage(getVersionStatusMessage());
-  });
-
   // Guardar todas las secciones de la versión.
   saveButton.addEventListener("click", async () => {
-    if (role.value !== "docente") {
-      alert("Solo el docente puede guardar el borrador.");
+    if (!canEditCurrentVersion()) {
+      alert("Solo los gestores o el docente responsable pueden editar esta versión.");
       return;
     }
 
@@ -621,8 +740,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Antes de enviar, guarda los campos actuales para que la revisión use lo más reciente.
   submitForReviewButton.addEventListener("click", async () => {
-    if (role.value !== "docente") {
-      alert("Solo el docente puede enviar el programa a revisión.");
+    if (
+      !hasAnyRole(PROGRAM_AUTHORS) ||
+      (
+        authenticatedRoles.has("teacher") &&
+        !authenticatedRoles.has("coordinator") &&
+        !isAssignedTeacher()
+      )
+    ) {
+      alert("Solo el docente responsable de la versión o coordinación pueden enviarla a revisión.");
       return;
     }
 
@@ -644,26 +770,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   reviewButton.addEventListener("click", async () => {
-    if (!["coordinador-academico", "revisor"].includes(role.value) || state !== "submitted") {
-      alert("Solo Coordinación académica o un revisor pueden tomar una versión enviada.");
+    if (!hasAnyRole(PROGRAM_REVIEWERS) || state !== "submitted") {
+      alert("Solo revisión o coordinación pueden tomar una versión enviada.");
       return;
     }
     await withLoading(() => executeAction("review", "Revisión iniciada."));
   });
 
   returnButton.addEventListener("click", async () => {
-    if (!["coordinador-academico", "revisor"].includes(role.value)) {
-      alert("Solo Coordinación académica o un revisor pueden devolver el programa.");
+    if (!hasAnyRole(PROGRAM_REVIEWERS)) {
+      alert("Solo revisión o coordinación pueden devolver el programa.");
       return;
     }
 
     if (state !== "under_review") {
       alert("El programa debe estar en revisión.");
-      return;
-    }
-
-    if (!coordinatorName.value.trim()) {
-      alert("Escribe el nombre del coordinador académico.");
       return;
     }
 
@@ -677,13 +798,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     await withLoading(() =>
       executeAction("return", "Programa devuelto al docente.", {
         observacion: observation.trim(),
+        ...reviewResponsiblePayload(),
       }),
     );
   });
 
   approveButton.addEventListener("click", async () => {
-    if (!["coordinador-academico", "revisor"].includes(role.value)) {
-      alert("Solo Coordinación académica o un revisor pueden aprobar el programa.");
+    if (!hasAnyRole(PROGRAM_REVIEWERS)) {
+      alert("Solo revisión o coordinación pueden aprobar el programa.");
       return;
     }
 
@@ -692,19 +814,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    if (!coordinatorName.value.trim()) {
-      alert("Escribe el nombre del coordinador académico.");
-      return;
-    }
-
     await withLoading(() =>
-      executeAction("approve", "Programa aprobado."),
+      executeAction("approve", "Programa aprobado.", {
+        ...reviewResponsiblePayload(),
+      }),
     );
   });
 
   authorizeButton.addEventListener("click", async () => {
-    if (role.value !== "decanatura") {
-      alert("Solo Decanatura puede autorizar una versión.");
+    if (!authenticatedRoles.has("authority")) {
+      alert("Solo un usuario con el rol G1 authority puede autorizar una versión.");
       return;
     }
 
@@ -719,13 +838,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     await withLoading(() =>
-      executeAction("authorize", "Versión autorizada."),
+      executeAction("authorize", "Versión autorizada.", {
+        decanatura: deanName.value.trim(),
+      }),
     );
   });
 
   createVersionButton.addEventListener("click", async () => {
-    if (role.value !== "coordinador-academico") {
-      alert("Solo Coordinación académica puede crear una versión.");
+    if (!hasAnyRole(PROGRAM_MANAGERS)) {
+      alert("Se requiere el permiso G1 programs.manage para crear una versión.");
       return;
     }
     if (invalidAssignmentOrigin) {
@@ -735,11 +856,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (state !== "authorized") {
       alert("Debes partir de una versión autorizada.");
-      return;
-    }
-
-    if (!coordinatorName.value.trim()) {
-      alert("Escribe el nombre del coordinador académico.");
       return;
     }
 
@@ -813,6 +929,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     programStatus.classList.add(classes[state] || "badge-draft");
     versionNumberLabel.textContent = "Versión " + currentVersionNumber;
+    versionUpdated.textContent = currentVersion?.actualizado_en
+      ? `Última actualización: ${formatApiDate(currentVersion.actualizado_en)}`
+      : "";
 
     updateInterface();
     updateResponsibleEditing();
@@ -821,28 +940,37 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Cada persona puede editar solo cuando le toca hacerlo.
   function updateResponsibleEditing() {
     const canEdit =
-      role.value === "docente" &&
+      programLoaded &&
+      canEditCurrentVersion() &&
       ["draft", "returned"].includes(state);
 
     programFields.forEach((control) => {
       if (control instanceof HTMLSelectElement) {
-        control.disabled = !canEdit;
+        control.disabled = !canEdit || API_READ_ONLY_FIELDS.has(control.id);
       } else if (
         control instanceof HTMLInputElement ||
         control instanceof HTMLTextAreaElement
       ) {
-        control.readOnly = !canEdit;
+        control.disabled = false;
+        control.readOnly = !canEdit || API_READ_ONLY_FIELDS.has(control.id);
       }
     });
 
-    instructor.readOnly = !canEdit;
+    instructor.readOnly = true;
+    instructorId.disabled = !canEdit || !hasAnyRole(PROGRAM_MANAGERS);
 
-    deanName.readOnly = !(
-      role.value === "decanatura" && state === "approved"
-    );
+    deanName.readOnly = !(authenticatedRoles.has("authority") && state === "approved");
 
     coordinatorName.readOnly = !(
-      ["coordinador-academico", "revisor"].includes(role.value) &&
+      authenticatedRoles.has("coordinator") &&
+      (
+        state === "under_review" ||
+        state === "returned" ||
+        state === "authorized"
+      )
+    );
+    reviewerName.readOnly = !(
+      authenticatedRoles.has("reviewer") &&
       ["under_review", "authorized"].includes(state)
     );
   }
@@ -877,18 +1005,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     pdfPreviewButton.hidden = !["authorized", "superseded"].includes(state);
+    printPdfButton.hidden = !["authorized", "superseded"].includes(state);
 
-    if (role.value === "docente" && ["draft", "returned"].includes(state)) {
+    if (canEditCurrentVersion() && ["draft", "returned"].includes(state)) {
       saveButton.hidden = false;
-      submitForReviewButton.hidden = false;
       cancelButton.hidden = false;
     }
 
-    if (role.value === "decanatura" && state === "approved") {
+    if (
+      hasAnyRole(PROGRAM_AUTHORS) &&
+      (
+        !authenticatedRoles.has("teacher") ||
+        authenticatedRoles.has("coordinator") ||
+        isAssignedTeacher()
+      ) &&
+      ["draft", "returned"].includes(state)
+    ) {
+      submitForReviewButton.hidden = false;
+    }
+
+    if (authenticatedRoles.has("authority") && state === "approved") {
       authorizeButton.hidden = false;
     }
 
-    if (["coordinador-academico", "revisor"].includes(role.value)) {
+    if (hasAnyRole(PROGRAM_REVIEWERS)) {
       if (state === "submitted") {
         reviewButton.hidden = false;
       }
@@ -897,17 +1037,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         returnButton.hidden = false;
         approveButton.hidden = false;
       }
+    }
 
-      if (role.value === "coordinador-academico" && state === "authorized") {
-        const latestVersion = getLatestVersion();
-        const canCreateVersion =
-          latestVersion?.id === currentVersion?.id &&
-          latestVersion.estado === "authorized" &&
-          program?.version_actual === currentVersion?.numero_version;
+    if (hasAnyRole(PROGRAM_MANAGERS) && state === "authorized") {
+      const latestVersion = getLatestVersion();
+      const canCreateVersion =
+        latestVersion?.id === currentVersion?.id &&
+        latestVersion.estado === "authorized" &&
+        program?.version_actual === currentVersion?.numero_version;
 
-        if (canCreateVersion) {
-          createVersionButton.hidden = false;
-        }
+      if (canCreateVersion) {
+        createVersionButton.hidden = false;
       }
     }
 
@@ -997,7 +1137,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const metadata = createElement("div", "pdf-metadata");
     [
       ["Versión", String(currentVersionNumber)],
-      ["Emisión", new Date().toLocaleDateString("es-GT")],
+      ["Emisión", formatApiDate(new Date().toISOString())],
       ["Estado", programStatus.textContent.trim()],
     ].forEach(([tagName, dataItem]) => {
       const metadataItem = createElement("div", "pdf-metadata-item");
@@ -1079,7 +1219,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const date = createElement(
       "p",
       "pdf-authorization-date",
-      `Facultad de ${getValue("faculty") || "—"} · ${new Date().toLocaleDateString("es-GT")}`,
+      `Facultad de ${getValue("faculty") || "—"} · ${formatApiDate(new Date().toISOString())}`,
     );
     authorization.append(date);
 
@@ -1088,6 +1228,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       ["Elaborado por", instructor.value.trim()],
       ["Decanatura", deanName.value.trim()],
       ["Coordinación académica", coordinatorName.value.trim()],
+      ["Revisor", reviewerName.value.trim()],
     ].forEach(([roleTitle, name]) => {
       const signature = createElement("div", "pdf-signature");
       signature.append(
@@ -1139,7 +1280,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Abre el diálogo de impresión con el formato que aparece en la vista previa.
-  printPdfButton.addEventListener("click", () => window.print());
+  printPdfButton.addEventListener("click", () => {
+    buildPdfDocument();
+    pdfDocument.hidden = false;
+    document.body.classList.add("pdf-preview-mode");
+    updateInterface();
+    window.requestAnimationFrame(() => window.print());
+  });
 
   closePreviewButton.addEventListener("click", () => {
     document.body.classList.remove("pdf-preview-mode");
@@ -1148,81 +1295,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     showMessage("Vista previa cerrada.");
   });
 
-  loginForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!programId) {
-      loginStatus.textContent = "Abre la página con un identificador válido: ?program_id=123.";
-      return;
-    }
-
-    loginSubmit.disabled = true;
-    loginStatus.textContent = "Validando credenciales...";
-    try {
-      const response = await fetch(`${API}/auth/login`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          correo: loginEmail.value.trim(),
-          password: loginPassword.value,
-        }),
-      });
-      const result = await parseResponse(response);
-      if (!response.ok) {
-        throw new Error(
-          result.error?.message ||
-            result.mensaje ||
-            result.detail ||
-            `No se pudo iniciar sesión: ${response.status}`,
-        );
-      }
-      if (!result.access_token) {
-        throw new Error("La API no devolvió un token de acceso.");
-      }
-
-      accessToken = result.access_token;
-      sessionStorage.setItem(TOKEN_KEY, accessToken);
-      loginPassword.value = "";
-      const user = await request("/me");
-      await openProgramForUser(user);
-      loginStatus.textContent = "";
-    } catch (error) {
-      console.error(error);
-      accessToken = null;
-      sessionStorage.removeItem(TOKEN_KEY);
-      loginStatus.textContent = error.message;
-    } finally {
-      loginSubmit.disabled = false;
-    }
-  });
-
-  logoutButton.addEventListener("click", async () => {
-    let logoutError = null;
-    try {
-      await request("/auth/logout", { method: "POST" });
-    } catch (error) {
-      logoutError = error;
-      console.error(error);
-    } finally {
-      accessToken = null;
-      authenticatedUser = null;
-      sessionStorage.removeItem(TOKEN_KEY);
-      appContainer.hidden = true;
-      loginPanel.hidden = false;
-      role.replaceChildren();
-      loginStatus.textContent = logoutError
-        ? `Se quitó la sesión de este navegador, pero el servidor no confirmó el cierre: ${logoutError.message}`
-        : "Sesión cerrada.";
-    }
-  });
-
   async function restoreSession() {
-    if (!programId) {
-      loginSubmit.disabled = true;
-      loginStatus.textContent = "Abre la página con un identificador válido: ?program_id=123.";
+    if (!accessToken) {
+      loginStatus.textContent = "Primero inicia sesión desde el portal UDV.";
       return;
     }
-    if (!accessToken) return;
 
     try {
       const user = await request("/me");
@@ -1231,7 +1308,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error(error);
       accessToken = null;
       sessionStorage.removeItem(TOKEN_KEY);
-      loginStatus.textContent = `La sesión guardada ya no es válida. Inicia sesión de nuevo. ${error.message}`;
+      loginStatus.textContent = `No se pudo validar la sesión compartida: ${error.message}`;
     }
   }
 

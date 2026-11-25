@@ -40,6 +40,7 @@ Todas las rutas llevan el prefijo `/api/v1` (CONTRATO_COMUN.md §1).
 | POST | /tasks/{id}/cancel | Cancelar según reglas |
 | GET | /tasks/{id}/assignments | Monitorear destinatarios (individual y agregado) |
 | POST | /assignments/{id}/close | Cerrar una asignación aprobada |
+| POST | /assignments/{id}/reopen | Regresar a revisión una asignación aprobada (exige `comment`) |
 | GET | /assignments/{id}/history | Historial de transiciones |
 
 Transiciones válidas (la máquina de estados es LEY — el Grupo 4 pinta lo que
@@ -55,6 +56,7 @@ esta tabla permite, nunca más):
 | returned | resubmit | submitted | Docente destinatario | G4 `/assignments/{id}/resubmit` |
 | under_review | approve | approved | Revisor o autoridad | G4 `/assignments/{id}/approve` |
 | approved | close | closed | Coordinador o sistema | G3 `/assignments/{id}/close` |
+| approved | reopen | under_review | Coordinador de la tarea, con observación | G3 `/assignments/{id}/reopen` |
 | draft/assigned | cancel | cancelled | Coordinador autorizado | G3 `/tasks/{id}/cancel` |
 
 **Quién hace qué.** El G3 es dueño del **servicio de transiciones** (en
@@ -83,6 +85,14 @@ asignaciones cuando se cancela una tarea publicada.
 - Una transición fuera de la tabla responde **409 sin modificar datos**.
 - Toda devolución exige comentario: devolver sin observación responde **422**.
 - Un usuario que no es destinatario no puede iniciar ni entregar (403).
+- `submit` / `resubmit` en un tipo de tarea con `requiere_archivo = 1` sin ningún
+  archivo vinculado al intento actual responden **422** y no modifican datos.
+- Tabla `entrega` (decisión del PM, 13-nov-2026; aplica a G3 y G4). **Intento
+  actual** = la última fila de `entrega` de la asignación que no tiene una
+  transición `submitted` posterior en `tarea_transicion`. G4 crea esa fila (y
+  enlaza `archivo.entrega_id`) al vincular el archivo. En `submit` / `resubmit`,
+  G3 usa el intento actual y solo si no existe lo crea (`numero_intento = MAX + 1`,
+  con el texto del borrador); nunca se crean dos intentos para un mismo envío.
 - Fechas límite y prioridad se copian o resuelven consistentemente en la
   asignación.
 - Cada transición corre dentro de una transacción de base de datos.
@@ -109,3 +119,11 @@ asignaciones cuando se cancela una tarea publicada.
 |---|---|---|---|
 | 2026-09-26 | Versión inicial | — | PM |
 | 2026-09-28 | Jerarquía de fuentes; prefijo `/api/v1`; **nuevo** `POST /assignments/{id}/close` (la acción `close` no tenía endpoint); columna "Endpoint dueño" y reparto G3 servicio / G4 endpoints; nota tarea vs. asignación; eventos emitidos; reglas del .docx que faltaban (409, 422, independencia, idempotente o 409); checklist con pruebas y OpenAPI | PM | PM |
+| 2026-11-14 | §4: `submit`/`resubmit` responden 422 si el tipo exige archivo y el intento actual no tiene ninguno; regla del intento actual de `entrega` compartida con G4 | PM (decisión del 13-nov) y hallazgo de QA | Pendiente |
+| 2026-11-17 | `POST /tasks` y `PATCH /tasks/{id}` aceptan `course_id` y `period_id` (columnas `curso_id` y `periodo_id` de G1, opcionales; 422 si no existen) y toda tarea los devuelve con `course_code`, `course_name`, `period_code` y `program_version_id`. **Nuevo** `GET /tasks/eligible-teachers?course_id=&period_id=`: docentes del curso según `docente_curso`, solo coordinación | Interfaz Vinci (el coordinador indica de qué curso es la tarea) | PM (17-nov), hecho por el PM tras el cierre de entregas |
+| 2026-11-17 | `submit`/`resubmit` ponen en la entrega del intento el texto vigente del borrador (esquema 1.2.3). Las tareas devuelven `created_by_name` y `reviewer_name`. Corregido `GET /assignments/{id}/history`, que respondía 500 desde que la tarea trae el curso | Interfaz Vinci | PM (17-nov), hecho por el PM |
+| 2026-11-17 | **Tipos de tarea nuevos:** `POST /task-types` ya funciona con MySQL (antes 403). Cuerpo `{name*, delivery?, description?, code?}`; `delivery` es `texto` (sin archivos), `ambos` (texto y archivo opcional, por defecto) o `archivo` (exige al menos un archivo). Crea el tipo y su workflow copiando las transiciones y roles del flujo estándar. Lo usan coordinación, autoridad o admin; 409 si ya existe el nombre; 422 si falta el nombre o `delivery` no es válido. `GET /task-types` agrega `delivery_mode` y `description` | Durante el período aparecen tareas que no están en el catálogo inicial (PM, 17-nov) | PM (17-nov), hecho por el PM |
+| 2026-11-18 | `GET /tasks?include=progress` agrega a cada tarea `progress: {total, done, to_review, overdue_pending, by_status, assignee_name}` (una sola consulta para toda la página). Sin `include` la respuesta no cambia | La lista de tareas de Vinci pedía las asignaciones de cada tarea por separado | PM (18-nov), hecho por el PM |
+| 2026-11-18 | `progress` de `GET /tasks?include=progress` agrega `assignee_names`: los nombres de todos los destinatarios (sin cancelados), en orden alfabético | Buscar una tarea por docente solo encontraba las de un destinatario | PM (18-nov), hecho por el PM |
+| 2026-11-18 | `GET /tasks`: una tarea ya publicada que tiene `eliminado_en` (baja administrativa, por ejemplo datos de prueba retirados) no se lista en ninguna pestaña. Un borrador cancelado desde la aplicación sigue saliendo en «Canceladas» | Las tareas de prueba retiradas de Railway seguían apareciendo como canceladas | PM (18-nov), hecho por el PM |
+| 2026-11-20 | **Nuevo** `POST /assignments/{id}/reopen` con `{"comment": "..."}`: la coordinación dueña de la tarea regresa a revisión una entrega aprobada (`approved` → `under_review`). `422` sin observación, `403` si no es esa coordinación, `409 INVALID_TRANSITION` desde otro estado (una cerrada ya no se regresa) y `409 PROGRAM_TASK` si la tarea se entrega con un programa de curso. Quien revisa decide después con `approve` o `return` | Pedido del ingeniero | PM (20-nov) |

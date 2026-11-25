@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión docente</title>
+  <meta name="description" content="Las tareas académicas de la Universidad Da Vinci de Guatemala, de la asignación a la aprobación, en un solo lugar.">
+  <link rel="icon" href="/udv-styles/udv-escudo.png">
+  <link rel="stylesheet" href="/udv-styles/udv.css">
+  <link rel="stylesheet" href="/app/css/vinci.css">
+</head>
+<body class="vinci vinci--blanco">
+
+<header class="l-barra">
+  <div class="l-in l-barra__in">
+    <a class="l-marca" href="/app/">
+      <img src="/udv-styles/udv-escudo.png" alt="Escudo de la Universidad Da Vinci de Guatemala">
+      <span class="l-marca__txt">
+        <span class="l-marca__nombre" data-app="nombre"></span>
+        <span class="l-marca__sub">Gestión docente</span>
+      </span>
+    </a>
+    <nav class="l-nav" aria-label="Secciones">
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#perfiles">Perfiles</a>
+      <a href="#incluye">Qué incluye</a>
+      <a class="l-nav__entrar" href="#acceso">Iniciar sesión</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="l-hero">
+    <div class="l-in l-hero__in">
+      <div class="l-hero__texto">
+        <p class="l-hero__pre">Universidad Da Vinci de Guatemala · Facultad de Ingeniería</p>
+        <h1>Las tareas académicas, de la asignación a la aprobación.</h1>
+        <p class="l-hero__lead"><span data-app="nombre"></span> reúne en un solo lugar lo que la coordinación pide, lo que cada docente entrega y lo que se revisa y aprueba. Cada tarea muestra en qué paso va y qué falta para avanzar.</p>
+        <div class="l-flujo" aria-hidden="true">
+          <span class="l-flujo__paso l-flujo__paso--hecho">Asignada</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso l-flujo__paso--actual">En curso</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">Entregada</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">En revisión</span><span class="l-flujo__raya"></span>
+          <span class="l-flujo__paso">Aprobada</span>
+        </div>
+      </div>
+
+      <form id="acceso" class="l-login" aria-labelledby="t-acceso" novalidate>
+        <div class="l-login__cab">
+          <h2 id="t-acceso">Iniciar sesión</h2>
+          <p>Entra con tu cuenta institucional.</p>
+        </div>
+        <div id="login-aviso" aria-live="polite"></div>
+        <div class="v-campo">
+          <label for="correo">Correo</label>
+          <input id="correo" name="correo" type="email" placeholder="nombre@udv.edu.gt" autocomplete="username" required>
+        </div>
+        <div class="v-campo">
+          <label for="clave">Contraseña</label>
+          <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+        </div>
+        <button id="entrar" class="v-btn" type="submit">Entrar</button>
+        <p class="l-login__ayuda">¿No puedes entrar? Escribe a la administración del sistema para restablecer tu acceso.</p>
+      </form>
+    </div>
+  </section>
+
+  <section id="como-funciona" class="l-seccion">
+    <div class="l-in l-seccion__in">
+      <div class="l-seccion__cab">
+        <p class="l-pre">Cómo funciona</p>
+        <h2>Cuatro pasos, siempre a la vista</h2>
+        <p>Toda tarea recorre el mismo camino. En cada paso el sistema dice a quién le toca y qué necesita para pasar al siguiente.</p>
+      </div>
+      <ol class="l-pasos">
+        <li><span class="l-pre">Paso 1 · Coordinación</span><h3>Asignar</h3><p>Crea la tarea, elige a los docentes y fija la fecha límite. Al publicarla, a cada docente le llega su aviso.</p></li>
+        <li><span class="l-pre">Paso 2 · Docente</span><h3>Entregar</h3><p>Abre la tarea, ve lo que se le pide y lo completa: un archivo, una confirmación o el programa del curso, según el tipo.</p></li>
+        <li><span class="l-pre">Paso 3 · Coordinación</span><h3>Revisar</h3><p>Lee la entrega y sus archivos. Si falta algo, la devuelve con una observación y el docente la corrige sobre la misma tarea.</p></li>
+        <li class="l-pasos__ultimo"><span class="l-pre">Paso 4 · Coordinación</span><h3>Aprobar</h3><p>Aprueba y cierra. Queda el historial completo: quién hizo qué y cuándo, con cada versión de lo entregado.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="perfiles" class="l-seccion l-seccion--gris">
+    <div class="l-in l-seccion__in">
+      <div class="l-seccion__cab">
+        <p class="l-pre">Perfiles</p>
+        <h2>Cada quien entra a lo suyo</h2>
+      </div>
+      <div class="l-perfiles">
+        <article>
+          <h3>Docente</h3>
+          <p>Ve sus tareas ordenadas por lo que urge, entrega y atiende las devoluciones.</p>
+          <ul><li>Mis tareas, con vencidas y por vencer</li><li>Programa de curso y sus versiones anteriores</li><li>Avisos cuando algo cambia</li></ul>
+        </article>
+        <article>
+          <h3>Coordinación</h3>
+          <p>Crea y publica tareas, revisa las entregas, aprueba y autoriza los programas.</p>
+          <ul><li>Nueva tarea en cuatro pasos</li><li>Por revisar, con lo más antiguo primero</li><li>Avance por docente y cumplimiento</li></ul>
+        </article>
+        <article>
+          <h3>Administración</h3>
+          <p>Mantiene usuarios y catálogos, y consulta la auditoría sin modificar nada.</p>
+          <ul><li>Usuarios y roles</li><li>Sedes, cursos y períodos</li><li>Registro de cada acción</li></ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="incluye" class="l-seccion">
+    <div class="l-in l-incluye">
+      <div class="l-incluye__cab">
+        <p class="l-pre">Qué incluye</p>
+        <h2>Todo el recorrido en una sola aplicación</h2>
+      </div>
+      <div class="l-incluye__grid">
+        <div><h3>Tareas y entregas</h3><p>Estados claros, archivos por intento y devoluciones con observación.</p></div>
+        <div><h3>Programas de curso</h3><p>Por unidad y módulo, con versiones, cambios entre una y otra y PDF oficial.</p></div>
+        <div><h3>Notificaciones</h3><p>Aviso al asignar, entregar, devolver y aprobar, y antes de cada vencimiento.</p></div>
+        <div><h3>Panel de cumplimiento</h3><p>Tareas por estado, vencidas, próximas a vencer y avance por docente.</p></div>
+        <div><h3>Auditoría</h3><p>Cada acción queda registrada con su autor, fecha y cambio.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="l-pie">
+  <div class="l-in l-pie__in">
+    <img src="/udv-styles/udv-facultad.png" alt="Facultad de Ingeniería, Universidad Da Vinci de Guatemala">
+    <p><span data-app="nombre"></span> · Gestión docente<br>Universidad Da Vinci de Guatemala · <span data-app="anio"></span></p>
+  </div>
+</footer>
+
+<script type="module" src="/app/js/paginas/landing.js"></script>
+</body>
+</html>

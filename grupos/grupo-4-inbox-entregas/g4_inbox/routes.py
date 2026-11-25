@@ -26,7 +26,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from g2_api.routers.auth import obtener_usuario_actual
 from g2_api.models import Usuario
@@ -39,32 +39,44 @@ from .inbox import Asignacion, ErrorValidacion, listar_inbox, resumen_inbox
 # quedan solo para pruebas: G4_USAR_MYSQL=0 (lo pone tests/conftest.py).
 USAR_MYSQL = os.environ.get("G4_USAR_MYSQL", "1") != "0"
 
-from . import database
+from . import database, revision
 
 router = APIRouter(prefix="/api/v1", tags=["G4 - Inbox y entregas"])
 
 # Códigos de la tabla rol de G1. Quién puede hacer qué con una asignación ajena:
 #   - el docente dueño: todo (ver, comentar, modificar borrador y archivos)
-#   - reviewer, coordinator, admin: ver y comentar, pero NO tocar la entrega
+#   - coordinator, admin: ver y comentar, pero NO tocar la entrega
+#   - reviewer: lo mismo, pero solo si es el revisor designado de la tarea
+#     (tarea.revisor_id). Un revisor cualquiera no ve entregas ajenas.
 #   - auditor: solo ver (ni comentar ni modificar)
-ROLES_CON_ACCESO_GLOBAL = {"reviewer", "coordinator", "admin"}
-ROLES_SOLO_LECTURA = {"auditor"}
+ROLES_CON_ACCESO_GLOBAL = {"coordinator", "admin"}
+# La autoridad puede aprobar cualquier entrega en G3 (workflow.matrix): necesita verla para decidir.
+ROLES_SOLO_LECTURA = {"auditor", "authority"}
 
 
-def _exigir_acceso(asignacion: dict, usuario: Usuario, permiso: str) -> None:
-    """Corta con 403 si el usuario no puede hacer `permiso` sobre esta asignación.
+def _puede(asignacion: dict, usuario: Usuario, permiso: str) -> bool:
+    """True si el usuario puede hacer `permiso` sobre esta asignación.
 
     permiso: "ver", "comentar" o "modificar" (borrador y archivos del docente).
     """
     assert permiso in ("ver", "comentar", "modificar")
     if asignacion["assignee_id"] == usuario.id:
-        return
+        return True
     roles = {r.codigo for r in (usuario.roles or [])}
-    if permiso == "ver" and roles & (ROLES_CON_ACCESO_GLOBAL | ROLES_SOLO_LECTURA):
-        return
-    if permiso == "comentar" and roles & ROLES_CON_ACCESO_GLOBAL:
-        return
-    raise HTTPException(status_code=403, detail="No tienes acceso a esta asignación")
+    if "reviewer" in roles and asignacion.get("reviewer_id") == usuario.id:
+        roles.add("revisor_designado")
+    puede_ver_y_comentar = bool(roles & (ROLES_CON_ACCESO_GLOBAL | {"revisor_designado"}))
+    if permiso == "ver":
+        return puede_ver_y_comentar or bool(roles & ROLES_SOLO_LECTURA)
+    if permiso == "comentar":
+        return puede_ver_y_comentar
+    return False
+
+
+def _exigir_acceso(asignacion: dict, usuario: Usuario, permiso: str) -> None:
+    """Corta con 403 si el usuario no puede hacer `permiso` sobre esta asignación."""
+    if not _puede(asignacion, usuario, permiso):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta asignación")
 
 
 # ============================================================================
@@ -114,7 +126,16 @@ def _construir_db() -> List[dict]:
     for item in base:
         item.update(DETALLE_EXTRA.get(item["id"], {}))
         item["requiere_archivo"] = REQUIERE_ARCHIVO_POR_TIPO.get(item["task_type"], True)
+        item["reviewer_id"] = 5  # en los datos de ejemplo el revisor designado es el usuario 5
+        # Cómo se entrega, como lo manda database.py con tipo_tarea de G1
+        item["delivery"] = {"mode": "ambos" if item["requiere_archivo"] else "texto",
+                            "extensions": ["jpeg", "jpg", "pdf", "png"], "max_mb": 5, "not_accepted": []}
+        item["program_version"] = None
         item["history"] = [{"action": "publish", "new_status": "assigned", "actor": "coordinacion"}]
+        item["last_return"] = None
+        item["last_approval"] = None
+        if item["status"] == "returned" and item["comments"]:
+            item["last_return"] = {"comment": item["comments"][-1]["text"], "at": None, "actor": "revisor1"}
     return base
 
 
@@ -151,7 +172,7 @@ class BorradorIn(BaseModel):
 
 
 class ComentarioIn(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=5000)
 
 
 class ArchivoIn(BaseModel):
@@ -181,6 +202,43 @@ def inbox_summary(usuario: Usuario = Depends(obtener_usuario_actual)):
 
 
 # ============================================================================
+# 2b. BANDEJA DE REVISIÓN
+# ============================================================================
+def _cola_en_memoria(usuario: Usuario) -> List[dict]:
+    """Igual que database.fetch_cola_revision, sobre los datos de ejemplo."""
+    roles = {r.codigo for r in (usuario.roles or [])}
+    ve_todas = bool(roles & {"coordinator", "admin"})
+    filas = []
+    for a in DB:
+        if a["status"] not in revision.ESTADOS_COLA:
+            continue
+        revisor = a.get("reviewer_id")
+        if not (ve_todas or revisor == usuario.id):
+            continue
+        filas.append({
+            "id": a["id"], "assignee_id": a["assignee_id"], "teacher": f"Docente {a['assignee_id']}",
+            "title": a["title"], "task_type": a["task_type"], "status": a["status"],
+            "priority": a["priority"], "due_at": a["due_at"], "submitted_at": None,
+            "attempt": None, "files": len(a["files"]), "last_transition_id": a["id"],
+        })
+    return filas
+
+
+@router.get("/review-queue")
+def bandeja_de_revision(q: str = "", status: Optional[str] = None, page: int = 1,
+                        per_page: int = 20, usuario: Usuario = Depends(obtener_usuario_actual)):
+    """Entregas que le tocan revisar al usuario: primero las pendientes."""
+    roles = [r.codigo for r in (usuario.roles or [])]
+    if not revision.puede_usar_la_bandeja(roles):
+        raise HTTPException(status_code=403, detail="La bandeja de revisión es para revisores, coordinación y administración")
+    filas = database.fetch_cola_revision(usuario.id, roles) if USAR_MYSQL else _cola_en_memoria(usuario)
+    try:
+        return revision.listar_cola(filas, q=q, status=status, page=page, per_page=per_page)
+    except ErrorValidacion as e:
+        raise HTTPException(status_code=422, detail=e.details)
+
+
+# ============================================================================
 # 3. DETALLE
 # ============================================================================
 @router.get("/assignments/{assignment_id}")
@@ -189,7 +247,60 @@ def detalle_asignacion(assignment_id: int, usuario: Usuario = Depends(obtener_us
     if not a:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "ver")
-    return {**a, "allowed_actions": acciones_permitidas(a)}
+    permitidas = acciones_permitidas(a)
+    if _se_entrega_con_programa(a):
+        # G3 responde 409 PROGRAM_TASK: la tarea de programa no se regresa a revisión.
+        permitidas = [accion for accion in permitidas if accion != "reopen"]
+    return {**a, "allowed_actions": permitidas,
+            "viewer": _papel_del_usuario(a, usuario),
+            "viewer_actions": _acciones_de_quien_mira(a, usuario, permitidas)}
+
+
+def _se_entrega_con_programa(asignacion: dict) -> bool:
+    """La tarea se entrega con un programa de curso (por su tipo o porque ya tiene uno)."""
+    return bool((asignacion.get("delivery") or {}).get("mode") == "programa"
+                or asignacion.get("program_version_id") or asignacion.get("program_version"))
+
+
+def _acciones_de_quien_mira(asignacion: dict, usuario: Usuario, permitidas: List[str]) -> List[str]:
+    """De las acciones que el estado permite, las que puede ejecutar quien está viendo.
+
+    `allowed_actions` depende solo del estado; esto lo cruza con la persona, con las
+    mismas reglas de workflow.matrix (G3). Es una ayuda para la pantalla: quien decide
+    es G3 al ejecutar la acción.
+    """
+    roles = {r.codigo for r in (usuario.roles or [])}
+    yo = usuario.id
+    revisor = asignacion.get("reviewer_id")
+    creador = asignacion.get("created_by")
+    es_docente = asignacion["assignee_id"] == yo
+    if revisor is not None:
+        revisa = revisor == yo and bool(roles & {"reviewer", "coordinator", "admin"})
+    else:
+        revisa = "admin" in roles or ("coordinator" in roles and creador == yo)
+    aprueba = "authority" in roles or ("reviewer" in roles and revisor == yo)
+    cierra = "coordinator" in roles and creador == yo
+    puede = {"start": es_docente, "submit": es_docente, "resubmit": es_docente,
+             "review": revisa, "return": revisa, "approve": aprueba, "close": cierra,
+             "reopen": cierra}
+    return [accion for accion in permitidas if puede.get(accion, False)]
+
+
+def _papel_del_usuario(asignacion: dict, usuario: Usuario) -> dict:
+    """Le dice a la pantalla qué botones mostrar a quien está viendo.
+
+    Solo es para la pantalla: quien decide de verdad es G3 al ejecutar la
+    acción. Misma regla que G3: si la tarea tiene revisor, solo él revisa;
+    si no tiene, coordinación o admin.
+    """
+    roles = {r.codigo for r in (usuario.roles or [])}
+    revisor = asignacion.get("reviewer_id")
+    if revisor is not None:
+        es_revisor = revisor == usuario.id
+    else:
+        es_revisor = bool(roles & {"coordinator", "admin"})
+    return {"is_assignee": asignacion["assignee_id"] == usuario.id, "is_reviewer": es_revisor,
+            "can_comment": _puede(asignacion, usuario, "comentar")}
 
 
 # ============================================================================
@@ -202,8 +313,14 @@ def guardar_borrador(assignment_id: int, borrador: BorradorIn,
     if not a:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "modificar")
-    a["draft_comment"] = borrador.comment
-    return {"status": "borrador guardado", "draft_comment": a["draft_comment"]}
+    if USAR_MYSQL:
+        try:
+            database.guardar_borrador(assignment_id, borrador.comment, usuario.id)
+        except database.ErrorConflicto as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    else:
+        a["draft_comment"] = borrador.comment
+    return {"status": "borrador guardado", "draft_comment": borrador.comment}
 
 
 # ============================================================================
@@ -225,7 +342,10 @@ def crear_comentario(assignment_id: int, comentario: ComentarioIn,
     if not a:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "comentar")
-    nuevo = {"author": str(usuario.id), "text": comentario.text}
+    if USAR_MYSQL:
+        return database.crear_comentario(assignment_id, usuario.id, comentario.text)
+    nuevo = {"id": len(a["comments"]) + 1, "author": str(usuario.id),
+             "author_name": f"Usuario {usuario.id}", "text": comentario.text, "at": None}
     a["comments"].append(nuevo)
     return nuevo
 
@@ -240,5 +360,38 @@ def vincular_archivo(assignment_id: int, archivo: ArchivoIn,
     if not a:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     _exigir_acceso(a, usuario, "modificar")
-    a["files"].append({"file_id": archivo.file_id, "name": archivo.name})
-    return {"status": "archivo vinculado", "files": a["files"]}
+    if not USAR_MYSQL:
+        a["files"].append({"file_id": archivo.file_id, "name": archivo.name})
+        return {"status": "archivo vinculado", "files": a["files"]}
+    try:
+        intento = database.vincular_archivo(assignment_id, archivo.file_id, usuario.id)
+    except database.ArchivoNoEncontrado as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except database.ErrorConflicto as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    a = buscar_asignacion(assignment_id)  # releer: los archivos salen de la base
+    return {"status": "archivo vinculado", "files": a["files"], **intento}
+
+
+@router.delete("/assignments/{assignment_id}/files/{file_id}")
+def quitar_archivo(assignment_id: int, file_id: str,
+                   usuario: Usuario = Depends(obtener_usuario_actual)):
+    """Quita un archivo del intento que todavía no se envió (el docente subió el que no era)."""
+    a = buscar_asignacion(assignment_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Asignación no encontrada")
+    _exigir_acceso(a, usuario, "modificar")
+    if not USAR_MYSQL:
+        antes = len(a["files"])
+        a["files"] = [f for f in a["files"] if str(f.get("file_id")) != str(file_id)]
+        if len(a["files"]) == antes:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        return {"status": "archivo quitado", "files": a["files"]}
+    try:
+        database.desvincular_archivo(assignment_id, file_id, usuario.id)
+    except database.ArchivoNoEncontrado as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except database.ErrorConflicto as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    a = buscar_asignacion(assignment_id)
+    return {"status": "archivo quitado", "files": a["files"]}

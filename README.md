@@ -40,7 +40,7 @@ construye un módulo y todos se integran por contratos de endpoints.
 |---|---|---|---|
 | 1 | Base de datos (modelo, migraciones, semillas, vistas) | `grupos/grupo-1-base-de-datos/` | `g1_bd` |
 | 2 | API base y seguridad (auth, roles, archivos, OpenAPI) | `grupos/grupo-2-api-seguridad/` | `g2_api` |
-| 3 | Workflow y tareas (tipos, publicación, transiciones) | `grupos/grupo-3-workflow-tareas/` | `g3_workflow` |
+| 3 | Workflow y tareas (tipos, publicación, transiciones) | `grupos/grupo-3-workflow-tareas/` | `workflow` |
 | 4 | Inbox y entregas (experiencia del docente y revisor) | `grupos/grupo-4-inbox-entregas/` | `g4_inbox` |
 | 5 | Programas de curso, versiones y PDF | `grupos/grupo-5-programas-pdf/` | `g5_programas` |
 | 6 | Administración, notificaciones, pruebas y despliegue | `grupos/grupo-6-administracion/` | `g6_admin` |
@@ -49,6 +49,10 @@ Cada carpeta de grupo contiene su **CONTRATO.md** (resumen operativo,
 contrato de endpoints y checklist de PR) y su **documento de requerimientos
 completo** (.docx). El contrato es lo que se evalúa en cada PR, junto con el
 `CONTRATO_COMUN.md`.
+
+Fuera de los seis grupos, el PM mantiene `grupos/udv-styles/` (estilos
+compartidos), `portal/` (inicio y login) y `tests/integracion/` (pruebas de la
+aplicación completa).
 
 ## 3. Mapa de dependencias (quién necesita a quién)
 
@@ -84,9 +88,10 @@ endpoints) usando datos de ejemplo, y avísale al PM para coordinar fechas.
   carpeta de otro grupo invalida el PR completo.
 - **La raíz es del PM.** `README.md`, `CONTRATO_COMUN.md`, `requirements.txt`,
   `requirements-base.txt`, `.gitignore`, `.env.example`, `main.py` (punto de
-  entrada), `Dockerfile`, `docker-compose.yml`, `.dockerignore` y
-  `railway.json` los mantiene el PM. Si tu grupo necesita un cambio en la
-  raíz, lo pide al PM. Ningún grupo crea carpetas ni archivos en la raíz.
+  entrada), `Dockerfile`, `docker-compose.yml`, `.dockerignore`,
+  `railway.json`, `portal/`, `tests/integracion/` y `grupos/udv-styles/` los
+  mantiene el PM. Si tu grupo necesita un cambio en la raíz, lo pide al PM.
+  Ningún grupo crea carpetas ni archivos en la raíz.
 
 ### Estructura del código dentro de cada carpeta
 
@@ -114,6 +119,43 @@ cada módulo expone uno o más `APIRouter` con la ruta completa
 tumbar la app y aparece como pendiente en `GET /health`. Los archivos
 estáticos y estilos compartidos los sirve `main.py`, no los grupos.
 
+### Interfaz
+
+La aplicación que usa la gente es **Vinci** ("Gestión docente · Universidad
+Da Vinci de Guatemala"): una sola interfaz organizada por perfil y por estado,
+construida por el PM en `portal/` sobre la API de los seis grupos. Es HTML, CSS
+y JavaScript sin paso de compilación, y es la única interfaz que `main.py`
+publica (lista `PANTALLAS`):
+
+| Ruta | Qué es | Carpeta |
+|---|---|---|
+| `/app/` | **Vinci**: presentación, acceso y toda la aplicación (PM) | `portal/` |
+| `/udv-styles/udv.css` | Estilos compartidos (PM) | `grupos/udv-styles/` |
+
+Las pantallas que entregó cada grupo siguen en su carpeta (`frontend/`,
+`frontend-login/`, `g4_inbox/static/`, `g6_admin/pantallas/`) como parte de su
+entrega, pero desde el 18 de noviembre ya no se publican en `/app/g2/` … `/app/g6/`.
+
+`GET /` redirige a `/app/`. Las reglas que cumple toda pantalla (sesión,
+estilos, fechas) están en `CONTRATO_COMUN.md` §1b.
+
+Vinci muestra tres perfiles (decisión E): **Docente**, **Coordinación** y
+**Administración**. Sus páginas:
+
+| Página | Para quién | Qué hace |
+|---|---|---|
+| `index.html`, `inicio.html` | Todos | Presentación con el acceso; después de entrar, el inicio del perfil con lo que toca hoy |
+| `mis-tareas.html` | Docente | Sus asignaciones por estado, con vencidas y por vencer |
+| `asignacion.html` | Todos | Detalle de una asignación: línea de estados, qué falta para avanzar, la entrega (mensaje, archivos, programa), revisión, historial y comentarios |
+| `por-revisar.html` | Coordinación | Entregas que esperan revisión |
+| `tareas.html`, `tarea.html`, `nueva-tarea.html` | Coordinación | Lista de tareas, avance por docente, y creación en cuatro pasos (incluye crear un tipo de tarea nuevo) |
+| `programas.html`, `programa.html` | Todos (lectura); docente y coordinación (edición) | Programas de curso: versiones, editor por secciones, flujo de revisión y autorización, cambios y PDF |
+| `panel.html`, `notificaciones.html` | Coordinación y administración; todos | Indicadores de cumplimiento; avisos con enlace a su tarea o programa |
+
+Las pantallas de los grupos siguen publicadas en su ruta como evidencia de su
+trabajo, pero Vinci no las enlaza. Lo que la interfaz todavía resuelve con un
+rodeo por falta de una ruta está en `portal/NOTAS_BACKEND.md`.
+
 ### Dependencias
 
 - Cada grupo declara sus librerías en **su** `requirements.txt`.
@@ -131,22 +173,41 @@ estáticos y estilos compartidos los sirve `main.py`, no los grupos.
 
 | Tema | Estado | Quién decide | Plazo |
 |---|---|---|---|
-| Lenguaje del backend | ✅ **Python** | PM | Definido |
+| Lenguaje del backend | ✅ **Python 3.12** (la imagen del `Dockerfile`) | PM | Definido |
 | Framework web (FastAPI / Flask / Django) | ✅ **FastAPI** | PM, con propuesta del G2 | Definido 2026-10-10 |
-| ORM y herramienta de migraciones | ⏳ Pendiente (por ahora: scripts SQL del G1; SQLAlchemy sin `create_all`) | G1 + G2 proponen, PM aprueba | Semana 1 |
-| Motor de base de datos | ✅ **MySQL 8** (Railway en línea; Docker en local). Reemplaza a SQLite | G1 + G2 proponen, PM aprueba | Definido 2026-10-13 |
+| ORM y herramienta de migraciones | ✅ **SQLAlchemy** sin `create_all`. Las migraciones son scripts SQL numerados del G1 (`Docs/sql/migracion_X.Y.Z.sql`), registrados en la tabla `schema_migracion` | G1 + G2 proponen, PM aprueba | Definido 2026-11-17 (ya se trabajaba así) |
+| Motor de base de datos | ✅ **MySQL 8.4** (Railway en línea; Docker en local). Reemplaza a SQLite | G1 + G2 proponen, PM aprueba | Definido 2026-10-13 |
 | Driver de conexión | ✅ **PyMySQL** + `cryptography` (MySQL 8 la exige para el login) | PM | Definido 2026-10-13 |
 | Despliegue | ✅ **Docker** (`Dockerfile` de la raíz) en **Railway** | PM | Definido 2026-10-13 |
-| Valores de prioridad de tarea | ⏳ Pendiente: `low/medium/high` o agregar `urgent` | PM | 2026-10-14 |
-| Dueño de las acciones sobre asignaciones (start, submit, review, return, approve) | ⏳ Pendiente: G3 o G4 (no los dos) | PM, con G3 + G4 | Semana 1 |
+| Valores de prioridad de tarea | ✅ `low`, `medium`, `high`, `urgent` (catálogo `prioridad_tarea` del G1). Se valida contra la tabla, no contra una lista fija | PM | Definido 2026-11-12 |
+| Dueño de las acciones sobre asignaciones (start, submit, resubmit, review, return, approve, close) | ✅ **G3**. G4 muestra y prepara la entrega; no cambia estados | PM, con G3 + G4 | Definido 2026-11-13 |
 | Identificadores (enteros o UUID) | ✅ **Enteros** (autoincrementales) | G1 + G2 | Definido 2026-10-10 |
 | Versiones de librerías compartidas | ✅ Ver tabla abajo | PM | Definido 2026-10-10 |
-| Zona horaria institucional | ⏳ Pendiente | PM | Semana 1 |
-| Tecnología del frontend (pantallas de G3, G4, G5 y G6) | ⏳ Pendiente | PM | Semana 1 |
-| Transporte de eventos para notificaciones | ⏳ Pendiente | G3 + G6 proponen (con G1 si requiere tabla), PM aprueba | Semana 1 |
+| Zona horaria institucional | ✅ La base y la API trabajan en **UTC**; las pantallas muestran la hora de `America/Guatemala` (CONTRATO_COMUN §1 y §1b) | PM | Definido 2026-11-16 |
+| Tecnología del frontend (pantallas de G3, G4, G5 y G6) | ✅ **HTML, CSS y JavaScript** sin compilación, servidos por `main.py`, con los estilos de `/udv-styles/udv.css` (§4 "Interfaz") | PM | Definido 2026-11-11 |
+| Transporte de eventos para notificaciones | ✅ Tabla **`evento`** del G1: la llenan los triggers de la base y el G6 la convierte en notificaciones. Ningún módulo llama a otro para avisar | G3 + G6 proponen (con G1 si requiere tabla), PM aprueba | Definido 2026-11-17 (ya se trabajaba así) |
 
 Cuando una decisión se toma, se marca ✅ aquí y se anota en el historial.
 Hasta entonces, nadie escribe código que dependa de ella.
+
+### Decisiones de integración entre módulos
+
+Reglas que tocan a más de un grupo. El texto completo está en
+`CONTRATO_COMUN.md` §2c (A, B, D, E, G, H, I y J), §1b (F) y en el CONTRATO.md del G5 (C).
+
+| # | Tema | Decisión | Estado |
+|---|---|---|---|
+| A | Quién escribe la tabla `entrega` | G3 crea la fila al hacer `submit`/`resubmit`; G4 solo la crea al vincular el primer archivo si aún no existe | 2026-11-13 · en `main` |
+| B | Quién revisa una asignación | Con revisor designado, solo ese revisor; sin revisor, la coordinación dueña de la tarea o un administrador | 2026-11-12, revisada 2026-11-16 · en `main` |
+| C | Quién elabora el programa de curso | El docente elabora y envía el suyo; coordinación y revisor revisan y aprueban; dirección autoriza | 2026-11-13 · en `main`, con los permisos de la migración 1.2.2 |
+| D | Quién descarga un archivo | Dueño y administrador siempre; auditoría, cualquier archivo ya vinculado; revisor y coordinación solo en tareas donde son revisor designado o creador | 2026-11-16 · en `main` |
+| E | Perfil de coordinación | Coordinación, revisión y autoridad los ejerce la misma persona: su usuario tiene los roles `coordinator`, `reviewer` y `authority`. Los seis roles se conservan | 2026-11-17 · migración 1.2.2 |
+| F | Una sola interfaz | La aplicación es Vinci (`portal/`), organizada por perfil y estado. Las pantallas de los grupos quedan como evidencia y no se enlazan | 2026-11-17 · en `main` |
+| G | Qué puede hacer quien mira | El backend lo calcula y lo entrega en `viewer_actions` (asignaciones, G4; versiones de programa, G5). La pantalla pinta solo esos botones; no repite las reglas de permisos | 2026-11-17 · en `main` |
+| H | El programa nace de la tarea | La tarea «Actualizar programa» lleva curso y período (G3). El docente abre su borrador desde la tarea (G5): copia la última versión autorizada del curso o, si no hay, empieza en blanco. La entrega lo encuentra por la asignación (G4) | 2026-11-18 · en `main` |
+| I | Tipos de tarea | No son un catálogo cerrado: coordinación crea un tipo con su nombre y su forma de entrega (texto, texto y archivo opcional, archivo obligatorio). Todos usan el flujo estándar | 2026-11-18 · en `main` |
+| J | Quitar un archivo | El docente puede quitar un archivo del intento que todavía no envió; lo ya enviado no se modifica | 2026-11-18 · en `main` |
+| K | Quién escribe el programa | El contenido lo escribe y lo envía a revisión el docente responsable. Coordinación, revisión y administración lo leen, lo devuelven con una observación o lo aprueban, pero no lo corrigen; solo completan la sección de responsables. Si la versión no tiene responsable, la trabaja quien gestiona programas | 2026-11-18 · rama `pm/backend-vinci-13` |
 
 ### Versiones oficiales de librerías compartidas
 
@@ -164,26 +225,41 @@ pide al PM.
 | `pytest` | `9.1.1` |
 | `SQLAlchemy` | `2.1.1` |
 | `PyMySQL` | `1.1.1` |
-| `cryptography` | `44.0.2` |
+| `cryptography` | `50.0.2` |
+| `python-dotenv` | `1.2.3` |
 
 Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 
 ### Base de datos, entorno local y despliegue
 
-- **Una sola base:** `db_udv` en MySQL 8, con el esquema del G1. Ningún
-  grupo crea, borra ni altera tablas desde su código (nada de
-  `Base.metadata.create_all`); un cambio de esquema se le pide al G1.
+- **Una sola base:** `db_udv` en MySQL 8.4, con el esquema del G1 (versión
+  1.2.6). Ningún grupo crea, borra ni altera tablas desde su código (nada de
+  `Base.metadata.create_all`); un cambio de esquema se le pide al G1, que lo
+  entrega como migración numerada.
 - **Conexión:** siempre por la variable `DATABASE_URL`
   (`mysql+pymysql://usuario:clave@host:3306/db_udv`), nunca escrita en el
   código.
+- **Horas en UTC:** MySQL corre en UTC en local y en Railway, y cada módulo
+  ejecuta `SET time_zone = '+00:00'` al abrir la conexión. La API responde las
+  fechas con `Z` y la pantalla las convierte a hora de Guatemala.
 - **Local:** `cp .env.example .env` (y cambiar las claves) y luego
-  `docker compose up --build`. Levanta MySQL con los scripts del G1 y la API
-  en `http://localhost:8000/api/v1/docs`. `docker compose down -v` borra la
-  base local para recrearla. Cada grupo prueba contra su base local.
+  `docker compose up --build`. Levanta MySQL con los scripts del G1 y la
+  aplicación en `http://localhost:8000/app/` (portal) y
+  `http://localhost:8000/api/v1/docs` (Swagger). `docker compose down -v`
+  borra la base local para recrearla. Cada grupo prueba contra su base local.
+- **Cuentas de demostración:** las trae la semilla del G1, una por rol
+  (`admin`, `coordinator`, `teacher`, `reviewer`, `authority`, `auditor`). La
+  lista está en `grupos/grupo-1-base-de-datos/README.md`.
 - **En línea (Railway):** la base compartida es solo para integración y
-  demostración, no para pruebas que borran datos. La carga y recarga el PM.
-  Los grupos reciben por privado un usuario sin permisos de root.
-- **Salud:** `GET /health` (app y routers) y `GET /health/db` (conexión).
+  demostración, no para pruebas que borran datos. La carga y las migraciones
+  las aplica el PM. Los archivos subidos se guardan en un volumen
+  (`UPLOAD_DIR=/app/uploads`). El servicio lleva `APP_ENV=demostracion` y
+  `APP_VERSION` con la etiqueta desplegada.
+- **Salud:** `GET /health` (app, routers y pantallas montadas),
+  `GET /health/db` (conexión) y `GET /api/v1/health` (G6: versión, commit y
+  ambiente desplegados).
+- **Pruebas de integración:** `tests/integracion/` prueba la aplicación
+  completa contra MySQL con la base del G1 (instrucciones en su README).
 
 ## 6. El flujo de trabajo diario
 
@@ -191,7 +267,10 @@ Nada de rangos (`>=`, `<`, `~=`) en ningún `requirements.txt`: solo `==`.
 2. Commits pequeños y frecuentes con mensajes claros:
    `git commit -m "inbox: filtro por estado y vencimiento"`.
 3. `git push origin grupo-X` — tu trabajo queda respaldado y visible.
-4. Para integrar, **solo el coordinador del grupo** abre el Pull Request.
+4. Antes de pedir la integración: `git fetch origin` y
+   `git merge origin/main` en la rama del grupo, y correr las pruebas del
+   grupo y las de `tests/integracion/`. Lo que ahí falla, falla en Railway.
+5. Para integrar, **solo el coordinador del grupo** abre el Pull Request.
 
 **Sobre los puntos:** GitHub registra CADA commit con nombre y fecha — el
 historial individual es visible para siempre. Que el coordinador maneje el PR
@@ -235,3 +314,8 @@ tras revisión · **merge** = la integración aprobada.
 | 2026-09-28 | Jerarquía de fuentes de verdad (§0); `CONTRATO_COMUN.md`; raíz del PM, paquetes Python y `requirements.txt` por grupo (§4); tabla de decisiones técnicas (§5); sub-ramas por funcionalidad; regla dura 6 (pruebas) | README, CONTRATO.md, .docx y OpenAPI se declaraban fuente de verdad sin orden; la estructura por carpetas no permitía importar código entre grupos |
 | 2026-10-10 | §5: FastAPI, SQLite e identificadores enteros pasan a ✅; tabla de versiones oficiales de librerías compartidas. §4: los `requirements.txt` de subpaquetes solo apuntan al del grupo | G2, G3 y G4 ya escribían código sobre estas decisiones; G4 pedía `fastapi==0.115.0` y G2 `0.142.1`, y las dependencias de G3 y G4 no se instalaban desde la raíz |
 | 2026-10-13 | §5: motor MySQL 8 en lugar de SQLite; driver PyMySQL; despliegue con Docker en Railway; SQLAlchemy, PyMySQL y cryptography en versiones oficiales; prohibidos los rangos de versión; nueva sección de base de datos, entorno local y despliegue; prioridades y dueño de acciones de asignación quedan pendientes. §4: archivos nuevos de la raíz (`main.py`, Docker, `railway.json`, `requirements-base.txt`), regla de una sola app con `APIRouter` y ramas `qa/*` y `pm/*` documentadas | G1 montó el esquema en MySQL; el deploy en Railway fallaba porque `main` no tenía punto de entrada; G3, G4 y G5 levantaban cada uno su propia app y base; G3 y G4 usan prioridades distintas e implementan las mismas transiciones; QA se separó como equipo aparte y sus ramas no estaban documentadas |
+| 2026-11-17 | §2: el paquete del G3 es `workflow`; carpetas del PM. §4: `portal/`, `tests/integracion/` y `grupos/udv-styles/` en la raíz del PM; nueva sección "Interfaz" con las rutas de las pantallas. §5: quedan ✅ migraciones, prioridad (`urgent`), dueño de las acciones (G3), zona horaria (UTC), frontend y transporte de eventos; nueva tabla de decisiones de integración A–D; `python-dotenv` en versiones oficiales; base, entorno local y despliegue al día (MySQL 8.4, UTC, portal, cuentas de demostración, volumen, `/api/v1/health`, pruebas de integración). §6: mezclar `main` y correr las pruebas de integración antes del PR | El documento seguía como el 13-oct: marcaba pendientes seis decisiones ya tomadas y aplicadas, y no mencionaba el portal, las pantallas ni las pruebas de integración |
+| 2026-11-17 (noche) | §5: decisiones C y D en `main`; nueva decisión E (perfil de coordinación con tres roles); esquema 1.2.2 | Cierre de entregas de los grupos: el PM integra G2 y G5 y escribe la migración 1.2.2 que el G1 no entregó |
+| 2026-11-17 (noche, 2) | Esquema 1.2.3: el texto de una entrega se puede corregir mientras el intento no se haya enviado (cambia un trigger del G1; sin tablas nuevas) | El texto quedaba fijo al adjuntar el primer archivo y el docente no podía corregirlo antes de entregar |
+| 2026-11-18 | §4 "Interfaz": la aplicación es Vinci, con sus páginas por perfil; las pantallas de los grupos quedan como evidencia. §5: decisiones F (una sola interfaz), G (`viewer_actions`), H (el programa nace de la tarea), I (tipos de tarea que crea coordinación) y J (quitar un archivo antes de entregar) | Tras el cierre de entregas el PM unificó la interfaz y completó en el backend lo que hacía falta para que el flujo se pudiera recorrer de punta a punta (PR #48 a #58) |
+| 2026-11-18 (2) | §5: decisión K (el contenido del programa lo escribe y lo envía su docente responsable). `main.py` sirve las pantallas con `Cache-Control: no-cache` | QA (Cristóbal) reportó que coordinación podía editar el programa del docente, y una pantalla en blanco tras un despliegue por archivos viejos guardados en el navegador |

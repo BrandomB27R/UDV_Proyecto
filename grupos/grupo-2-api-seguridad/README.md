@@ -47,14 +47,15 @@ El archivo `.env` **nunca se sube** al repositorio. Se copia desde `.env.example
 | Variable | Para qué sirve |
 |-|-|
 | `DATABASE_URL` | Conexión a la base (`mysql+pymysql://...`). Sin ella usa SQLite local. |
-| `SECRET_KEY` | Firma de los JWT. Obligatoria; valor largo y aleatorio. |
+| `SECRET_KEY` | Firma de los JWT. Obligatoria; al menos 32 caracteres, aleatoria y distinta del ejemplo. |
 | `ALGORITHM` | Algoritmo del token (`HS256`). |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Vigencia del token (120 minutos = 7200 segundos). |
 | `CORS_ORIGINS` | Orígenes del frontend permitidos, separados por coma. |
 | `LOGIN_MAX_INTENTOS` | Intentos fallidos antes del bloqueo (5 intentos). |
 | `LOGIN_BLOQUEO_MINUTOS` | Minutos de bloqueo (15 minutos). |
+| `LOGIN_MAX_INTENTOS_IP` | Fallos de login permitidos desde una misma IP en esos minutos (20 por defecto; `0` lo desactiva). **En Railway se deja en `0`** (decisión del PM): ahí la API ve la IP del proxy y 20 fallos de cualquier usuario bloquearían el login de todos. Úsalo con un valor mayor que 0 solo donde la IP del cliente sea la real. |
 | `CONTRASENA_MIN` / `CONTRASENA_MAX` | Largo de la contraseña (de 8 a 64 caracteres). |
-| `UPLOAD_DIR` | Carpeta donde se guardan los archivos subidos. |
+| `UPLOAD_DIR` | Carpeta donde se guardan los archivos subidos. En un servidor usa una ruta absoluta dentro de un volumen persistente. |
 
 ## 5. Base de datos
 
@@ -67,7 +68,7 @@ El archivo `.env` **nunca se sube** al repositorio. Se copia desde `.env.example
 
 El esquema lo crea el Grupo 1 (`01_schema.sql` y `02_seed.sql`). Esta API **no crea tablas** en la base compartida.
 
-La versión 1.2.0 de la base (G1) agrega el catálogo `prioridad_tarea` y una llave foránea en `tarea.prioridad`. No afecta a este módulo (`models.py` no usa `tarea`). Si tu base **local** es 1.1.0, aplica `migracion_1.2.0.sql` (en `grupos/grupo-1-base-de-datos/Docs/sql/`) con `mysql -u root db_udv < migracion_1.2.0.sql`; para comprobar la versión: `SELECT * FROM schema_migracion;`. En la base compartida **no se corre**: la actualiza el PM o el Grupo 1.
+La versión 1.2.0 de la base (G1) agrega el catálogo `prioridad_tarea` y una llave foránea en `tarea.prioridad`. No afecta a este módulo (`models.py` no usa `tarea`; solo la regla de descarga de `files.py` la lee, con una consulta parametrizada). Si tu base **local** es 1.1.0, aplica `migracion_1.2.0.sql` (en `grupos/grupo-1-base-de-datos/Docs/sql/`) con `mysql -u root db_udv < migracion_1.2.0.sql`; para comprobar la versión: `SELECT * FROM schema_migracion;`. En la base compartida **no se corre**: la actualiza el PM o el Grupo 1.
 Las fechas se guardan en UTC y cada conexión nueva queda en UTC.
 
 Para comprobar la conexión:
@@ -94,7 +95,10 @@ En `auditoria` solo se escriben a mano los eventos de acceso (login, login falli
 - Contraseñas solo con hash bcrypt; ninguna respuesta las devuelve.
 - Autorización en el servidor con `Authorization: Bearer <token>`.
 - Errores en el formato común, sin trazas, SQL ni rutas internas.
-- Los archivos de `/files` solo los descarga su dueño o un admin; cualquier otro rol recibe 403.
+- Descarga de `/files` (regla del PM, 17-nov): la hacen el dueño, el admin y auditoría (si el archivo ya está vinculado). Revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado o que ellos crearon (una tarea sin revisor designado la revisa la coordinación que la creó o un admin) (JOIN `archivo` → `entrega` → `tarea_destinatario` → `tarea`). Un archivo sin vincular solo lo descargan su dueño y el admin; cualquier otro usuario recibe 403.
+- Subida de `/files`: se lee por bloques de 1 MB y se corta al pasar 5 MB, sin cargar el archivo entero en memoria.
+- Login: si el correo no existe se verifica igual una contraseña falsa (misma demora), el bloqueo de 5 intentos sigue respondiendo 429 y también se limita por IP (`LOGIN_MAX_INTENTOS_IP`; en Railway queda en `0`, desactivado).
+- Token: `verificar_token` exige `exp` y `sub`. Un admin no puede desactivarse ni quitarse su propio rol, y cambiar una contraseña cierra las sesiones abiertas de ese usuario.
 - Sin credenciales en el código: todo va en `.env`.
 
 ## 7. Estructura
@@ -133,6 +137,8 @@ grupos/grupo-2-api-seguridad/
 │   ├── test_users.py                       # Pruebas de usuarios y roles: 401, 403, 404, 409 y 422. (Elaborado por Randy Torres)
 │   ├── test_errores.py                     # Pruebas del formato de error y de la paginación. (Elaborado por Edgar Domingo)
 │   ├── test_file.py                        # Pruebas de archivos: tipo no permitido, tamaño y descarga. (Elaborado por Fulvio Jiménez)
+│   ├── test_hallazgos_pm.py                # Pruebas de los hallazgos del PM: descarga por rol, archivo eliminado, validaciones 422 y Coordinación. (Elaborado por Daniel Cobos)
+│   ├── test_seguridad_pm.py                # Pruebas de la auditoría de seguridad del PM: errores de triggers, subida, token, admin, sesiones, descarga según la tarea, verificación falsa y límite por IP. (Elaborado por Daniel Cobos y Robert Rodríguez)
 │   └── test_openapi.py                     # Pruebas de que Swagger coincide con lo que responde la API. (Elaborado por Robert Rodríguez)
 └── g2_api/                                 # Paquete con todo el código de la API. (Elaborado por el Grupo 2)
     ├── __init__.py                         # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
@@ -144,10 +150,10 @@ grupos/grupo-2-api-seguridad/
     ├── seguridad.py                        # Crea y valida los tokens JWT y revisa las contraseñas. (Elaborado por Daniel Cobos)
     ├── routers/                            # Rutas de la API agrupadas por tema. (Elaborado por Daniel Cobos, Randy Torres y Fulvio Jiménez)
     │   ├── __init__.py                     # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
-    │   ├── auth.py                         # Login, logout y /me, con el bloqueo por intentos fallidos. (Elaborado por Daniel Cobos)
+    │   ├── auth.py                         # Login, logout y /me, con el bloqueo por intentos fallidos y el límite por IP. (Elaborado por Daniel Cobos)
     │   ├── users.py                        # Crear, listar, consultar, editar y desactivar usuarios. (Elaborado por Randy Torres)
     │   ├── roles.py                        # Listar roles y crear uno nuevo, solo para el admin. (Elaborado por Randy Torres)
-    │   └── files.py                        # Subir archivos validados y descargarlos solo el dueño o un admin. (Elaborado por Fulvio Jiménez)
+    │   └── files.py                        # Subir archivos validados y descargarlos según el dueño, el rol y la tarea de la entrega. (Elaborado por Fulvio Jiménez)
     ├── middleware/                         # Código que se ejecuta antes o después de cada ruta. (Elaborado por Randy Torres y Edgar Domingo)
     │   ├── __init__.py                     # Marca la carpeta como paquete de Python. (Elaborado por Daniel Cobos)
     │   ├── auth_middleware.py              # Exige un rol permitido y responde 403 si no lo tiene. (Elaborado por Randy Torres)
@@ -162,10 +168,10 @@ grupos/grupo-2-api-seguridad/
 
 | Persona | Cuenta de GitHub | Archivos |
 |-|-|-|
-| Daniel - Persona 1 (Coordinador) | `dancobs` | `routers/auth.py`, `seguridad.py`, `tests/test_auth.py`, `GUIA_GRUPO2.md` |
-| Randy - Persona 2 | `rtorresixcoy375` | `routers/users.py`, `routers/roles.py`, `middleware/auth_middleware.py`, `tests/test_users.py` |
-| Edgar - Persona 3 | `zeusgeo99-code` | `middleware/error_handler.py`, `utils/paginacion.py`, `utils/registro.py`, `tests/test_errores.py` |
-| Fulvio - Persona 4 | `Ful55` | `routers/files.py`, `frontend-login/`, `tests/test_file.py` |
-| Robert - Persona 5 | `Davids107` | `main.py`, `config.py`, `database.py`, `models.py`, `requirements.txt`, `.env.example`, `.gitignore`, `README.md`, `tests/conftest.py`, `tests/test_openapi.py`, `g2_api/openapi_docs.py` |
+| Daniel - Persona 1 (Coordinador) | `dancobs` | `g2_api/routers/auth.py`, `g2_api/seguridad.py`, `tests/test_auth.py`, `tests/test_hallazgos_pm.py`, `tests/test_seguridad_pm.py`, `GUIA_GRUPO2.md` |
+| Randy - Persona 2 | `rtorresixcoy375` | `g2_api/routers/users.py`, `g2_api/routers/roles.py`, `g2_api/middleware/auth_middleware.py`, `tests/test_users.py` |
+| Edgar - Persona 3 | `zeusgeo99-code` | `g2_api/middleware/error_handler.py`, `g2_api/utils/paginacion.py`, `g2_api/utils/registro.py`, `tests/test_errores.py` |
+| Fulvio - Persona 4 | `Ful55` | `g2_api/routers/files.py`, `frontend-login/imagen.webp`, `frontend-login/index.html`, `frontend-login/logo.webp`, `frontend-login/script.js`, `frontend-login/style.css`, `tests/test_file.py` |
+| Robert - Persona 5 | `Davids107` | `g2_api/main.py`, `g2_api/config.py`, `g2_api/database.py`, `g2_api/models.py`, `requirements.txt`, `.env.example`, `PENDIENTES_QA.md`, `.gitignore`, `README.md`, `tests/conftest.py`, `tests/test_seguridad_pm.py`, `tests/test_openapi.py`, `g2_api/openapi_docs.py` |
 | Jonathan Veras - PM | — | `CONTRATO.md`, `CONTRATO_COMUN.md`, los `.docx` de requerimientos y la raíz del repo |
 

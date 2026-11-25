@@ -74,6 +74,87 @@ tabla de transiciones en el CONTRATO.md del G3.
 - El revisor solo actúa sobre asignaciones asignadas o permitidas.
 - Los archivos se cargan por el servicio del G2, nunca por rutas propias.
 
+## 4.1 Comentarios, borrador, archivos y entrega
+
+Acuerdo con el PM del 13 de noviembre (aplica a G3 y G4).
+
+- `POST /assignments/{id}/comments` guarda en la tabla `comentario`.
+- `PUT /assignments/{id}/submission-draft` guarda en `entrega_borrador` (una
+  fila por asignación; se reemplaza). Si la asignación ya no está pendiente
+  (`assigned`, `in_progress` o `returned`), responde 409.
+- `POST /assignments/{id}/files` recibe el `file_id` que devolvió
+  `POST /api/v1/files` de G2 y hace esto en una sola transacción:
+  1. El archivo debe existir en `archivo`, con `eliminado_en IS NULL` y
+     subido por el mismo usuario. Si no, 404.
+  2. La asignación debe estar pendiente. Si no, 409.
+  3. Busca el intento actual. Si no hay, crea la fila de `entrega` con
+     `numero_intento = MAX + 1`. Si ya hay, la usa.
+  4. `UPDATE archivo SET entrega_id = <entrega del intento actual>`.
+- Intento actual: la última fila de `entrega` de esa asignación que no tenga
+  una transición `submitted` posterior en `tarea_transicion`. Nunca se crean
+  dos intentos para un mismo envío.
+- Cómo lo aplica G4: cuenta envíos en vez de comparar fechas. Cada
+  `submitted` (submit o resubmit) cierra un intento, así que el intento N
+  sigue abierto mientras haya menos de N envíos. Da lo mismo que la regla
+  del PM sin depender de la zona horaria.
+- G3 sí compara fechas (`tarea_transicion.creado_en >= entrega.entregado_en`).
+  Regla del PM (16-nov): la base y la API en UTC. G2, G3 y G4 fijan
+  `time_zone = '+00:00'` en su conexión; las pantallas convierten a hora de
+  Guatemala al mostrar. Si un grupo no lo fija, con el docker-compose
+  (`TZ: America/Guatemala`) hay 6 horas de diferencia.
+- La entrega que crea G4 lleva `contenido_texto` y `programa_version_id` del
+  borrador, igual que cuando la crea G3, porque G1 no deja modificarla
+  después. La pantalla guarda el borrador antes de subir el archivo.
+- El revisor solo ve y comenta las asignaciones de las tareas donde es el
+  revisor designado (`tarea.revisor_id`). Coordinación y admin ven todas.
+
+## 4.2 Bandeja de revisión
+
+Entregable 4 de los requerimientos de G4. Aprobada por el PM el 15-nov, en un
+PR aparte y sin cambios en el detalle ni en las acciones.
+
+- `GET /api/v1/review-queue?q=&status=&page=&per_page=` responde
+  `{page, per_page, total, data, summary}`. `summary` cuenta `submitted` y
+  `under_review` sin aplicar filtros.
+- Solo para usuarios con rol `reviewer`, `coordinator` o `admin`; los demás
+  reciben 403.
+- Quién ve qué (regla oficial del PM, 16-nov, la de G3): coordinación y
+  administración ven todas; un revisor ve solo las asignaciones donde es el
+  revisor designado, `COALESCE(tarea_destinatario.revisor_id, tarea.revisor_id)`.
+  Una tarea sin revisor la revisa la coordinación que la creó o admin.
+- Pantalla: `/app/g4/revision.html`. El enlace lo pone el portal del PM en la
+  tarjeta de G4 para revisor y coordinación.
+- `status`: `pending` (por defecto: `under_review` y `submitted`), uno de
+  `submitted`, `under_review`, `returned`, `approved`, `closed`, o `all`.
+  Otro valor responde 422.
+- Orden: primero las ya tomadas, luego las entregadas, de la que más espera a
+  la que menos; las revisadas al final. Se ordena por id de transición, no por
+  fecha.
+- Las acciones (tomar, aprobar, devolver) siguen siendo de G3 y se hacen desde
+  el detalle.
+
+## 4.3 Detalle: comentarios, historial y forma de entrega
+
+Pendientes aprobados por el PM el 17-nov.
+
+- `GET /assignments/{id}` agrega:
+  - `delivery`: `{mode, extensions, max_mb, not_accepted}`. `mode` es
+    `tipo_tarea.modalidad_entrega`; `extensions` y `max_mb` son los del tipo,
+    limitados a lo que acepta `POST /api/v1/files` de G2. `not_accepted`
+    lista lo que el tipo admite y G2 todavía no recibe.
+  - `program_version`: solo en tareas de modalidad `programa`. Primero la
+    versión más reciente creada en G5 desde esa asignación
+    (`programa_version.tarea_destinatario_origen_id`); si no hay, la de
+    `tarea.programa_version_id`. `null` si no hay ninguna.
+  - `viewer.can_comment`: si quien mira puede escribir comentarios.
+  - En `comments` cada comentario trae `id`, `author_name` y `at` (UTC con Z);
+    `POST /comments` responde el comentario con esos mismos campos.
+- `PUT /submission-draft`, en tareas de programa, guarda en el borrador la
+  versión de `program_version`. G3 la copia a la entrega al hacer submit.
+- Una entrega puede llevar varios archivos: se suben y se vinculan uno por uno
+  al mismo intento.
+- G4 usa la sesión de base de datos de G2 (`g2_api.database`), no una propia.
+
 ## 5. Definición de HECHO (checklist de cada PR)
 
 - [ ] Corre desde cero con `pip install -r requirements.txt` (raíz) en una
@@ -95,3 +176,10 @@ tabla de transiciones en el CONTRATO.md del G3.
 |---|---|---|---|
 | 2026-09-26 | Versión inicial | — | PM |
 | 2026-09-28 | Jerarquía de fuentes; prefijo `/api/v1`; **nuevo** `PUT /assignments/{id}/submission-draft` (el .docx exige borradores y no había ruta); reparto de responsabilidades con el G3; `program_version_id` con el G5; reglas del .docx que faltaban; checklist con pruebas y OpenAPI | PM | PM |
+| 2026-11-14 | Sección 4.1: comentarios y borrador en la base, validación de archivos, fila de entrega por intento, revisor designado | PM y QA | Pendiente |
+| 2026-11-15 | Sección 4.2: bandeja de revisión (GET /review-queue) | Requerimientos G4, entregable 4 | PM (15-nov) |
+| 2026-11-17 | Sección 4.3: comentarios e historial en el detalle, forma de entrega por tipo de tarea, versión del programa, varios archivos, sesión de G2 | PM (17-nov) | PM (17-nov) |
+| 2026-11-17 | `GET /assignments/{id}` agrega `task_id`, `assignee_name`, `reviewer_name`, `created_by`, `created_by_name`, curso y período de la tarea, `attempts` (texto de cada intento), `viewer_actions` (acciones que puede ejecutar quien mira) y, en `comments`, `author_id`, `author_name` y `created_at`. El revisor se lee como en G3 (`COALESCE` de la asignación y la tarea). `allowed_actions` incluye `close`. La autoridad puede ver el detalle. `GET /review-queue` agrega `task_id`, `reviewer_id`, `reviewer_name`, `created_by` y `mine`. Ningún campo existente cambia | Interfaz Vinci | PM (17-nov), hecho por el PM tras el cierre de entregas |
+| 2026-11-17 | `GET /inbox` agrega `task_id`, `course_code`, `course_name` y `period_code`; `GET /review-queue` agrega `course_code`, `course_name` y `period_code` | Interfaz Vinci | PM (17-nov), hecho por el PM |
+| 2026-11-18 | **Quitar un archivo:** `DELETE /assignments/{id}/files/{file_id}` quita un archivo del intento que todavía no se envió. Solo el docente de la asignación y autor del archivo, con la asignación pendiente (`assigned`, `in_progress`, `returned`). Responde `{status, files}`. 404 si el archivo no existe o no es suyo; 409 si ya se envió. El archivo queda con eliminación lógica | El docente sube el archivo equivocado y no tenía cómo corregirlo (interfaz Vinci) | PM (18-nov), hecho por el PM |
+| 2026-11-18 | `GET /inbox`: cada fila agrega `reviewer_name` (revisor designado), `submitted_at` (última entrega, con `Z`) y `last_return_comment` (la observación, solo mientras la asignación está devuelta) | La pantalla de inicio del docente pedía el detalle de cada fila para mostrar quién revisa y por qué se devolvió | PM (18-nov), hecho por el PM |

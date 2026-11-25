@@ -1,14 +1,16 @@
 import uuid # <----- Nombre interno aleatorio del archivo
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 import puremagic # <----- Dependencia Para verificar el tipo de archivo
-from g2_api.middleware.auth_middleware import obtener_usuario_actual
+from g2_api.middleware.auth_middleware import obtener_usuario_actual, requerir_permiso
 from g2_api.models import Usuario
 from pathlib import Path
 from fastapi.responses import FileResponse
 import hashlib
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from g2_api import config
 from g2_api.database import get_db
 from g2_api.models import Archivo
 
@@ -18,8 +20,23 @@ router = APIRouter(
     tags=["Files"]
 )
 
-
 MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def nombre_limpio(nombre, extension: str) -> str:
+    """El nombre que mandó el navegador, reducido a un nombre de archivo simple.
+
+    Se guarda y se devuelve tal cual en las descargas y en las pantallas, así que
+    no debe traer carpetas (`../../etc/passwd`, `C:\\x\\y`), caracteres de control
+    ni comillas, ni pasar del largo de la columna. La extensión es la del tipo
+    real del archivo, no la que diga el nombre.
+    """
+    base = str(nombre or "").replace("\\", "/").split("/")[-1]
+    base = "".join(c for c in base if c.isprintable() and c not in '<>:"|?*;').strip().lstrip(".").strip()
+    if "." in base:
+        base = base[: base.rindex(".")].rstrip(" .")
+    base = base[:200] or "archivo"
+    return base + extension
 
 # Definir los tipos de archivos permitidos y sus extensiones correspondientes
 MIMETYPES_PERMITIDOS = {
@@ -31,33 +48,43 @@ MIMETYPES_PERMITIDOS = {
 # Definir la ruta para verificar el archivo subido
 @router.post("")
 async def verificar_archivo(file: UploadFile = File(...),
-    usuario_actual: Usuario = Depends(obtener_usuario_actual),
+    usuario_actual: Usuario = Depends(requerir_permiso("files.upload")),
     db: Session = Depends(get_db)
 ):
-    contenido = await file.read()
+    # lee por bloques de 1 MB y corta apenas pasa el limite, sin cargar archivos enormes
+    partes = []
+    leidos = 0
+    while True:
+        bloque = await file.read(1024 * 1024)
+        if not bloque:
+            break
+        leidos += len(bloque)
+        if leidos > MAX_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo supera el límite de 5 MB"
+            )
+        partes.append(bloque)
+    contenido = b"".join(partes)
 
-    if len(contenido) > MAX_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail="El archivo supera el límite de 5 MB"
-        )
+    # un archivo vacio no es valido
+    if not contenido:
+        raise HTTPException(status_code=422, detail="El archivo está vacío.")
     # leer los primeros 2048 bytes del archivo para determinar su tipo real
     try:
         tipo_real = puremagic.from_string(contenido[:2048], mime=True)
-    except puremagic.PureError:
+    except (puremagic.PureError, ValueError):
         # si el archivo esta corrupto o no se puede determinar su tipo, se lanza una excepción HTTP
         raise HTTPException(
             status_code=400,
-            detail={"error": "Archivo invlálido", "mensaje": "No se pudo determinar el tipo de archivo. Asegúrese de que el archivo no esté corrupto y sea un archivo válido."}
+            detail="No se pudo leer el tipo de archivo. Solo se aceptan PDF, JPG o PNG sin dañar."
         )
 
     # Verificar si el tipo de archivo real está en la lista de tipos permitidos
     if tipo_real not in MIMETYPES_PERMITIDOS:
         raise HTTPException(
             status_code=400,
-            detail={"error": "formato no permitido",
-                    "mensaje": f"El archivo tiene un formato real de tipo '{tipo_real}'. Solo se permiten los siguientes formatos: {', '.join(MIMETYPES_PERMITIDOS.keys())}."
-                    }
+            detail=f"Formato no permitido ({tipo_real}). Solo se aceptan PDF, JPG o PNG."
         )
 
     # Generar un identificador único para el archivo y un nombre interno basado en el tipo de archivo
@@ -68,8 +95,9 @@ async def verificar_archivo(file: UploadFile = File(...),
         file_id +
         MIMETYPES_PERMITIDOS[tipo_real]
     )
-    UPLOAD_DIR = Path("uploads")
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    # la carpeta sale del .env (UPLOAD_DIR) para usar el volumen de Railway
+    UPLOAD_DIR = Path(config.UPLOAD_DIR)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     ruta_archivo = UPLOAD_DIR / nombre_interno
 
@@ -79,7 +107,7 @@ async def verificar_archivo(file: UploadFile = File(...),
     hash_sha256 = hashlib.sha256(contenido).hexdigest()
 
     nuevo_archivo = Archivo(
-        nombre_original=file.filename,
+        nombre_original=nombre_limpio(file.filename, MIMETYPES_PERMITIDOS[tipo_real]),
         nombre_interno=nombre_interno,
         tipo_mime=tipo_real,
         tamano_bytes=len(contenido),
@@ -88,8 +116,14 @@ async def verificar_archivo(file: UploadFile = File(...),
         autor_id=usuario_actual.id
     )
 
-    db.add(nuevo_archivo)
-    db.commit()
+    try:
+        db.add(nuevo_archivo)
+        db.commit()
+    except Exception:
+        # si la base rechaza el registro, se borra el archivo para no dejarlo huerfano
+        db.rollback()
+        ruta_archivo.unlink(missing_ok=True)
+        raise
     db.refresh(nuevo_archivo)
     
     # devolver el identificador único y el nombre interno del archivo
@@ -97,9 +131,50 @@ async def verificar_archivo(file: UploadFile = File(...),
         "file_id": nuevo_archivo.id,
         "nombre_interno": nombre_interno
     }
-    
 
+# Tarea a la que pertenece un archivo: archivo -> entrega -> tarea_destinatario -> tarea (tablas del G1).
+# Devuelve quien creo la tarea y el revisor designado (el del destinatario o, si no tiene, el de la tarea).
+# Va con parametros (:entrega_id), nunca con texto armado a mano. Una tarea eliminada no da acceso.
+_SQL_TAREA_DE_LA_ENTREGA = text(
+    "SELECT t.creado_por, COALESCE(td.revisor_id, t.revisor_id) "
+    "FROM entrega e "
+    "JOIN tarea_destinatario td ON td.id = e.tarea_destinatario_id "
+    "JOIN tarea t ON t.id = td.tarea_id "
+    "WHERE e.id = :entrega_id AND t.eliminado_en IS NULL"
+)
 
+# Regla de descarga que decidio el PM (17-nov):
+#  - dueño del archivo y admin: pueden siempre.
+#  - auditoria: Cualquier archivo ya vinculado a una entrega, un comentario o una version de programa.
+#  - revisor: solo si el archivo es de una entrega de una tarea donde es el revisor designado
+#    (si la tarea no tiene revisor designado, la revisa la coordinacion que la creo o un admin).
+#  - coordinacion: Solo si el archivo es de una entrega de una tarea que el creo.
+#  - un archivo todavia suelto (sin vincular) solo lo descargan su dueño y el admin.
+#  - docente ajeno, autoridad y cualquiera sin el permiso files.download: 403.
+def _puede_descargar(db: Session, usuario: Usuario, registro: Archivo):
+    if registro.autor_id == usuario.id:
+        return True
+    roles = {rol.codigo for rol in usuario.roles}
+    if "admin" in roles:
+        return True
+    # fuera del dueño y el admin, hace falta el permiso files.download (matriz del Grupo 1).
+    if not any(p.codigo == "files.download" for rol in usuario.roles for p in rol.permisos):
+        return False
+    if "auditor" in roles:
+        return any(v is not None for v in (registro.entrega_id, registro.comentario_id, registro.programa_version_id))
+    # revisor y coordinacion: se valida la tarea de la entrega; sin entrega vinculada no hay acces.o
+    if registro.entrega_id is None or not roles & {"reviewer", "coordinator"}:
+        return False
+    fila = db.execute(_SQL_TAREA_DE_LA_ENTREGA, {"entrega_id": registro.entrega_id}).first()
+    if fila is None:
+        return False
+    creador_id, revisor_id = fila
+    if "coordinator" in roles and creador_id == usuario.id:
+        return True
+    # Solo descarga el revisor designado, sea con rol de revisor o de coordinacion (decision B, revisada el 16-nov).
+    # Si la tarea no tiene revisor designado, revisor_id es None y esta comparacion da False:
+    # la revisa la coordinacion que la creo (el if de arriba) o un admin (ya paso antes).
+    return revisor_id == usuario.id
 
 @router.get("/{id}")
 async def descargar_archivo(
@@ -108,8 +183,10 @@ async def descargar_archivo(
     db: Session = Depends(get_db)
 ):
 
+    # un archivo eliminado se trata como si no existiera
     registro = db.query(Archivo).filter(
-        Archivo.id == id
+        Archivo.id == id,
+        Archivo.eliminado_en.is_(None)
     ).first()
 
     if registro is None:
@@ -118,12 +195,8 @@ async def descargar_archivo(
             detail="Archivo no encontrado"
         )
 
-    es_admin = any(
-    rol.codigo == "admin"
-    for rol in usuario_actual.roles
-    )
-
-    if registro.autor_id != usuario_actual.id and not es_admin:
+    # la autorizacion se decide en el servidor segun la tarea de la entrega (ver _puede_descargar)
+    if not _puede_descargar(db, usuario_actual, registro):
         raise HTTPException(
         status_code=403,
         detail="No tienes permiso para acceder a este archivo"
@@ -141,3 +214,4 @@ async def descargar_archivo(
         path=str(ruta),
         filename=registro.nombre_original
     )
+

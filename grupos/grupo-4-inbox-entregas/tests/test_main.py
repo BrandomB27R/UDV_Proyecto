@@ -96,8 +96,16 @@ def test_el_dueno_si_puede_ver_su_detalle():
 
 
 def test_revisor_puede_ver_el_detalle_de_otro():
+    # en los datos de ejemplo el revisor designado es el usuario 5
     autenticar_como(5, roles=("teacher", "reviewer"))
     assert cliente.get("/api/v1/assignments/1").status_code == 200
+
+
+def test_revisor_no_designado_no_ve_ni_comenta():
+    """Hallazgo de la integración del PM: un revisor que no es el de la tarea no la ve."""
+    autenticar_como(6, roles=("teacher", "reviewer"))
+    assert cliente.get("/api/v1/assignments/1").status_code == 403
+    assert cliente.post("/api/v1/assignments/1/comments", json={"text": "x"}).status_code == 403
 
 
 def test_coordinador_puede_ver_el_detalle_de_otro():
@@ -288,3 +296,36 @@ def test_ciclo_completo_hasta_aprobada(tarea_assigned):
     respuesta = cliente.post(f"/api/v1/assignments/{t}/approve", headers={"X-Role": "revisor"})
     assert respuesta.status_code == 200
     assert respuesta.json()["status"] == "approved"
+
+
+def test_el_detalle_dice_si_quien_mira_es_el_docente_o_el_revisor():
+    """La pantalla usa esto para no mostrarle al docente el botón de revisar."""
+    autenticar_como(1)   # dueño de la asignación 1
+    assert cliente.get("/api/v1/assignments/1").json()["viewer"] == {"is_assignee": True, "is_reviewer": False, "can_comment": True}
+    autenticar_como(5, roles=("teacher", "reviewer"))   # revisor designado
+    assert cliente.get("/api/v1/assignments/1").json()["viewer"] == {"is_assignee": False, "is_reviewer": True, "can_comment": True}
+    autenticar_como(9, roles=("auditor",))   # auditoría solo lee
+    assert cliente.get("/api/v1/assignments/1").json()["viewer"] == {"is_assignee": False, "is_reviewer": False, "can_comment": False}
+
+
+def test_el_detalle_de_una_devuelta_trae_la_observacion():
+    autenticar_como(1)
+    d = cliente.get("/api/v1/assignments/3").json()
+    if d["status"] != "returned":
+        pytest.skip("En los datos de ejemplo la asignación 3 no está devuelta")
+    assert d["last_return"]["comment"] == "El monto no coincide. Verificar y reenviar."
+
+
+def test_g4_usa_la_conexion_compartida_de_g2():
+    """Pendiente técnico del PM: un solo grupo de conexiones (Railway permite 10 por usuario)."""
+    import g2_api.database as g2
+    import g4_inbox.database as g4
+    assert g4.engine is g2.engine
+    assert g4.SessionLocal is g2.SessionLocal
+
+
+def test_el_detalle_dice_como_se_entrega():
+    autenticar_como(1)
+    d = cliente.get("/api/v1/assignments/1").json()
+    assert set(d["delivery"]) == {"mode", "extensions", "max_mb", "not_accepted"}
+    assert "program_version" in d

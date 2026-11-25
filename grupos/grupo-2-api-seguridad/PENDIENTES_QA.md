@@ -1,8 +1,30 @@
-## Pendientes del QA — Grupo 2 (Update No. 3 · 05-nov-2026 · estado al 09-nov-2026)
+## Pendientes del QA — Grupo 2 (Update No. 3 · 05-nov-2026 · estado al 18-nov-2026)
 
 Resumen de los informes de Allison Espaderos (QA: Informe No. 1, Update No. 2 e Informe de Retest No. 2) y quién corrige cada cosa. Cada quien toca **solo sus archivos**. Los números G2-xx son los escenarios del plan de QA.
 
 Prioridad: **Alta** → **Media** → **Baja**. El Planner de Allison tiene tres tareas (Alta, Media y Baja) con puntos por escenario; están sin responsable y con fecha 21/10. El detalle está en `GUIA_GRUPO2.md`, sección 8.
+
+## Avisos del PM y de QA (12, 14, 17 y 18-nov)
+
+| Aviso | Quién | Estado al 18-nov |
+|-|-|-|
+| Pantalla de login apuntaba a `localhost` y no guardaba el token | Robert (archivo de Fulvio) | 🔵 `script.js`: ruta relativa `/api/v1/auth/login`, `sessionStorage.setItem("udv_token", ...)` y redirección a `/app/`. Falta que Fulvio lo revise y el PR 14-nov: QA probó el login integrado en Railway y dio 5/5 PASS (portal, autenticación, `udv_token`, acceso a G4 y logout). |
+| Avisar en el grupo antes de cambiar algo compartido (errores, auth, Swagger); el cambio de formato rompió 3 pruebas del G6 | Todos (Edgar, Randy, Daniel) | 🔵 Regla para la semana 6 |
+| El bloqueo tras 5 intentos no estaba en Swagger ni decía cuánto falta | Robert | 🔵 `openapi_docs.py`: login documenta 200, 401, 422 y 429 (5 fallos = 15 minutos, mensaje con los minutos que faltan); `tests/test_openapi.py` al día |
+| `.env.example` sin valores reales | Robert | 🔵 Solo marcadores (`TU_USUARIO`, `TU_CLAVE`, `TU_HOST`, `TU_PUERTO`, `TU_CLAVE_SECRETA`) |
+| MySQL antes del PR, convención única de pantalla (`udv_token`, rutas relativas, `udv.css`) y avisar cada PR | Daniel y todos | 🔵 `index.html` carga `/udv-styles/udv.css`. Falta `pytest` contra MySQL y el PR (Daniel) |
+| G2-33: confirmar si ya está arreglado para actualizar la hoja de QA | Robert y PM | 🔵 Corregido (06-nov) y el PM ya lo activó en la raíz (PR #24 en `main`). Falta el despliegue y que Allison repita G2-33 14-nov: QA confirmó que Railway ya muestra la documentación corregida; quedó solo H-04 (ver la fila siguiente). |
+| G2-33, H-04: el ejemplo 200 de `GET /me` traía `creado_en` y `actualizado_en` y la API real no los devuelve | Robert | 🔵 Corregido el 15-nov en `openapi_docs.py` (ejemplo sin fechas); `tests/test_openapi.py` lo compara con la respuesta real. ✅ 17-nov: QA repitió G2-33 en Railway; H-04 corregido y los cinco hallazgos en PASS (5/5). Los 38 escenarios del G2 están en PASS y QA da por aprobada la evaluación dentro del alcance documentado; publicará el informe final. Queda como limitación documentada el 201 de `POST /users` (validado solo en Swagger) |
+| Descarga de archivos: la descripción de Swagger solo mencionaba al dueño y al admin | Robert | 🔵 Alineada con la regla final del PM (17-nov, decisión B revisada el 16-nov): dueño y admin; auditoría si el archivo está vinculado; revisor y coordinación según la tarea de la entrega; README al día. QA confirmó antes en Railway: revisor 200, docente ajeno 403; falta repetirlo con la regla final |
+| Retest complementario (14-nov): 7 hallazgos de integración del PM | Todos | ✅ PASS en descarga por revisor, 422 en usuarios y roles, correo inválido, Coordinación en `GET /users` y mensaje al rechazar un formato; archivo eliminado PASS en prueba aislada (1/1). `UPLOAD_DIR`: PASS en código, sin verificar el volumen de Railway. H-02 (201): PASS documental, no se creó un usuario nuevo para no modificar la base compartida |
+| G4 (15-nov): corrigió el enlace «Inicio» de su menú | G4 | 🔵 Corregido por el G4; falta que QA lo repita cuando ellos avisen |
+| G4 (15-nov): la descarga de `GET /files/{id}` es muy amplia (un rol no docente con `files.download` baja cualquier archivo por su id) | PM decide; Robert y el dueño de `files.py` | 🔵 El PM decidió el 17-nov: descargan el dueño, el admin y auditoría; revisor y coordinación solo si el archivo es de una entrega de una tarea donde son el revisor designado, y la coordinación también si creó la tarea; si la tarea no tiene revisor designado, solo la coordinación dueña o el admin (decisión B revisada el 16-nov; el PM aplicó el ajuste en `main`, `d031c89`); un archivo sin vincular, solo su dueño y el admin. Aplicado en `files.py` (aviso a Fulvio) con Swagger, README y pruebas. Falta que QA repita la descarga por rol y que el G4 confirme |
+| Revisión de seguridad de la configuración (15-nov) | Robert | 🔵 `config.py` rechaza la clave de ejemplo y avisa si `SECRET_KEY` es corta o falta `DATABASE_URL`; `.env.example` y `README.md` al día (ruta absoluta para `UPLOAD_DIR`). `pytest`: 130 pasan |
+| Auditoría de seguridad del PM, parte 1 (16-nov): 9 ajustes de la reunión con el PM | Daniel | 🔵 `f61442c`: triggers del G1 a 409 o 422, archivo vacío 422, sin archivos huérfanos, permiso `files.upload`, contador de intentos atómico, Swagger tolerante, token con `exp` y `sub`, admin no se desactiva y cambiar la contraseña cierra sesiones |
+| Auditoría de seguridad del PM, parte 2 (17-nov): PDF «Otras vulnerabilidades del Grupo 2» | Robert, con Fulvio y Daniel | 🔵 (1) `files.py` descarga: regla del PM con JOIN archivo → entrega → tarea_destinatario → tarea y su ajuste final (`return revisor_id == usuario.id`, aplicado por el PM en `main`). (2) `files.py` subida: por bloques y corte a 5 MB (ya hecho por Daniel). (3) `auth.py` login: verificación falsa de contraseña si el correo no existe. (4) `auth.py` bloqueo: límite por IP (`LOGIN_MAX_INTENTOS_IP`, 20 por defecto; `0` lo desactiva y es el valor de Railway, porque ahí la IP es la del proxy). (5) `seguridad.py`: `exp` y `sub` obligatorios (ya hecho). (6) `users.py` PATCH: un admin no se desactiva ni se quita su rol y cambiar la clave revoca sesiones (ya hecho). El 429 del bloqueo y `sessionStorage` no cambian. Pruebas en `tests/test_seguridad_pm.py`; `test_errores.py` ajustado a la `ip` en `detalle`. Falta que QA repita descarga y login y que el PM la pase por la suite de integración |
+| Cierre del PM (17-nov, noche): desde el 18-nov integra él (incluida la interfaz); plazo 8:00 PM; el G2 entrega el PR con la regla de descarga y los ajustes | Daniel (abre el PR) y Robert | 🔵 Aplicado en `grupo-2`. Falta `git fetch`, merge de `origin/main`, pruebas del grupo (162 pasan) y de `tests/integracion`, y abrir el PR. Después del plazo no se aceptan cambios a las pantallas |
+
+`pytest` completo en `grupo-2` (18-nov): **162 pasan** y 0 fallan. Antes, el 15-nov: 130 pasan.
 
 ## Retest No. 3 (05-nov) · estado al 09-nov
 
@@ -13,7 +35,7 @@ Allison repitió G2-21, G2-31, G2-32 y G2-33 contra la API desplegada en Railway
 | G2-21 | ✅ PASS 4/4: el dueño y el admin descargan (200), otro usuario recibe 403 | Fulvio | ✅ Cerrado. Ya está en `main` (PR #20; el PM montó `/files` en el PR #22) |
 | G2-31 | ✅ PASS 22/22: `page` y `per_page` de 1 a 100, 422 fuera de rango | Randy | ✅ Cerrado |
 | G2-32 | ✅ PASS 8/8: 32 fechas en ISO 8601 y UTC con `Z` | Randy | ✅ Cerrado |
-| G2-33 | ❌ FAIL documental: Swagger de Railway no coincide con la API (H-01 a H-05) | Robert | 🔵 Corregido en `grupo-2` el 06-nov. Falta que el PM lo active en el `main.py` de la raíz, desplegar y el retest. Ya está comentado «listo para retest» en el Planner |
+| G2-33 | ❌ FAIL documental: Swagger de Railway no coincide con la API (H-01 a H-05) | Robert | 🔵 Corregido en `grupo-2` el 06-nov. El PM ya lo activó en el `main.py` de la raíz (PR #24, 12-nov); falta confirmar el despliegue y el retest. Ya está comentado «listo para retest» en el Planner 14-nov: el retest dejó solo H-04 (ejemplo de `GET /me` con fechas); corregido el 15-nov. |
 
 **Por qué falló G2-33.** Los códigos HTTP y los ejemplos de Swagger estaban en `g2_api/main.py`, pero Railway ejecuta el `main.py` de la raíz, que solo monta los routers y nunca cargaba esa documentación. Las pruebas pasaban porque usan la app de `g2_api`; QA veía la de la raíz. Las respuestas reales de la API estaban bien.
 
@@ -34,23 +56,7 @@ Allison repitió G2-21, G2-31, G2-32 y G2-33 contra la API desplegada en Railway
 
 **Estado al 09-nov:** `pytest` completo pasa 115 (los 107 del 06-nov más las 8 pruebas de `tests/test_file.py`, que Fulvio subió el 08-nov).
 
-Los estados «Falta retest» de las tablas siguientes son del retest No. 2 y quedaron cerrados arriba, salvo G2-33.
-
-## Retest No. 2 (23 y 24-oct) · estado al 02-nov (histórico, superado por el retest No. 3)
-
-34 PASS, 2 FAIL, 1 PARCIAL y 1 PASS histórico con retest pendiente. `pytest` en `grupo-2` (04-nov): 103 pasan, sin fallas. `test_campo_obligatorio_faltante_422` en `tests/test_users.py` ya lee `details` como objeto con un campo por llave (Randy y Robert, 04-nov; Randy también agregó `test_password_fuera_de_largo_422` y quitó el `xfail`). El `details` del 422 ya sale como objeto y el xfail de `tests/test_openapi.py` se quitó; la contraseña de 8 a 64 al crear usuario ya pasa.
-
-| Escenario | Resultado de QA | Quién | Archivo | Estado al 02-nov |
-|-|-|-|-|-|
-| G2-21 | FAIL (crítico): un docente descarga el archivo de un admin | Fulvio | `routers/files.py` | 🔵 Subido el 28-oct (`6982c15`): `GET /files/{id}` da 403 si no es el dueño ni un admin y 404 si no existe; el archivo se registra en la tabla `archivo`. 31-oct (`7ffa69c`): el admin también descarga, como confirmó el PM (01-nov). ✅ PASS 4/4 en el retest del 05-nov. Ya está en `main` (PR #20 y PR #22 del PM) |
-| G2-31 | FAIL: `GET /users` sin paginación | Randy | `routers/users.py` | ✅ Ya pagina desde el 24-oct. PASS 22/22 en el retest del 05-nov |
-| G2-33 | PARCIAL: faltaban 409, 403 y ejemplos reales | Robert | `main.py` | 🔵 Hecho el 27 y 28-oct y probado en `tests/test_openapi.py`; ejemplos al día con el PM el 01-nov (fechas, `details` como objeto, 403 en archivos). 04-nov: el usuario de ejemplo pasó a `Carlos Maeda` (`e593976`). ❌ FAIL documental en el retest del 05-nov (Railway no usaba esta documentación); corregido el 06-nov, ver el retest No. 3 |
-| G2-32 | PASS histórico, retest pendiente: ya no salen `creado_en` ni `actualizado_en` | Randy y PM | `routers/users.py` | 🔵 Subido el 02-nov (`9205344`): salen de solo lectura, en ISO 8601 y en UTC con `Z` (por ejemplo `2026-10-29T21:30:00Z`), como pidió el PM (01-nov). ✅ PASS 8/8 en el retest del 05-nov |
-| G2-36 | PASS de QA y del PM (retest del 23-oct). Antes el PM avisó que el login fallido se guardaba dos veces | Daniel y Edgar | `routers/auth.py`, `utils/registro.py` | ✅ PASS de QA. 02-nov: `registro_id = 0` otra vez con correo inexistente (Daniel); 03-nov: queda igual en `registro.py` (Edgar) |
-| Limpieza | Aviso del PM | Daniel | `routers/auth.py` | ✅ Hecho (02-nov): se quitó la carga de `usuarios_prueba.json` y la carpeta `datos_prueba/` |
-| Aviso del Grupo 1 (28-oct) | `set_actor_id()` en `registro.py` (línea 61) manda `@actor_id = 0` cuando no hay usuario y la llave foránea hace fallar la auditoría. Hoy ninguna ruta la llama | Edgar | `utils/registro.py` | ✅ Corregido el 30-oct: manda NULL (`f5b2d35`). Aparte, `users.py` ya pasa `request.client.host` a `fijar_actor` (Randy, 02-nov) |
-
-Ese PR ya entró a `main` el 04-nov (PR #20), con G2-21, las fechas, `details` y el JSON de prueba. El siguiente PR (solo Daniel) lleva la corrección de G2-33: antes, merge de `main` en `grupo-2` y `pytest` completo.
+Los estados «Falta retest» de las tablas siguientes son del retest No. 2 y quedaron cerrados arriba, salvo la repetición de la descarga por rol con la regla final.
 
 ## Update No. 2 e Informe de Retest No. 2 del QA (23 y 24-oct)
 
@@ -172,7 +178,7 @@ El middleware de usuarios y roles todavía lee el encabezado `usuario-actual` y 
 ### Fulvio · Persona 4 · Archivos y frontend
 | Escenario | Prioridad | Qué falta | Archivo | Estado |
 |-|-|-|-|-|
-| G2-18 a G2-22 | Alta | `POST /files` valida el tipo real con `puremagic` y guarda en la tabla `archivo` con SHA-256 y `autor_id`. `GET /files/{id}` con token, 404 si no existe y 403 si no es el dueño ni un admin (28 y 31-oct). Las pruebas de G2-19, G2-20 y G2-21 ya están en `tests/test_file.py` (Fulvio, 08-nov). | `routers/files.py` | 🔵 Subido (el admin también descarga desde el 31-oct, `7ffa69c`). ✅ PASS 4/4 en el retest del 05-nov |
+| G2-18 a G2-22 | Alta | `POST /files` valida el tipo real con `puremagic` y guarda en la tabla `archivo` con SHA-256 y `autor_id`. `GET /files/{id}` con token, 404 si no existe y 403 si no es el dueño ni un admin (28 y 31-oct). Las pruebas de G2-19, G2-20 y G2-21 ya están en `tests/test_file.py` (Fulvio, 08-nov). | `routers/files.py` | 🔵 Subido (el admin también descarga desde el 31-oct, `7ffa69c`). ✅ PASS 4/4 en el retest del 05-nov 14-nov: la descarga ahora sigue la regla del PM (dueño, admin o rol no docente con `files.download`); revisor 200 y docente ajeno 403 en el retest de QA. |
 | G2-18 | Media | `POST /files` ya exige token, pero con un token válido responde 500 (`usuario_actual["correo"]` y el usuario ya no es un diccionario). | `routers/files.py` | 🔵 Corregido (23-oct): `usuario_actual.correo`. Listo para retest |
 | Pruebas | Media | Pruebas de archivos: tipo no permitido, archivo muy grande, descarga sin token, 404 y 403. | `tests/test_file.py` | ✅ Subido el 08-nov: 8 pruebas; `pytest` completo pasa 115 |
 
@@ -186,7 +192,7 @@ El middleware de usuarios y roles todavía lee el encabezado `usuario-actual` y 
 | 3 | G2-34 | Las columnas `intentos_fallidos` y `bloqueado_hasta` coinciden con el script del Grupo 1 | `models.py` | ✅ Revisado contra `01_schema.sql`. Falta que el login las use (Daniel) |
 | 3 | G2-36 | `auditoria.detalle` guarda JSON válido (`JSON_VALID` de G1) y `fijar_actor(db, actor_id, ip)` llena `@actor_id` e `@ip_origen` | `models.py`, `database.py` | 🔵 Hecho el 22-oct. Daniel y Randy tienen que llamar a `fijar_actor` |
 | 3 | G2-32 | Fechas en UTC: cada conexión nueva a MySQL usa `time_zone = '+00:00'` | `database.py` | 🔵 Hecho el 22-oct |
-| 4 | G2-33 | `README.md` con títulos y tablas; revisar `/api/v1/docs` cuando todos terminen | `README.md`, `main.py` | 🔵 README corregido el 22-oct. Ejemplos de `main.py` al día con el PM el 01-nov. Revisión final de OpenAPI (semana 5) hecha el 03-nov, con Randy y Edgar ya subidos: se quitó el xfail y `tests/test_openapi.py` pasa 9 de 9. 05-nov: FAIL documental porque Railway usa el `main.py` de la raíz. 06-nov: `openapi_docs.py` y pruebas con una app como la de la raíz (107 pasan). 09-nov: revisión final sin claves y `pytest` pasa 115; falta que el PM la active y el retest |
+| 4 | G2-33 | `README.md` con títulos y tablas; revisar `/api/v1/docs` cuando todos terminen | `README.md`, `main.py` | 🔵 README corregido el 22-oct. Ejemplos de `main.py` al día con el PM el 01-nov. Revisión final de OpenAPI (semana 5) hecha el 03-nov, con Randy y Edgar ya subidos: se quitó el xfail y `tests/test_openapi.py` pasa 9 de 9. 05-nov: FAIL documental porque Railway usa el `main.py` de la raíz. 06-nov: `openapi_docs.py` y pruebas con una app como la de la raíz (107 pasan). 09-nov: revisión final sin claves y `pytest` pasa 115; falta que el PM la active y el retest 15-nov: H-04 corregido en `openapi_docs.py` y la descripción de la descarga de archivos al día; falta el PR y el retest. |
 | 4 | G2-35 | El README explica `.env`, la base compartida y la auditoría, sin ningún dato real | `README.md` | 🔵 Hecho el 22-oct |
 | 4 | Pruebas | `pytest` corre para todos con SQLite temporal | `tests/conftest.py` | ✅ Sin cambios. Revisado el 23-oct: pasan 40 de 40 |
 | QA | G2-35 | Que el repositorio no tenga contraseñas ni variables sensibles | `.gitignore` | PASS de QA. Para mantenerlo: `grupo-2.txt` y `.env` nunca se suben, y `.env.example` solo lleva el formato |
@@ -248,12 +254,11 @@ Allison revisa lo que se marque como completado en el Planner. Marca solo lo que
 | 🟡 Media | 1. Consulta del usuario autenticado: implementar el endpoint `/me` para recuperar la identidad y los roles del usuario autenticado | G2-07 | Ya cerrado: PASS confirmado por el PM |
 | 🟡 Media | 2. Consulta individual de usuarios: revisar la disponibilidad del endpoint GET por ID y devolver HTTP 404 cuando el usuario no exista | G2-12 (y G2-11) | Ya cerrado: PASS confirmado por el PM |
 | 🟡 Media | 3. Manejo de recursos inexistentes: revisar las rutas requeridas para garantizar respuestas HTTP apropiadas cuando un recurso no exista | G2-26 | Ya cerrado: PASS confirmado por el PM |
-| 🟡 Media | 4. Documentación OpenAPI/Swagger: actualizar la documentación de los endpoints, sus esquemas y las respuestas HTTP 401, 409 y demás códigos aplicables | G2-33 | Sigue abierto: FAIL documental el 05-nov. Corregido el 06-nov (Robert, `openapi_docs.py`): ya está comentado «listo para retest» en el Planner. No marcarlo completado hasta que el PM lo active en el `main.py` de la raíz, despliegue y Allison repita G2-33 |
+| 🟡 Media | 4. Documentación OpenAPI/Swagger: actualizar la documentación de los endpoints, sus esquemas y las respuestas HTTP 401, 409 y demás códigos aplicables | G2-33 | Sigue abierto: FAIL documental el 05-nov. Corregido el 06-nov (Robert, `openapi_docs.py`): ya está comentado «listo para retest» en el Planner. No marcarlo completado hasta que el PM lo active en el `main.py` de la raíz, despliegue y Allison repita G2-33 14-nov: QA dejó solo H-04; corregido el 15-nov y comentado «listo para retest». |
 | ⚪ Baja | 1. Paginación de usuarios: revisar la implementación de paginación en el listado de usuarios | G2-31 | Ya cerrado: PASS de QA (22/22, retest del 05-nov) |
 | ⚪ Baja | 2. Fechas `creado_en` y `actualizado_en`: confirmar si se incluyen en las respuestas de usuarios y su formato | G2-32 | Ya cerrado: PASS de QA (8/8, retest del 05-nov) |
 | ⚪ Baja | 3. Bloqueo por intentos fallidos: integrar el bloqueo de 15 minutos después de cinco intentos fallidos de autenticación | G2-34 | Ya cerrado: PASS del PM y del QA |
 | ⚪ Baja | 4. Registro de auditoría: integrar las funciones de auditoría con las operaciones correspondientes, incluyendo intentos fallidos de autenticación y acciones sensibles | G2-36 | Ya cerrado: PASS del PM y del QA. Antes del PR, confirmar que el login fallido se guarda una sola vez |
-
 
 ## Fechas
 

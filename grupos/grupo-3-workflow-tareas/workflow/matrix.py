@@ -3,21 +3,22 @@
 Cada regla dice: desde qué estado, con qué acción, a qué estado, qué roles pueden
 ejecutarla y con qué alcance (scope):
     assignee          -> el usuario debe ser el docente de ESA asignación
-    task_reviewer     -> si la tarea tiene revisor, debe ser ese revisor
+    task_reviewer     -> si la tarea tiene revisor, SOLO ese revisor; si no tiene revisor,
+                         solo coordinación (la dueña de la tarea) o administración
     task_coordinator  -> debe ser quien creó la tarea o su responsable
 `unscoped_roles` son roles que quedan exentos del alcance (p. ej. la autoridad
 puede aprobar aunque no sea el revisor designado).
 """
 from dataclasses import dataclass
 
-COORDINATOR, TEACHER, REVIEWER, AUTHORITY, SYSTEM = (
-    "coordinator", "teacher", "reviewer", "authority", "system")
-ROLES = (COORDINATOR, TEACHER, REVIEWER, AUTHORITY, SYSTEM)
+COORDINATOR, TEACHER, REVIEWER, AUTHORITY, SYSTEM, ADMIN = (
+    "coordinator", "teacher", "reviewer", "authority", "system", "admin")
+ROLES = (COORDINATOR, TEACHER, REVIEWER, AUTHORITY, SYSTEM, ADMIN)
 
 STATES = ("draft", "assigned", "in_progress", "submitted", "under_review",
           "returned", "approved", "closed", "cancelled")
 ACTIONS = ("publish", "start", "submit", "review", "return",
-           "resubmit", "approve", "close", "cancel")
+           "resubmit", "approve", "close", "cancel", "reopen")
 
 
 @dataclass(frozen=True)
@@ -40,11 +41,17 @@ STANDARD = (
     _r("draft",        "publish",  "assigned",     [COORDINATOR],           "task_coordinator"),
     _r("assigned",     "start",    "in_progress",  [TEACHER],               "assignee"),
     _r("in_progress",  "submit",   "submitted",    [TEACHER],               "assignee"),
-    _r("submitted",    "review",   "under_review", [REVIEWER],              "task_reviewer"),
-    _r("under_review", "return",   "returned",     [REVIEWER],              "task_reviewer", comment=True),
+    # review y return: el revisor designado; si la tarea NO tiene revisor_id, coordinación o admin
+    # (transitions.authorize aplica la regla; con revisor_id solo puede el designado).
+    _r("submitted",    "review",   "under_review", [REVIEWER, COORDINATOR, ADMIN], "task_reviewer"),
+    _r("under_review", "return",   "returned",     [REVIEWER, COORDINATOR, ADMIN], "task_reviewer", comment=True),
     _r("returned",     "resubmit", "submitted",    [TEACHER],               "assignee"),
     _r("under_review", "approve",  "approved",     [REVIEWER, AUTHORITY],   "task_reviewer", unscoped=[AUTHORITY]),
     _r("approved",     "close",    "closed",       [COORDINATOR, SYSTEM],   "task_coordinator", unscoped=[SYSTEM]),
+    # reopen (pedido del ingeniero, 20-nov): antes de cerrar, la coordinación dueña de la tarea puede
+    # regresar a revisión una entrega aprobada, con observación. El revisor vuelve a decidir con las
+    # reglas de siempre: aprobar de nuevo o devolver al docente. Una entrega cerrada ya no se regresa.
+    _r("approved",     "reopen",   "under_review", [COORDINATOR],           "task_coordinator", comment=True),
     _r("draft",        "cancel",   "cancelled",    [COORDINATOR],           "task_coordinator"),
     _r("assigned",     "cancel",   "cancelled",    [COORDINATOR],           "task_coordinator"),
 )
@@ -80,9 +87,9 @@ BY_ACTION = {"standard": _by_action(STANDARD), "short": _by_action(SHORT)}
 def render_markdown() -> str:
     """Genera la matriz documentada (docs/matriz_estados.md)."""
     names = {COORDINATOR: "Coordinador", TEACHER: "Docente", REVIEWER: "Revisor",
-             AUTHORITY: "Autoridad", SYSTEM: "Sistema"}
+             AUTHORITY: "Autoridad", SYSTEM: "Sistema", ADMIN: "Administrador"}
     scopes = {"assignee": "solo el docente destinatario",
-              "task_reviewer": "el revisor designado en la tarea",
+              "task_reviewer": "el revisor designado (sin revisor: solo coordinación o administración, si la fila las incluye)",
               "task_coordinator": "quien creó la tarea o su responsable", None: "-"}
     out = ["# Matriz de estados, acciones y roles", "",
            "Generada desde `workflow/matrix.py`. No editar a mano: ejecutar "

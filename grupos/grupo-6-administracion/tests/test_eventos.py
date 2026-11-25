@@ -120,14 +120,17 @@ def test_un_evento_que_falla_no_frena_los_demas(fabrica, sesion, servicio, monke
     assert list(pendientes) == [malo]
 
 
-def test_sin_destinatarios_se_marca_procesado_sin_avisos(fabrica, sesion, servicio):
-    # Una tarea sin revisor: la entrega no tiene a quién avisar.
+def test_entrega_sin_revisor_designado_avisa_a_quien_creo_la_tarea(fabrica, sesion, servicio):
+    # Una tarea sin revisor la revisa la coordinación que la creó (decisión B del PM):
+    # el aviso de la entrega le llega a esa persona, con la asignación a la que se refiere.
     with fabrica.begin() as s:
         s.execute(insert(tablas.tarea).values(id=11, titulo="Sin revisor", creado_por=1))
         s.execute(insert(tablas.tarea_destinatario).values(id=21, tarea_id=11, usuario_id=2))
     evento_de_trigger(fabrica, "assignment.submitted", "x", tarea_id=11, tarea_destinatario_id=21)
 
-    assert servicio.procesar_pendientes() == {"processed": 1, "notifications": 0, "failed": 0}
+    assert servicio.procesar_pendientes() == {"processed": 1, "notifications": 1, "failed": 0}
+    _, avisos = servicio.listar(1)
+    assert [(a["event"], a["assignment_id"]) for a in avisos] == [("assignment.submitted", 21)]
 
 
 def test_al_listar_se_procesan_los_eventos_nuevos(fabrica, docente):

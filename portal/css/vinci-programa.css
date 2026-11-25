@@ -1,0 +1,167 @@
+/*
+ * Vinci · Programas de curso (etapa 2). Se carga solo en programas.html y programa.html,
+ * después de vinci.css, y usa sus mismos valores.
+ */
+
+/* ── Lista de programas ──────────────────────────────────── */
+.v-programas { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.v-programa-fila { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; border: 1px solid var(--v-line); border-radius: 12px; }
+.v-programa-fila__info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 280px; }
+.vinci a.v-programa-fila__titulo { font-size: 16px; font-weight: 700; color: var(--v-navy); text-decoration: none; overflow-wrap: anywhere; }
+.vinci a.v-programa-fila__titulo:hover { text-decoration: underline; }
+.v-versiones { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; flex: 1 1 280px; justify-content: flex-end; }
+.vinci a.v-version-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--v-ink); text-decoration: none; padding: 6px 6px 6px 12px; border: 1px solid var(--v-line); border-radius: var(--v-pill); min-height: 40px; }
+.vinci a.v-version-chip:hover { border-color: var(--v-navy); }
+.v-programa-fila__versiones { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 1 1 280px; min-width: 0; }
+.v-programa-fila__versiones .v-versiones { flex: 0 1 auto; }
+.vinci a.v-programa-fila__mas { font-size: 13px; font-weight: 600; color: var(--v-navy); padding: 8px 4px; min-height: 40px; display: inline-flex; align-items: center; }
+
+/* ── Programa: encabezado fijo ───────────────────────────── */
+.p-cabecera { position: sticky; top: var(--alto-barra, 68px); z-index: 10; background: var(--v-bg); padding: 14px 0; margin-top: -14px; border-bottom: 1px solid var(--v-line); display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.p-cabecera__titulo { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 420px; }
+.p-cabecera__h1 { font-size: 26px; line-height: 1.2; font-weight: 800; color: var(--v-navy); overflow-wrap: anywhere; }
+.p-cabecera__datos { display: flex; flex-wrap: wrap; gap: 6px 28px; }
+.p-cabecera__datos div { display: flex; align-items: baseline; gap: 6px; }
+.p-cabecera__datos dt { font-size: 12px; font-weight: 600; color: var(--v-muted); }
+.p-cabecera__datos dd { font-size: 14px; font-weight: 700; }
+.p-cabecera__acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.p-selector select { padding: 8px 12px; font-size: 14px; min-height: 40px; }
+/* Autorizada en verde también en el selector (el de «Aprobada»); las demás opciones con el color normal. */
+.p-selector .p-opcion--autorizada { color: #0E6B3A; font-weight: 700; }
+.p-selector .p-opcion { color: var(--v-ink); font-weight: 400; }
+
+/* ── Editor: secciones a la izquierda ────────────────────── */
+.p-editor { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+.p-secciones { position: sticky; top: calc(var(--alto-barra, 68px) + 150px); background: var(--v-white); border: 1px solid var(--v-line); border-radius: var(--v-radius); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.p-secciones ol { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.p-secciones__avance { font-size: 13px; font-weight: 700; color: var(--v-navy); }
+.p-secciones__barra { height: 8px; background: var(--v-line); border-radius: var(--v-pill); overflow: hidden; }
+.p-secciones__barra span { display: block; height: 8px; background: var(--v-navy); border-radius: var(--v-pill); }
+.p-secciones__item { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; font: inherit; font-size: 14px; text-align: left; color: var(--v-ink); background: none; border: none; border-radius: 8px; padding: 10px; min-height: 44px; cursor: pointer; }
+.p-secciones__item:hover { background: var(--v-bg); }
+.p-secciones__item--actual { background: #EEF2F7; font-weight: 700; color: var(--v-navy); }
+.p-marca { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.p-marca--ok { color: var(--v-ok); }
+.p-marca--falta { color: var(--v-warn-text); }
+.p-marca--guardar { color: #00577A; }
+.p-seccion { gap: 20px; }
+.p-seccion__cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.p-seccion__pie { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; border-top: 1px solid var(--v-line); padding-top: 18px; }
+.p-guardado { font-size: 13px; color: var(--v-muted); }
+.p-guardado--pendiente { color: var(--v-warn-text); font-weight: 600; }
+.v-editor { display: flex; flex-direction: column; gap: 16px; }
+.v-datos--fijos { background: #F7F9FB; border: 1px solid var(--v-line); border-radius: var(--v-radius-sm); padding: 14px 16px; }
+.v-check--sola { align-self: flex-start; }
+
+/* Filas editables (prerrequisitos, competencias, perfil, bibliografía) */
+.v-filas { display: flex; flex-direction: column; gap: 12px; }
+.v-filas__lista, .v-unidades, .v-temas { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.v-fila-ed, .v-unidad { border: 1px solid var(--v-line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; background: var(--v-white); }
+.v-fila-ed__cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.v-fila-ed__n { font-size: 13px; font-weight: 700; color: var(--v-muted-2); }
+.v-fila-ed__campos { display: flex; flex-direction: column; gap: 12px; }
+.v-fila-ctrl { display: flex; gap: 6px; }
+.v-icono-btn { font: inherit; font-size: 15px; font-weight: 700; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--v-input); background: var(--v-white); color: var(--v-navy); cursor: pointer; }
+.v-icono-btn:hover:not(:disabled) { border-color: var(--v-navy); background: #EEF2F7; }
+.v-icono-btn:disabled { color: var(--v-track); border-color: var(--v-line); cursor: default; }
+.v-icono-btn--quitar { color: var(--v-danger); }
+
+/* Contenidos: unidades con temas */
+.v-unidad { background: #FAFBFC; }
+.v-unidad__datos { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; }
+.v-tema { display: flex; align-items: flex-end; gap: 10px; padding: 10px 12px; background: var(--v-white); border: 1px solid var(--v-line); border-radius: 10px; }
+.v-tema__campos { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.v-total { font-size: 15px; font-weight: 800; color: var(--v-navy); }
+.v-total--ok { color: var(--v-ok); }
+.v-total--falta { color: var(--v-warn-text); }
+.v-total--error { color: var(--v-danger); }
+
+/* Evaluación como tabla */
+.v-tabla-ed { display: flex; flex-direction: column; gap: 8px; }
+.v-tabla-ed__fila { display: grid; grid-template-columns: minmax(0, 1fr) 100px 150px auto; gap: 10px; align-items: center; }
+.v-tabla-ed__cab { font-size: 12px; font-weight: 700; color: var(--v-muted); }
+.v-tabla-ed input { width: 100%; font: inherit; font-size: 15px; padding: 10px 12px; border: 1px solid var(--v-input); border-radius: 8px; }
+.v-tabla-lectura { width: 100%; border-collapse: collapse; font-size: 14px; }
+.v-tabla-lectura th, .v-tabla-lectura td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--v-line); }
+.v-tabla-lectura thead th { font-size: 12px; color: var(--v-muted); }
+.v-tabla-lectura tfoot th, .v-tabla-lectura tfoot td { font-weight: 800; color: var(--v-navy); border-bottom: none; }
+.v-lista { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.6; }
+.v-unidades--lectura .v-unidad { background: var(--v-white); }
+.v-unidad__titulo { font-weight: 700; color: var(--v-navy); }
+.v-url { overflow-wrap: anywhere; }
+
+/* Lectura: ficha en rejilla (Información general) y tablas */
+.v-ficha { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--v-line); border-radius: var(--v-radius-sm); overflow: hidden; background: var(--v-white); }
+/* Solo separadores horizontales; margin-top -1px oculta el de la primera fila bajo el borde de la ficha. */
+.v-ficha__campo { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-top: 1px solid var(--v-line); margin-top: -1px; min-width: 0; }
+.v-ficha__campo--ancho { grid-column: 1 / -1; }
+.v-ficha dt { font-size: 12px; font-weight: 600; color: var(--v-muted); }
+.v-ficha dd { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.v-ficha__campo--ancho dd { font-weight: 400; line-height: 1.6; white-space: pre-line; }
+.v-tabla-marco { overflow-x: auto; }
+.v-tabla-lectura--fija { table-layout: fixed; }
+.v-tabla-lectura td { vertical-align: top; overflow-wrap: anywhere; }
+
+/* Historial de versiones */
+.p-historial__cab { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.p-historial__cab h2:focus { outline: none; }
+.p-historial__marco { overflow-x: auto; }
+.p-historial__tabla td, .p-historial__tabla th { vertical-align: middle; }
+.p-historial__tabla tbody th { font-weight: 700; white-space: nowrap; }
+.p-historial__actual { background: #EEF2F7; }
+.p-historial__aqui { font-weight: 600; color: var(--v-muted-2); }
+.p-historial__acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; }
+.p-historial__tabla .v-enlace { padding: 10px 0; min-height: 40px; }
+
+/* Cambios frente a la versión anterior */
+.p-cambios { display: flex; flex-direction: column; gap: 8px; }
+.p-cambios + .p-cambios { border-top: 1px solid var(--v-line); padding-top: 14px; }
+.p-cambios__titulo { font-size: 15px; font-weight: 800; color: var(--v-navy); }
+.p-cambios__lista { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.p-cambios__lista li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; font-size: 13px; padding: 8px 0; }
+.p-cambios__campo { font-weight: 700; color: var(--v-muted-2); }
+.p-cambios__antes { color: var(--v-danger); text-decoration: line-through; overflow-wrap: anywhere; }
+.p-cambios__ahora { color: var(--v-ok); overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .p-editor { grid-template-columns: minmax(0, 1fr); }
+  .p-secciones { position: static; }
+  .p-secciones ol { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .p-secciones li { flex: 1 1 160px; }
+  .p-secciones__item { border: 1px solid var(--v-line); }
+}
+@media (max-width: 599px) {
+  .p-cabecera { position: static; }
+  .p-cabecera__h1 { font-size: 22px; }
+  .v-tabla-ed__cab { display: none; }
+  .v-tabla-ed__fila { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 10px; border: 1px solid var(--v-line); border-radius: 10px; }
+  .v-tabla-ed__fila > span:first-child { grid-column: 1 / -1; }
+  .v-unidad__datos, .v-tema__campos { grid-template-columns: minmax(0, 1fr); }
+  .v-tema { flex-direction: column; align-items: stretch; }
+  .p-cambios__lista li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .v-ficha { grid-template-columns: minmax(0, 1fr); }
+  .v-ficha__relleno { display: none; }
+  /* Tablas de lectura: cada fila como tarjeta, etiqueta arriba y valor abajo */
+  .v-tabla-lectura--apilable thead { display: none; }
+  .v-tabla-lectura--apilable, .v-tabla-lectura--apilable tbody, .v-tabla-lectura--apilable tfoot,
+  .v-tabla-lectura--apilable tr, .v-tabla-lectura--apilable td, .v-tabla-lectura--apilable th { display: block; }
+  .v-tabla-lectura--apilable tbody { display: flex; flex-direction: column; gap: 10px; }
+  .v-tabla-lectura--apilable tbody tr { border: 1px solid var(--v-line); border-radius: 10px; padding: 4px 14px; }
+  .v-tabla-lectura--apilable td { border-bottom: none; padding: 6px 0; }
+  .v-tabla-lectura--apilable td::before { content: attr(data-etq); display: block; font-size: 12px; font-weight: 600; color: var(--v-muted); }
+  .v-tabla-lectura--apilable tfoot tr { display: flex; justify-content: space-between; padding: 12px 14px 0; }
+  .v-tabla-lectura--apilable tfoot th, .v-tabla-lectura--apilable tfoot td { padding: 0; }
+  .v-tabla-lectura--apilable tfoot td::before { content: none; }
+  .v-programa-fila__versiones { align-items: flex-start; }
+  .v-programa-fila__versiones .v-versiones { justify-content: flex-start; }
+  /* Historial: cada versión en su propia tarjeta, con la etiqueta antes del dato */
+  .p-historial__tabla thead { display: none; }
+  .p-historial__tabla, .p-historial__tabla tbody, .p-historial__tabla tr, .p-historial__tabla th, .p-historial__tabla td { display: block; }
+  .p-historial__tabla tbody { display: flex; flex-direction: column; gap: 10px; }
+  .p-historial__tabla tr { border: 1px solid var(--v-line); border-radius: 10px; padding: 6px 14px; }
+  .p-historial__tabla tbody th, .p-historial__tabla td { border-bottom: none; padding: 6px 0; }
+  .p-historial__tabla tbody th { font-size: 15px; color: var(--v-navy); }
+  .p-historial__tabla td[data-etq] { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .p-historial__tabla td[data-etq]::before { content: attr(data-etq); font-size: 12px; font-weight: 600; color: var(--v-muted); }
+  .p-historial__acciones { justify-content: flex-start; border-top: 1px solid var(--v-line); margin-top: 4px; }
+}

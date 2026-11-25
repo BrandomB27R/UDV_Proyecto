@@ -284,7 +284,7 @@ CREATE TABLE workflow_detalle (
     origen_clave    VARCHAR(20)  AS (IFNULL(estado_origen, '')) STORED,
     PRIMARY KEY (id),
     CONSTRAINT uq_wd_transicion UNIQUE (workflow_id, origen_clave, estado_destino),
-    CONSTRAINT ck_wd_accion CHECK (accion IN ('publish', 'start', 'submit', 'review', 'return', 'resubmit', 'approve', 'close', 'cancel')),
+    CONSTRAINT ck_wd_accion CHECK (accion IN ('publish', 'start', 'submit', 'review', 'return', 'resubmit', 'approve', 'close', 'cancel', 'reopen')),
     CONSTRAINT fk_wd_workflow FOREIGN KEY (workflow_id)    REFERENCES workflow(id),
     CONSTRAINT fk_wd_origen   FOREIGN KEY (estado_origen)  REFERENCES estado_tarea(codigo),
     CONSTRAINT fk_wd_destino  FOREIGN KEY (estado_destino) REFERENCES estado_tarea(codigo)
@@ -352,6 +352,7 @@ CREATE TABLE programa_version (
     area_id                 INT           NULL,
     pensum                  VARCHAR(50)   NULL,
     horas_clase_semanal     DECIMAL(4,1)  NULL,
+    sin_prerrequisitos      TINYINT(1)    NOT NULL DEFAULT 0,
     docente_responsable_id  INT           NULL,
     revisor_id              INT           NULL,
     tarea_destinatario_origen_id INT      NULL,
@@ -725,7 +726,8 @@ CREATE TABLE evento (
     PRIMARY KEY (id),
     CONSTRAINT uq_evento_clave UNIQUE (clave_unica),
     CONSTRAINT ck_evento_nombre CHECK (nombre IN ('task.published', 'assignment.due_soon', 'assignment.submitted',
-                                                  'assignment.returned', 'assignment.approved', 'program.authorized', 'task.cancelled')),
+                                                  'assignment.returned', 'assignment.approved', 'program.authorized', 'task.cancelled',
+                                                  'assignment.reopened')),
     CONSTRAINT ck_evento_payload CHECK (payload IS NULL OR JSON_VALID(payload)),
     CONSTRAINT fk_evento_tarea FOREIGN KEY (tarea_id)              REFERENCES tarea(id),
     CONSTRAINT fk_evento_td    FOREIGN KEY (tarea_destinatario_id) REFERENCES tarea_destinatario(id),
@@ -832,7 +834,12 @@ INSERT INTO schema_migracion (version, descripcion) VALUES
 ('1.0.0', 'Esquema inicial (01_schema.sql)'),
 ('1.1.0', 'Aportes del esquema de Pablo: modalidad, area, docente_curso, flujo_programa, perfil de egreso, seleccion, borrador, evento, programa_pdf'),
 ('1.2.0', 'Catalogo prioridad_tarea (low, medium, high, urgent) y FK en tarea.prioridad'),
-('1.2.1', 'Fechas en UTC; @actor_id = 0 se trata como NULL en auditoria y eventos; actor de task.published desde sp_publicar_tarea');
+('1.2.1', 'Fechas en UTC; @actor_id = 0 se trata como NULL en auditoria y eventos; actor de task.published desde sp_publicar_tarea'),
+('1.2.2', 'Permisos de programas para docente y coordinacion (decision C); el usuario de coordinacion ejerce tambien revision y autoridad'),
+('1.2.3', 'El texto de una entrega se puede corregir mientras el intento no se haya enviado'),
+('1.2.4', 'users.read solo para administracion y coordinacion'),
+('1.2.5', 'programa_version.sin_prerrequisitos: el curso declara que no tiene prerrequisitos'),
+('1.2.6', 'Coordinacion puede regresar a revision una entrega aprobada (reopen) con observacion');
 -- ==================== TRIGGERS Y PROCEDIMIENTOS ====================
 
 DELIMITER $$
@@ -871,7 +878,17 @@ END$$
 
 CREATE TRIGGER trg_entrega_no_update BEFORE UPDATE ON entrega FOR EACH ROW
 BEGIN
-SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+-- Un intento ya enviado no se modifica nunca. Mientras el docente lo prepara (aun no hay
+-- una transicion 'submitted' posterior a su creacion) solo pueden cambiar el texto y la
+-- version de programa; lo demas identifica al intento y queda fijo. (1.2.3)
+IF EXISTS (SELECT 1 FROM tarea_transicion tt
+            WHERE tt.tarea_destinatario_id = OLD.tarea_destinatario_id
+              AND tt.estado_nuevo = 'submitted' AND tt.creado_en >= OLD.entregado_en)
+   OR NOT (NEW.id <=> OLD.id AND NEW.tarea_destinatario_id <=> OLD.tarea_destinatario_id
+           AND NEW.numero_intento <=> OLD.numero_intento AND NEW.entregado_por <=> OLD.entregado_por
+           AND NEW.entregado_en <=> OLD.entregado_en) THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Una entrega no se modifica. Registre un nuevo intento.';
+END IF;
 END$$
 
 CREATE TRIGGER trg_entrega_valor_no_update BEFORE UPDATE ON entrega_valor FOR EACH ROW
@@ -982,6 +999,11 @@ BEGIN
   IF NEW.estado_nuevo = 'returned' AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: una devolucion exige una observacion (422)';
   END IF;
+
+  IF NEW.estado_anterior = 'approved' AND NEW.estado_nuevo = 'under_review'
+     AND (NEW.comentario IS NULL OR TRIM(NEW.comentario) = '') THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: regresar a revision exige una observacion (422)';
+  END IF;
 END$$
 
 -- Programas de curso
@@ -1010,6 +1032,7 @@ BEGIN
               AND NEW.nivel <=> OLD.nivel
               AND NEW.area_id <=> OLD.area_id
               AND NEW.pensum <=> OLD.pensum
+              AND NEW.sin_prerrequisitos <=> OLD.sin_prerrequisitos
               AND NEW.horas_clase_semanal <=> OLD.horas_clase_semanal
               AND NEW.docente_responsable_id <=> OLD.docente_responsable_id
               AND NEW.revisor_id <=> OLD.revisor_id
@@ -1357,10 +1380,11 @@ END$$
 CREATE TRIGGER trg_tt_evento AFTER INSERT ON tarea_transicion FOR EACH ROW
 BEGIN
   DECLARE v_nombre VARCHAR(40) DEFAULT NULL;
-  SET v_nombre = CASE NEW.estado_nuevo
-                   WHEN 'submitted' THEN 'assignment.submitted'
-                   WHEN 'returned'  THEN 'assignment.returned'
-                   WHEN 'approved'  THEN 'assignment.approved'
+  SET v_nombre = CASE
+                   WHEN NEW.estado_nuevo = 'submitted' THEN 'assignment.submitted'
+                   WHEN NEW.estado_nuevo = 'returned'  THEN 'assignment.returned'
+                   WHEN NEW.estado_nuevo = 'approved'  THEN 'assignment.approved'
+                   WHEN NEW.estado_nuevo = 'under_review' AND NEW.estado_anterior = 'approved' THEN 'assignment.reopened'
                  END;
   IF v_nombre IS NOT NULL THEN
     INSERT INTO evento (nombre, clave_unica, tarea_id, tarea_destinatario_id, actor_id, payload)

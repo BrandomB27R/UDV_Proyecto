@@ -71,6 +71,54 @@ class TransitionTests(Base):
             self.assertTrue(h["actor_id"] and h["created_at"] and h["from_status"] and h["to_status"])
         self.assertEqual(hist[4]["comment"], "Falta bibliografía")
 
+    # ── reopen: coordinación regresa a revisión una entrega aprobada (pedido del ingeniero) ──
+    def _approved(self):
+        aid = self.assignment_of(self.make_task(publish=True))
+        for a, w in (("start", self.t[0]), ("submit", self.t[0]), ("review", "reviewer"),
+                     ("approve", "reviewer")):
+            self.do(aid, a, w)
+        return aid
+
+    def test_reopen_sends_an_approved_delivery_back_to_review_and_on_to_the_teacher(self):
+        aid = self._approved()
+        self.assertEqual(self.do(aid, "reopen", "coord", "Falta la firma del anexo")["status"],
+                         "under_review")
+        hist = tasks.get_history(self.conn, self.actor("coord"), aid)
+        self.assertEqual((hist[-1]["action"], hist[-1]["from_status"], hist[-1]["to_status"],
+                          hist[-1]["comment"]),
+                         ("reopen", "approved", "under_review", "Falta la firma del anexo"))
+        # Quien revisa decide con las reglas de siempre: devolver al docente...
+        self.assertEqual(self.do(aid, "return", "reviewer", "Agrega la firma")["status"], "returned")
+        self.assertEqual(self.do(aid, "resubmit", self.t[0])["status"], "submitted")
+        # ...o aprobar de nuevo, y entonces sí se cierra.
+        self.do(aid, "review", "reviewer")
+        self.assertEqual(self.do(aid, "approve", "reviewer")["status"], "approved")
+        self.assertEqual(self.do(aid, "close", "coord")["status"], "closed")
+
+    def test_reopen_without_comment_is_422_and_changes_nothing(self):
+        aid = self._approved()
+        before = self.snapshot()
+        for bad in (None, "", "   "):
+            with self.assertRaises(ValidationFailed):
+                self.do(aid, "reopen", "coord", bad)
+        self.assertEqual(before, self.snapshot())
+
+    def test_reopen_is_only_for_the_coordinator_of_the_task(self):
+        aid = self._approved()
+        before = self.snapshot()
+        for who in ("reviewer", "authority", self.t[0], "coord2"):
+            with self.subTest(who=who), self.assertRaises(Forbidden):
+                self.do(aid, "reopen", who, "No me corresponde")
+        self.assertEqual(before, self.snapshot())
+
+    def test_a_closed_delivery_is_not_reopened(self):
+        aid = self._approved()
+        self.do(aid, "close", "coord")
+        before = self.snapshot()
+        with self.assertRaises(Conflict):
+            self.do(aid, "reopen", "coord", "Ya estaba cerrada")
+        self.assertEqual(before, self.snapshot())
+
     def test_return_without_comment_is_422_and_changes_nothing(self):
         aid = self.assignment_of(self.make_task(publish=True))
         for a, w in (("start", self.t[0]), ("submit", self.t[0]), ("review", "reviewer")):
@@ -86,7 +134,8 @@ class TransitionTests(Base):
         # (Si el usuario no tuviera permiso, respondería 403 antes; ver el test siguiente.)
         permitted = {"publish": "coord", "start": self.t[0], "submit": self.t[0],
                      "review": "reviewer", "return": "reviewer", "resubmit": self.t[0],
-                     "approve": "authority", "close": "system", "cancel": "coord"}
+                     "approve": "authority", "close": "system", "cancel": "coord",
+                     "reopen": "coord"}
         self.assertEqual(set(permitted), set(ACTIONS))
         for flow, type_code in (("standard", "update_program"), ("short", "confirm_activity")):
             aid = self.assignment_of(self.make_task(type_code, publish=True))
@@ -101,7 +150,7 @@ class TransitionTests(Base):
                                           (state, aid))
                         before = self.snapshot()
                         with self.assertRaises(Conflict):
-                            self.do(aid, action, permitted[action])
+                            self.do(aid, action, permitted[action], "Observación de prueba")
                         self.assertEqual(before, self.snapshot())
 
     def test_forbidden_takes_precedence_over_conflict(self):
@@ -232,6 +281,35 @@ class TransitionTests(Base):
         with self.assertRaises(ValidationFailed):
             self.do(aid, "explode", self.t[0])
 
+    # ------------------------------------------------ hallazgos #14 y #15
+    def test_reviewer_cannot_act_on_a_task_without_designated_reviewer(self):
+        """Hallazgo #15: sin revisor_id ningún revisor puede revisar; la autoridad sí aprueba."""
+        aid = self.assignment_of(self.make_task(reviewer_id=None, publish=True))
+        for a in ("start", "submit"):
+            self.do(aid, a, self.t[0])
+        before = self.snapshot()
+        for who in ("reviewer", "reviewer2"):
+            with self.subTest(who=who), self.assertRaises(Forbidden):
+                self.do(aid, "review", who)
+        self.assertEqual(before, self.snapshot())
+
+    def test_return_and_approve_are_restricted_to_the_designated_reviewer(self):
+        aid = self.assignment_of(self.make_task(publish=True))
+        for a, w in (("start", self.t[0]), ("submit", self.t[0]), ("review", "reviewer")):
+            self.do(aid, a, w)
+        before = self.snapshot()
+        for action, comment in (("return", "Falta algo"), ("approve", None)):
+            with self.subTest(action=action), self.assertRaises(Forbidden):
+                self.do(aid, action, "reviewer2", comment)
+        self.assertEqual(before, self.snapshot())
+
+    def test_error_codes_are_uppercase(self):
+        """Hallazgo #14: los códigos del contrato van en MAYÚSCULAS."""
+        aid = self.assignment_of(self.make_task(publish=True))
+        with self.assertRaises(Conflict) as cm:
+            self.do(aid, "approve", "authority")           # autorizada, pero estado inválido
+        self.assertEqual(cm.exception.code, "INVALID_TRANSITION")
+
 
 class TaskAndPublishTests(Base):
     def test_publish_all_creates_one_assignment_per_eligible_teacher(self):
@@ -301,7 +379,7 @@ class TaskAndPublishTests(Base):
         tasks.publish_task(self.conn, self.actor("coord"), tid)
         inbox = tasks.inbox(self.conn, t0)
         self.assertEqual(inbox["total"], 1)
-        self.assertEqual(inbox["items"][0]["status"], "assigned")
+        self.assertEqual(inbox["data"][0]["status"], "assigned")
 
     def test_edit_only_while_draft(self):
         tid = self.make_task()
@@ -379,11 +457,11 @@ class TaskAndPublishTests(Base):
         self.assertEqual(res["summary"]["total"], 5)
         by = res["summary"]["by_status"]
         self.assertEqual((by["assigned"], by["in_progress"], by["submitted"]), (3, 1, 1))
-        self.assertEqual(len(res["items"]), 5)
+        self.assertEqual(len(res["data"]), 5)
         only = tasks.list_task_assignments(self.conn, self.actor("coord"), tid, status="submitted")
         self.assertEqual(only["total"], 1)
         small = tasks.list_task_assignments(self.conn, self.actor("coord"), tid, page_size=2)
-        self.assertEqual((len(small["items"]), small["total"]), (2, 5))
+        self.assertEqual((len(small["data"]), small["total"]), (2, 5))
         with self.assertRaises(Forbidden):
             tasks.list_task_assignments(self.conn, self.actor("coord2"), tid)
 
@@ -392,6 +470,15 @@ class TaskAndPublishTests(Base):
         self.assertTrue(tasks.get_history(self.conn, self.actor(self.t[0]), aid))
         with self.assertRaises(Forbidden):
             tasks.get_history(self.conn, self.actor(self.t[1]), aid)
+
+    def test_pagination_follows_the_contract(self):
+        """Hallazgo #9: page, per_page, total, data."""
+        self.make_task(rule={"mode": "all"}, publish=True)
+        self.make_task()
+        res = tasks.list_tasks(self.conn, self.actor("coord"), page=1, page_size=1)
+        self.assertEqual(set(res), {"page", "per_page", "total", "data"})
+        self.assertEqual((res["page"], res["per_page"], res["total"], len(res["data"])),
+                         (1, 1, 2, 1))
 
 
 class SeedTests(unittest.TestCase):
@@ -405,6 +492,25 @@ class SeedTests(unittest.TestCase):
         self.assertEqual((ind["total"], mass["total"]), (1, 5))
         self.assertEqual(mass["summary"]["by_status"]["submitted"], 1)
         self.assertEqual(tasks.get_task(conn, coord, ids["draft_task"])["status"], "draft")
+
+
+class ErrorCodeTests(unittest.TestCase):
+    """Hallazgo #14: todos los códigos de error del contrato van en MAYÚSCULAS."""
+
+    def test_default_codes_are_uppercase(self):
+        from workflow import errors
+        classes = [c for c in vars(errors).values()
+                   if isinstance(c, type) and issubclass(c, errors.WorkflowError)]
+        self.assertGreaterEqual(len(classes), 6)
+        for cls in classes:
+            with self.subTest(cls=cls.__name__):
+                self.assertEqual(cls.code, cls.code.upper())
+        self.assertEqual(errors.NotFound("x").to_dict()["error"]["code"], "NOT_FOUND")
+        self.assertEqual(errors.ValidationFailed("x").code, "VALIDATION_ERROR")
+
+    def test_custom_code_is_uppercased(self):
+        from workflow.errors import Conflict
+        self.assertEqual(Conflict("x", code="invalid_transition").code, "INVALID_TRANSITION")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,16 @@ class Asignacion:
     status: str
     priority: str
     due_at: date | None = None
+    # La tarea de origen y, si la tarea lo indica, el curso y el período (columnas de G1).
+    task_id: int | None = None
+    course_code: str | None = None
+    course_name: str | None = None
+    period_code: str | None = None
+    # Para la pantalla de inicio: quién revisa, cuándo se entregó por última vez y, si la
+    # asignación está devuelta, la observación de esa devolución.
+    reviewer_name: str | None = None
+    submitted_at: str | None = None
+    last_return_comment: str | None = None
 
     def to_dict(self):
         datos = asdict(self)

@@ -37,7 +37,7 @@ class TipoEvento:
     plantilla: str           # Mensaje que ve el destinatario
 
 
-# Los mismos siete nombres que acepta la tabla evento del G1
+# Los mismos ocho nombres que acepta la tabla evento del G1
 # (CHECK ck_evento_nombre) y la tabla del CONTRATO.md §3.
 EVENTOS: dict[str, TipoEvento] = {e.nombre: e for e in (
     TipoEvento("task.published", ("task_title", "due_date"), "Nueva tarea asignada",
@@ -50,6 +50,8 @@ EVENTOS: dict[str, TipoEvento] = {e.nombre: e for e in (
                "Tu entrega de «{task_title}» fue devuelta. Observación: {comment}"),
     TipoEvento("assignment.approved", ("task_title",), "Entrega aprobada",
                "La entrega de «{task_title}» fue aprobada."),
+    TipoEvento("assignment.reopened", ("task_title", "comment"), "Entrega regresada a revisión",
+               "Coordinación regresó a revisión la entrega de «{task_title}». Observación: {comment}"),
     TipoEvento("program.authorized", ("program_name",), "Programa autorizado",
                "Se autorizó una nueva versión del programa «{program_name}»."),
     TipoEvento("task.cancelled", ("task_title",), "Tarea cancelada",
@@ -77,7 +79,10 @@ def _fecha_visible(valor: datetime | None) -> str:
 def como_dict(fila: Any) -> dict[str, Any]:
     return {"id": fila.id, "event": fila.tipo, "title": fila.titulo,
             "message": fila.mensaje, "is_read": fila.leida_en is not None,
-            "created_at": _iso(fila.creado_en), "read_at": _iso(fila.leida_en)}
+            "created_at": _iso(fila.creado_en), "read_at": _iso(fila.leida_en),
+            # A qué se refiere el aviso, para que la pantalla enlace a su detalle.
+            "assignment_id": fila.tarea_destinatario_id,
+            "program_version_id": fila.programa_version_id}
 
 
 class RepositorioNotificaciones:
@@ -184,6 +189,12 @@ class RepositorioNotificaciones:
             select(td.c.usuario_id).where(td.c.tarea_id == tarea_id)
             .order_by(td.c.id)).scalars())
 
+    def asignaciones_de_tarea(self, tarea_id: int) -> dict[int, int]:
+        """{usuario_id: id de su asignación} de una tarea."""
+        td = tablas.tarea_destinatario
+        return {u: a for u, a in self.sesion.execute(
+            select(td.c.usuario_id, td.c.id).where(td.c.tarea_id == tarea_id))}
+
     def programa(self, version_id: int | None) -> Any | None:
         if version_id is None:
             return None
@@ -196,6 +207,10 @@ class RepositorioNotificaciones:
             select(u.c.id).join(ur, ur.c.usuario_id == u.c.id).join(r, r.c.id == ur.c.rol_id)
             .where(r.c.codigo == codigo_rol, r.c.activo.is_(True), u.c.activo.is_(True))
             .order_by(u.c.id)).scalars())
+
+
+# Clave interna de `referencias`: {usuario_id: asignación} para los avisos de toda la tarea.
+_ASIGNACION_POR_USUARIO = "_asignacion_por_usuario"
 
 
 def _error_de_campo(campo: str, codigo: str, mensaje: str) -> dict[str, str]:
@@ -264,9 +279,14 @@ class ServicioNotificaciones:
         """Guarda una notificación por destinatario que aún no tenga la suya."""
         mensaje = tipo.plantilla.format(**datos)[:1000]
         ya = self.repositorio.ya_avisados(evento_id)
+        # En un aviso de toda la tarea (publicada o cancelada) cada docente recibe
+        # la referencia a SU asignación, para que la pantalla lo lleve a su detalle.
+        referencias = dict(referencias)
+        por_usuario = referencias.pop(_ASIGNACION_POR_USUARIO, {})
         return self.repositorio.agregar_notificaciones([
             {"usuario_id": u, "tipo": tipo.nombre, "titulo": tipo.titulo,
-             "mensaje": mensaje, "evento_id": evento_id, **referencias}
+             "mensaje": mensaje, "evento_id": evento_id, **referencias,
+             **({"tarea_destinatario_id": por_usuario[u]} if u in por_usuario else {})}
             for u in destinatarios if u not in ya])
 
     def procesar_evento(self, evento: Any) -> list[dict[str, Any]]:
@@ -309,12 +329,21 @@ class ServicioNotificaciones:
         nombre = fila.nombre
         if nombre in ("task.published", "task.cancelled") and tarea is not None:
             destinatarios = repo.destinatarios_de_tarea(tarea.id)
+            referencias[_ASIGNACION_POR_USUARIO] = repo.asignaciones_de_tarea(tarea.id)
         elif nombre in ("assignment.due_soon", "assignment.returned") and asignacion:
             destinatarios = [asignacion.usuario_id]
             datos["comment"] = (payload.get("comentario") or "").strip() or "Sin comentario."
         elif nombre == "assignment.submitted" and asignacion:
-            revisor = asignacion.revisor_id or (tarea.revisor_id if tarea else None)
+            # Sin revisor designado revisa la coordinación que creó la tarea (decisión B).
+            revisor = (asignacion.revisor_id or (tarea.revisor_id if tarea else None)
+                       or (tarea.creado_por if tarea else None))
             destinatarios = [revisor] if revisor else []
+        elif nombre == "assignment.reopened" and asignacion:
+            # Quien revisa (debe volver a decidir) y el docente (su entrega ya no está aprobada).
+            revisor = (asignacion.revisor_id or (tarea.revisor_id if tarea else None)
+                       or (tarea.creado_por if tarea else None))
+            destinatarios = [revisor, asignacion.usuario_id]
+            datos["comment"] = (payload.get("comentario") or "").strip() or "Sin comentario."
         elif nombre == "assignment.approved" and asignacion:
             # Docente y coordinador (quien creó la tarea).
             destinatarios = [asignacion.usuario_id] + ([tarea.creado_por] if tarea else [])

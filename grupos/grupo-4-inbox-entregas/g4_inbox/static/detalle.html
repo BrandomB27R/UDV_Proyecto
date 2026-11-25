@@ -6,7 +6,8 @@
   <title>Detalle de la asignación · UDV</title>
   <!-- Estilos institucionales del PM (grupos/udv-styles): se importan, no se copian -->
   <link rel="stylesheet" href="../../../udv-styles/udv.css">
-  <link rel="stylesheet" href="css/detalle.css">
+  <link rel="stylesheet" href="css/menu.css?v=20261117">
+  <link rel="stylesheet" href="css/detalle.css?v=20261117">
 </head>
 <body>
 
@@ -19,17 +20,17 @@
     </a>
     <nav aria-label="Principal">
       <ul class="udv-header__nav">
-        <li><a href="#">Inicio</a></li>
+        <li><a href="/app/">Inicio</a></li>
         <li><a href="inbox.html" aria-current="page">Inbox</a></li>
-        <li><a href="#">Tareas</a></li>
-        <li><a href="#">Programas</a></li>
+        <li><a href="/app/g3/">Tareas</a></li>
+        <li><a href="/app/g5/Programa.html">Programas</a></li>
       </ul>
     </nav>
   </header>
 
   <main class="udv-section">
     <div class="udv-container">
-      <a href="inbox.html" class="btn-udv btn-udv-outline btn-udv-sm" style="margin-bottom:1.5rem;">&larr; Volver al inbox</a>
+      <a href="inbox.html" id="enlaceVolver" class="btn-udv btn-udv-dark btn-udv-sm" style="margin-bottom:1.5rem;">&larr; Volver al inbox</a>
 
       <div id="cargando" class="udv-alert udv-alert-info">Cargando la asignación…</div>
       <div id="avisoError" class="udv-alert udv-alert-danger" style="display:none;"></div>
@@ -42,22 +43,31 @@
 
         <div id="detComentario"></div>
 
+        <!-- Archivos entregados, por intento -->
+        <div id="detArchivos" style="display:none;margin:1rem 0;">
+          <h2 class="udv-label" style="margin-bottom:.5rem;">Archivos entregados</h2>
+          <ul id="listaArchivos" style="list-style:none;padding:0;margin:0;"></ul>
+        </div>
+
         <div id="detBotones" class="udv-gap-2" style="display:flex;flex-wrap:wrap;margin-top:1rem;"></div>
 
         <div class="udv-form-group" id="obsGroup" style="display:none;margin-top:1rem;max-width:480px;">
-          <label class="udv-label" for="obs">Observación (obligatoria para devolver)</label>
+          <label class="udv-label" for="obs">Observación (obligatoria para devolver, opcional al aprobar)</label>
           <textarea class="udv-textarea" id="obs" placeholder="Escribe la observación antes de devolver…"></textarea>
         </div>
 
         <!-- Formulario de entrega -->
         <div id="formEntrega" style="display:none;margin-top:1.5rem;border-top:1px solid #E5E7EB;padding-top:1.5rem;max-width:480px;">
+          <!-- Solo en tareas de programa: la versión del programa que se entrega -->
+          <div id="detPrograma" class="udv-card-light g4-programa" style="display:none;"></div>
           <div class="udv-form-group">
             <label class="udv-label" for="entregaComentario">Comentario de la entrega</label>
             <textarea class="udv-textarea" id="entregaComentario" placeholder="Describe brevemente lo que estás entregando…"></textarea>
           </div>
           <div class="udv-form-group">
             <label class="udv-label" for="entregaArchivo">Adjuntar evidencia</label>
-            <input class="udv-input" type="file" id="entregaArchivo">
+            <input class="udv-input" type="file" id="entregaArchivo" multiple>
+            <small id="entregaArchivoNota" style="color:var(--udv-text-muted);"></small>
           </div>
           <p id="archivoInfo" style="font-size:.8rem;color:var(--udv-text-muted);margin-bottom:.6rem;"></p>
           <div id="entregaBotones" class="udv-gap-2" style="display:flex;flex-wrap:wrap;"></div>
@@ -65,11 +75,30 @@
 
         <div id="avisoEntregaError" class="udv-alert udv-alert-danger" style="display:none;"></div>
         <div id="avisoEntregaOk" class="udv-alert udv-alert-success" style="display:none;"></div>
+
+        <!-- Comentarios entre el docente y quien revisa -->
+        <section id="detComentarios" class="g4-seccion">
+          <h2 class="udv-label">Comentarios</h2>
+          <ul id="listaComentarios" class="g4-lista"></ul>
+          <p id="sinComentarios" class="g4-vacio">Todavía no hay comentarios.</p>
+          <div id="nuevoComentario" style="display:none;">
+            <label class="udv-label" for="textoComentario">Escribir un comentario</label>
+            <textarea class="udv-textarea" id="textoComentario" maxlength="5000" placeholder="Escribe una pregunta o una aclaración…"></textarea>
+            <button type="button" class="btn-udv btn-udv-dark btn-udv-sm" id="btnComentar">Comentar</button>
+          </div>
+          <div id="avisoComentario" class="udv-alert udv-alert-danger" style="display:none;"></div>
+        </section>
+
+        <!-- Historial de la tarea (lo registra G3 en cada acción) -->
+        <section id="detHistorial" class="g4-seccion">
+          <h2 class="udv-label">Historial</h2>
+          <ol id="listaHistorial" class="g4-lista"></ol>
+        </section>
       </div>
     </div>
   </main>
 
-  <script src="js/sesion.js"></script>
-  <script src="js/detalle.js"></script>
+  <script src="js/sesion.js?v=20261117"></script>
+  <script src="js/detalle.js?v=20261117"></script>
 </body>
 </html>

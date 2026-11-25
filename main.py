@@ -11,12 +11,15 @@ prefijo /api/v1 (por ejemplo APIRouter(prefix="/api/v1/auth")).
 Correr local:  uvicorn main:app --reload
 """
 import importlib
+import ipaddress
 import logging
 import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 RAIZ = Path(__file__).resolve().parent
 log = logging.getLogger("udv")
@@ -41,13 +44,88 @@ ROUTERS = [
     ("g6_admin.api", "router"),             # G6
 ]
 
+# Fuera de desarrollo la aplicación no cuenta nada de sí misma sin sesión: ni la
+# documentación de la API, ni la versión de la base, ni qué módulos tiene montados.
+# API_DOCS_PUBLICA=1 vuelve a publicar la documentación si alguna vez hace falta.
+ES_DESARROLLO = os.getenv("APP_ENV", "desarrollo") == "desarrollo"
+DOCS_PUBLICAS = ES_DESARROLLO or os.getenv("API_DOCS_PUBLICA", "") == "1"
+
 app = FastAPI(
     title="UDV · Workflow docente",
     version="0.1.0",
-    docs_url="/api/v1/docs",
-    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/docs" if DOCS_PUBLICAS else None,
+    openapi_url="/api/v1/openapi.json" if DOCS_PUBLICAS else None,
     redoc_url=None,
 )
+
+# Cabeceras de seguridad en todas las respuestas.
+_CSP_VINCI = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+              "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
+              "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+_CSP_API = "default-src 'none'; frame-ancestors 'none'"
+_CSP_MINIMA = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+
+def _csp_para(ruta: str) -> str:
+    """Política de contenido según qué se sirve.
+
+    Vinci y los estilos: solo recursos propios, sin scripts en línea. La API:
+    nada (devuelve JSON y archivos). Swagger (solo en desarrollo) usa scripts
+    en línea, así que recibe solo la parte que no lo rompe.
+    """
+    if ruta.startswith("/api/v1/docs"):
+        return _CSP_MINIMA
+    if ruta.startswith("/api/") or ruta.startswith("/health"):
+        return _CSP_API
+    return _CSP_VINCI
+
+
+@app.middleware("http")
+async def cabeceras_de_seguridad(request, call_next):
+    respuesta = await call_next(request)
+    c = respuesta.headers
+    c.setdefault("X-Content-Type-Options", "nosniff")
+    c.setdefault("X-Frame-Options", "DENY")
+    c.setdefault("Referrer-Policy", "same-origin")
+    c.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    c.setdefault("Content-Security-Policy", _csp_para(request.url.path))
+    if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
+        c.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return respuesta
+
+class DireccionDelCliente:
+    """Detrás de un proxy, pone en la petición la dirección real de quien llama.
+
+    En Railway la conexión que ve la aplicación es la del proxy de la plataforma,
+    la misma para todos: sin esto, el límite de intentos de inicio de sesión por
+    dirección cuenta a todos los usuarios juntos (veinte fallos de cualquiera
+    bloquean el acceso de todos) y la auditoría guarda siempre la dirección del proxy.
+
+    Solo actúa si CABECERA_IP_CLIENTE nombra la cabecera donde el proxy escribe
+    esa dirección (en Railway, X-Real-IP, que el borde sobrescribe). Sin la
+    variable no se confía en ninguna cabecera: sin proxy delante, cualquiera
+    podría escribirla. El resto del código sigue leyendo request.client.host.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        cabecera = os.getenv("CABECERA_IP_CLIENTE", "").strip().lower().encode("latin-1", "ignore")
+        if cabecera and scope["type"] in ("http", "websocket"):
+            valores = [v for k, v in scope.get("headers", []) if k == cabecera]
+            if len(valores) == 1:                       # repetida o ausente: no se confía
+                try:
+                    ip = str(ipaddress.ip_address(valores[0].decode("latin-1").strip()))
+                except ValueError:
+                    ip = None
+                if ip:
+                    scope = dict(scope)
+                    scope["client"] = (ip, 0)
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(DireccionDelCliente)
 
 # Formato de error común: servicio compartido del G2 (CONTRATO_COMUN §1).
 try:
@@ -76,10 +154,70 @@ for modulo, nombre in [
         log.warning("Gancho omitido %s:%s -> %s", modulo, nombre, exc)
 
 
+# Interfaz (README §4: los estáticos y estilos compartidos los sirve main.py).
+# La única interfaz publicada es Vinci (portal/). Las pantallas que cada grupo
+# entregó siguen en su carpeta como parte de su entrega, pero ya no se publican:
+# nadie las usa ni las mantiene, y cada una era superficie expuesta de más
+# (revisión de seguridad del 18 de noviembre, hallazgo 12).
+PANTALLAS = [
+    ("/udv-styles", "grupos/udv-styles"),                               # estilos compartidos (PM)
+    ("/app",        "portal"),                                          # Vinci (PM)
+]
+
+
+class PantallasSinCacheVieja(StaticFiles):
+    """Sirve las pantallas pidiendo al navegador que revalide cada archivo.
+
+    Sin esta cabecera el navegador decide por su cuenta cuánto guardar cada
+    archivo, y tras un despliegue puede mezclar un módulo nuevo con uno viejo
+    (pantalla en blanco: "does not provide an export named ..."). Con
+    ``no-cache`` sigue guardando, pero antes de usar la copia pregunta si
+    cambió (ETag); si no cambió, la respuesta es un 304 sin contenido.
+    """
+
+    async def get_response(self, path, scope):
+        respuesta = await super().get_response(path, scope)
+        respuesta.headers["Cache-Control"] = "no-cache"
+        return respuesta
+
+
+pantallas_montadas = []
+for ruta, carpeta in PANTALLAS:
+    directorio = RAIZ / carpeta
+    if directorio.is_dir():
+        app.mount(ruta, PantallasSinCacheVieja(directory=str(directorio), html=True), name=ruta.strip("/").replace("/", "-"))
+        pantallas_montadas.append(ruta)
+    else:
+        log.warning("Pantalla omitida %s -> no existe %s", ruta, carpeta)
+
+
+@app.get("/", include_in_schema=False)
+def inicio():
+    return RedirectResponse("/app/")
+
+
+if not DOCS_PUBLICAS:
+    # El esquema sigue disponible para quien tiene sesión (herramientas y pruebas).
+    try:
+        from g2_api.routers.auth import obtener_usuario_actual
+
+        @app.get("/api/v1/openapi.json", include_in_schema=False)
+        def esquema_con_sesion(_usuario=Depends(obtener_usuario_actual)):
+            return JSONResponse(app.openapi())
+    except ImportError as exc:
+        log.warning("Esquema con sesión no disponible: %s", exc)
+
+
 @app.get("/health", tags=["Sistema"])
 def health():
-    """Estado de la app y de los routers. No requiere base de datos."""
-    return {"status": "ok", "routers": montados, "pendientes": pendientes}
+    """Estado de la app. No requiere base de datos.
+
+    Es la ruta que consulta Railway para saber si el servicio vive. Fuera de
+    desarrollo responde solo el estado: la lista de módulos no es pública.
+    """
+    if not ES_DESARROLLO:
+        return {"status": "ok" if not pendientes else "degradado"}
+    return {"status": "ok", "routers": montados, "pendientes": pendientes, "pantallas": pantallas_montadas}
 
 
 @app.get("/health/db", tags=["Sistema"])
@@ -98,6 +236,11 @@ def health_db():
                 "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
             )).scalar()
         engine.dispose()
+        if not ES_DESARROLLO:
+            return {"status": "ok"}
         return {"status": "ok", "version": version, "tablas": tablas}
     except Exception as exc:
+        log.warning("health/db falló: %s", exc)
+        if not ES_DESARROLLO:
+            return {"status": "error"}
         return {"status": "error", "detalle": f"{type(exc).__name__}: {exc}"}

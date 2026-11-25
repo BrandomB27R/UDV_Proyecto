@@ -126,6 +126,8 @@ class NotificacionSalida(BaseModel):
     is_read: bool
     created_at: str
     read_at: str | None
+    assignment_id: int | None = None
+    program_version_id: int | None = None
 
 
 class PaginaNotificaciones(BaseModel):
@@ -145,6 +147,10 @@ class RegistroAuditoriaSalida(BaseModel):
     action: str
     entity: str
     entity_id: int | str
+    entity_label: str | None = Field(
+        default=None, description="Nombre legible de lo que se tocó: título de la tarea, "
+                                  "tarea y docente de la asignación, nombre del usuario o "
+                                  "curso y versión del programa. Null si no aplica.")
     created_at: str
     from_state: str | None
     to_state: str | None
@@ -162,6 +168,7 @@ class PaginaAuditoria(BaseModel):
 class ActorAuditoria(BaseModel):
     id: int
     email: str | None
+    name: str | None = None
 
 
 class OpcionesAuditoria(BaseModel):
@@ -205,6 +212,24 @@ class IndicadoresPanel(BaseModel):
     overdue: ListaPanel
     due_soon: ListaPanel
     compliance: Cumplimiento
+
+
+class DocentePanel(BaseModel):
+    user_id: int
+    user_email: str | None
+    name: str | None
+    assigned: int
+    overdue: int
+    due_soon: int
+    to_review: int
+    finished: int
+
+
+class ResumenDocentes(BaseModel):
+    generated_at: str
+    due_soon_days: int
+    total: int
+    data: list[DocentePanel]
 
 
 class ResumenEventos(BaseModel):
@@ -328,6 +353,8 @@ def listar_facultades(db: Sesion, _usuario: UsuarioConSesion) -> list[dict[str, 
 @router.get("/notifications", tags=["Notificaciones"],
             response_model=PaginaNotificaciones,
             summary="Listar mis notificaciones (las más recientes primero)",
+            description="Antes de listar, procesa los eventos pendientes, igual que "
+                        "`POST /notifications/process`.",
             responses=_errores(401, 422))
 def listar_notificaciones(
     servicio: Notificaciones,
@@ -348,6 +375,12 @@ def listar_notificaciones(
 @router.post("/notifications/process", tags=["Notificaciones"],
              response_model=ResumenEventos,
              summary="Procesar ya los eventos pendientes (solo administración)",
+             description="Las notificaciones no se crean solas en segundo plano: se crean "
+                         "cuando se llama a esta ruta (o cuando alguien lista las suyas). "
+                         "Convierte en avisos los eventos que dejaron G3, G4 y G5 en la tabla "
+                         "`evento`, y genera los de `assignment.due_soon` con la hora de la "
+                         "base. Llamarla varias veces no duplica nada. Responde cuántos "
+                         "eventos procesó, cuántos avisos creó y cuántos fallaron.",
              responses=_errores(401, 403))
 def procesar_eventos(servicio: Notificaciones, _usuario: Administracion) -> dict[str, int]:
     return servicio.procesar_pendientes()
@@ -413,3 +446,10 @@ def panel(
         "Los totales siempre cuentan todas."))] = 20,
 ) -> dict[str, Any]:
     return servicio.indicadores(limite=limit)
+
+
+@router.get("/dashboard/teachers", tags=["Panel"], response_model=ResumenDocentes,
+            summary="Asignaciones por docente: asignadas, vencidas, por vencer, por revisar y terminadas",
+            responses=_errores(401, 403))
+def panel_por_docente(servicio: Panel, _usuario: Monitoreo) -> dict[str, Any]:
+    return servicio.por_docente()

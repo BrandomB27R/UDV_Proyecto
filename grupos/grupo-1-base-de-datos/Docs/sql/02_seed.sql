@@ -105,15 +105,15 @@ insert into rol_permiso (rol_id, permiso_id) values
 
 (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),(1,8),(1,9),(1,10),(1,11),(1,12),(1,13),(1,14),(1,15),(1,17),(1,20),(1,21),
 
-(2,1),(2,5),(2,7),(2,8),(2,10),(2,11),(2,13),(2,14),(2,15),(2,16),(2,17),
+(2,1),(2,5),(2,7),(2,8),(2,10),(2,11),(2,13),(2,14),(2,15),(2,16),(2,17),(2,18),
 
-(3,7),(3,8),(3,12),(3,16),(3,17),
+(3,7),(3,8),(3,12),(3,14),(3,16),(3,17),
 
-(4,1),(4,8),(4,13),(4,14),(4,16),(4,17),(4,18),
+(4,8),(4,13),(4,14),(4,16),(4,17),(4,18),
 
 (5,8),(5,15),(5,16),(5,17),(5,19),
 
-(6,1),(6,8),(6,9),(6,15),(6,17);
+(6,8),(6,9),(6,15),(6,17);
 
 insert into usuario (id, correo, id_academico, nombres, apellidos, hash_contrasena, unidad_academica_id, activo) values
 (1, 'admin@demo.udv.edu.gt',        'U-0001', 'Ana',    'Administradora', '$2b$10$IrPNlu9CPcXlLL.viZRic.z3vaku4uuI6eiWVXOoTa.HulL7SJyCu', 1, 1),
@@ -128,6 +128,8 @@ insert into usuario (id, correo, id_academico, nombres, apellidos, hash_contrase
 insert into usuario_rol (usuario_id, rol_id, asignado_por) values
 (1, 1, NULL),
 (2, 2, 1),
+(2, 4, 1),
+(2, 5, 1),
 (3, 3, 1),
 (4, 3, 1),
 (5, 4, 1),
@@ -183,6 +185,7 @@ cross join (
   union all select 'returned',     'submitted',    'resubmit'
   union all select 'under_review', 'approved',     'approve'
   union all select 'approved',     'closed',       'close'
+  union all select 'approved',     'under_review', 'reopen'
   union all select 'assigned',     'cancelled',    'cancel'
 ) t;
 
@@ -190,7 +193,7 @@ insert into workflow_detalle_rol (workflow_detalle_id, rol_id)
 select wd.id, r.id
 from workflow_detalle wd
 join rol r on r.codigo = case
-    when wd.accion in ('publish', 'close', 'cancel')           then 'coordinator'
+    when wd.accion in ('publish', 'close', 'cancel', 'reopen') then 'coordinator'
     when wd.accion in ('start', 'submit', 'resubmit')          then 'teacher'
     when wd.accion in ('review', 'return', 'approve')          then 'reviewer'
   end;

@@ -54,6 +54,7 @@ el sistema (CONTRATO_COMUN.md §3):
 | assignment.submitted | G3 | Revisor | Entrega disponible para revisión |
 | assignment.returned | G3 | Docente | Entrega devuelta con observación |
 | assignment.approved | G3 | Docente y coordinador | Entrega aprobada |
+| assignment.reopened | G3 | Revisor y docente | Entrega regresada a revisión por coordinación, con su observación |
 | program.authorized | G5 | Docente y coordinación | Nueva versión de programa autorizada |
 | task.cancelled | G3 | Destinatarios | Tarea cancelada |
 
@@ -102,3 +103,5 @@ proponen G3 y G6 en la semana 1.
 |---|---|---|---|
 | 2026-09-26 | Versión inicial | — | PM |
 | 2026-09-28 | Jerarquía de fuentes; prefijo `/api/v1`; catálogos en filas separadas y **nuevos** `/modalities` y `/areas` (el .docx los pide en el alcance y no tenían ruta); columnas emisor y mensaje en eventos; datos demo vs. semillas del G1; README principal → guía en la carpeta del grupo; reglas del .docx que faltaban; checklist con pruebas y OpenAPI | PM | PM |
+| 2026-11-17 | `GET /notifications` agrega `assignment_id` y `program_version_id` a cada aviso; los avisos de tarea publicada o cancelada llevan la asignación de cada docente. `assignment.submitted` sin revisor designado avisa a quien creó la tarea (decisión B) | Interfaz Vinci | PM (17-nov), hecho por el PM tras el cierre de entregas |
+| 2026-11-18 | `GET /dashboard/teachers` (mismos roles que `/dashboard`): `{generated_at, due_soon_days, total, data: [{user_id, user_email, name, assigned, overdue, due_soon, to_review, finished}]}`, con los mismos criterios del panel, así que sus sumas cuadran con las tarjetas | El bloque «Por docente» del panel de Vinci lo armaba con una llamada por tarea | PM (18-nov), hecho por el PM |
